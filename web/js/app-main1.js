@@ -212,7 +212,8 @@ const methods = {
     const args = (info.args || []).filter(Boolean);
     let restored = false;
     try { restored = await this.restoreSession(); } catch (e) { console.error(e); }
-    for (const a of args) await this.openPdf(a);
+    host.log('boot: args=' + JSON.stringify(args) + ' restored=' + restored);
+    for (const a of args) { try { await this.openPdf(a); host.log('boot: opened ' + a + ' sessions=' + this.sessions.length); } catch (e) { host.log('boot: open failed ' + (e && e.stack || e)); } }
     if (!args.length && !restored) this.showWelcome();
     window.dispatchEvent(new Event('pdfnote-ready'));
   },
