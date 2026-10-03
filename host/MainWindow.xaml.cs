@@ -22,11 +22,10 @@ public partial class MainWindow : Window
         InitializeComponent();
         bridge = new Bridge(this, files);
         RestoreBounds_();
-        Web.CreationProperties = new CoreWebView2CreationProperties
-        {
-            UserDataFolder = AppPaths.WebView2Data,
-            AdditionalBrowserArguments = "--autoplay-policy=no-user-gesture-required --disable-features=Translate,OverscrollHistoryNavigation,msSmartScreenProtection",
-        };
+        var browserArgs = "--autoplay-policy=no-user-gesture-required --disable-features=Translate,OverscrollHistoryNavigation,msSmartScreenProtection";
+        var dbgPort = Environment.GetEnvironmentVariable("PDFNOTE_DEBUG_PORT");   // CI smoke test / development only
+        if (!string.IsNullOrEmpty(dbgPort) && int.TryParse(dbgPort, out _)) browserArgs += " --remote-debugging-port=" + dbgPort;
+        Web.CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = AppPaths.WebView2Data, AdditionalBrowserArguments = browserArgs };
         Loaded += async (s, e) => await InitWebAsync();
         Closing += OnClosing;
         Closed += (s, e) => { bridge.Shutdown(); try { Web.Dispose(); } catch { } };
@@ -87,6 +86,7 @@ public partial class MainWindow : Window
             core.ContainsFullScreenElementChanged += (s, e) => SetFullscreen(core.ContainsFullScreenElement);
             core.DocumentTitleChanged += (s, e) => { var t = core.DocumentTitle; Title = string.IsNullOrWhiteSpace(t) ? "PDF Note" : t; };
             core.ProcessFailed += OnProcessFailed;
+            core.NavigationCompleted += (s, e) => Log.Write("navigation completed ok=" + e.IsSuccess + " status=" + e.WebErrorStatus + " url=" + core.Source);
 
             var devUrl = Dev ? Environment.GetEnvironmentVariable("PDFNOTE_DEV_URL") : null;
             core.Navigate(string.IsNullOrEmpty(devUrl) ? "https://" + WebServer.AppHost + "/index.html" : devUrl);

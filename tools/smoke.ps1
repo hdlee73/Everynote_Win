@@ -15,7 +15,7 @@ $data = Join-Path ([IO.Path]::GetTempPath()) 'pdfnote-smoke-data'
 Remove-Item -Recurse -Force $data -ErrorAction SilentlyContinue
 $env:PDFNOTE_DATA = $data
 $env:PDFNOTE_LIBRARY = Join-Path $data 'library'
-$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9333'
+$env:PDFNOTE_DEBUG_PORT = '9333'
 $pdfFull = (Resolve-Path $Pdf).Path
 
 $p = Start-Process -FilePath $Exe -ArgumentList "`"$pdfFull`"" -PassThru
@@ -25,16 +25,17 @@ for ($i = 0; $i -lt 90; $i++) {
   if ($p.HasExited) { break }
   try {
     $list = Invoke-RestMethod -Uri 'http://127.0.0.1:9333/json/list' -TimeoutSec 2
+    $lastList = ($list | ForEach-Object { "$($_.type) $($_.url)" }) -join ' ; '
     $page = $list | Where-Object { $_.type -eq 'page' -and $_.url -like 'https://app.pdfnote.local/*' } | Select-Object -First 1
     if ($page) { break }
-  } catch { }
+  } catch { $lastErr = $_.Exception.Message }
 }
 if ($p.HasExited) {
   Write-Host "::error title=smoke::APP EXITED with code $($p.ExitCode)"; $fail = $true
 } else {
   $p.Refresh()
   Write-Host "::notice title=smoke::APP RUNNING title='$($p.MainWindowTitle)' ws=$([int]($p.WorkingSet64/1MB))MB private=$([int]($p.PrivateMemorySize64/1MB))MB responding=$($p.Responding) page=$($page.url)"
-  if (-not $page) { Write-Host "::error title=smoke::no page from https://app.pdfnote.local reached (WebResourceRequested serving failed?)"; $fail = $true }
+  if (-not $page) { Write-Host "::error title=smoke::no page from https://app.pdfnote.local reached (WebResourceRequested serving failed?) targets=[$lastList] err=[$lastErr]"; $fail = $true }
 }
 
 function Cdp([string]$ws, [string]$expr, [int]$timeoutSec = 120) {
