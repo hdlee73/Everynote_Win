@@ -55,7 +55,7 @@ jobs:
             Write-Host "::error title=smoke::APP EXITED with code $($p.ExitCode)"
             $failed = $true
           } else {
-            Write-Host "::notice title=smoke::APP RUNNING title='$($p.MainWindowTitle)' ws=$([int]($p.WorkingSet64/1MB))MB responding=$($p.Responding)"
+            Write-Host "::notice title=smoke::APP RUNNING title='$($p.MainWindowTitle)' ws=$([int]($p.WorkingSet64/1MB))MB private=$([int]($p.PrivateMemorySize64/1MB))MB threads=$($p.Threads.Count) responding=$($p.Responding)"
           }
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
           $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds

@@ -28,6 +28,9 @@
     <Resource Include="Assets\app.ico" />
     <!-- Windows Ink pointer stack: better pen/touch on modern pen laptops -->
     <RuntimeHostConfigurationOption Include="Switch.System.Windows.Input.Stylus.EnablePointerSupport" Value="true" />
+    <!-- keep memory low on small machines -->
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
+    <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="false" />
   </ItemGroup>
 
 </Project>
