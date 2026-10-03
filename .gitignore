@@ -6,3 +6,7 @@ dist/
 *.user
 *.suo
 *.log
+# HWP engine is built by CI (tools/prepare_hwp_engine.py) and not committed
+web/hwp/rhwptopdf.umd.js
+web/hwp/rhwptopdf.umd_bg.wasm
+.hwp-engine-source/
