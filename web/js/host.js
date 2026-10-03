@@ -122,7 +122,7 @@ export const host = {
   /** dev/test only: fake file system access */
   _fake: fake,
 
-  info: () => host.call('app.info'),
+  info: () => (host._infoP ||= host.call('app.info')),  // cached: the first call hands out (and clears) the startup file args
   log: msg => host.call('app.log', { msg: String(msg) }).catch(() => {}),
   list: path => host.call('fs.list', { path }),
   stat: path => host.call('fs.stat', { path }),
