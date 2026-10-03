@@ -15,11 +15,14 @@ import { PdfDoc } from './pdfdoc.js';
 import { NotebookFiles, samePath } from './library.js';
 import { LibraryDialog, PaperChoiceView, ProgressDialog, rebindButton, inputField } from './library-dialog.js';
 import * as Search from './search.js';
+import { ColorPicker } from './ui/colorpicker.js';
 
 // ------------------------------------------------------------------------------------------------------------------ constants
 export const NAVY = '#1C1C1E', ACCENT = '#007AFF', ACTIVE_BG = '#E5F0FF', ACTIVE_FG = '#007AFF', GRAY = '#8E8E93', RED = '#FF3B30';
 export const CATEGORY_TITLES = ['문서', '보기·이동', '필기·삽입', '학습·주석', '내보내기·백업'];
-export const INK_COLORS = [0xFF1C1C1E, 0xFF007AFF, 0xFFFF3B30, 0xFF16835B, 0xFF7C3AED, 0xFFEA580C, 0xFFDB2777].map(c => c | 0);
+export const INK_COLORS = [0xFF1C1C1E, 0xFF636366, 0xFF007AFF, 0xFF16835B, 0xFF7C3AED, 0xFFEA580C, 0xFFDB2777, 0xFFFF3B30].map(c => c | 0);
+export const INK_COLORS2 = [0xFF8E1B14, 0xFFB35900, 0xFF8A6D00, 0xFF00746E, 0xFF0040A8, 0xFF2E2C8A, 0xFFFF9AA2, 0xFFA6CBFF].map(c => c | 0);
+const RAINBOW = 'conic-gradient(#FF3B30,#FFCC00,#34C759,#00C7BE,#007AFF,#AF52DE,#FF3B30)';
 export const INK_WIDTHS = [0.0022, 0.004, 0.0065, 0.009];
 export const HIGHLIGHT_COLORS = [0x66FFDE59, 0x6654C27A, 0x66FF6B9A, 0x66549CF5, 0x66B67CF2];
 export const TEXT_COLORS = [0xFF1C1C1E, 0xFF8E8E93, 0xFF007AFF, 0xFF16835B, 0xFFEA580C, 0xFFFF3B30, 0xFFDB2777, 0xFF7C3AED].map(c => c | 0);
@@ -265,21 +268,36 @@ M.sheetTile = function (dialogOrGetter, tile) {
   cell.addEventListener('click', () => { if (!tile.keepOpen) dialog().dismiss(); tile.action && tile.action(); });
   return cell;
 };
-/** colour dots with a check (swatches(colors, current, choose, size)) */
-M.swatches = function (colors, current, choose, size = 32) {
+/** colour dots with a check. more: 0 = presets only, 1 = + rainbow chip (ColorPicker), 2 = the same with an opacity slider. */
+M.swatches = function (colors, current, choose, size = 32, more = 0) {
   const row = h('div', { class: 'm2-swatches' });
   const dots = [];
-  const refresh = () => dots.forEach((dot, i) => {
-    const on = (colors[i] | 0) === (current() | 0);
-    dot.style.background = argb((colors[i] | 0xFF000000) >>> 0);
-    dot.style.border = (on ? 3 : 1) + 'px solid ' + (on ? NAVY : '#D5DCE6');
-    dot.textContent = ''; if (on) dot.append(icon('ic_check', 20, '#fff'));
-  });
+  let chip = null;
+  const refresh = () => {
+    const now = current() | 0;
+    dots.forEach((dot, i) => {
+      const on = (colors[i] | 0) === now;
+      dot.style.background = argb((colors[i] | 0xFF000000) >>> 0);
+      dot.style.border = (on ? 3 : 1) + 'px solid ' + (on ? NAVY : '#D5DCE6');
+      dot.textContent = ''; if (on) dot.append(icon('ic_check', 20, '#fff'));
+    });
+    if (chip) {
+      const custom = !colors.some(c => (c | 0) === now);
+      chip.style.background = custom ? argb(now >>> 0) : RAINBOW;
+      chip.style.border = (custom ? 3 : 1) + 'px solid ' + (custom ? NAVY : '#D5DCE6');
+      chip.textContent = ''; if (custom) chip.append(icon('ic_check', 20, '#fff'));
+    }
+  };
   colors.forEach((c, i) => {
     const dot = h('div', { class: 'm2-dot', role: 'button', 'aria-label': '색상 ' + (i + 1), style: { width: size + 'px', height: size + 'px' } });
     dot.addEventListener('click', () => { choose(c); refresh(); });
     dots.push(dot); row.append(dot);
   });
+  if (more > 0) {
+    chip = h('div', { class: 'm2-dot', role: 'button', 'aria-label': '다른 색 선택', dataset: { tag: 'color_more' }, style: { width: size + 'px', height: size + 'px' } });
+    chip.addEventListener('click', () => ColorPicker.show(null, '색 선택', current() | 0, more === 2, c => { choose(c | 0); refresh(); }));
+    row.append(chip);
+  }
   refresh();
   return row;
 };
@@ -306,17 +324,27 @@ M.toggleChip = function (label, typefaceStyle, flag, changed) {
 M.colorRow = function (colors, chosen) {
   const row = h('div', { class: 'm2-colorrow' });
   const sw = [];
-  const refresh = () => sw.forEach((v, i) => {
-    const none = (colors[i] >>> 24) === 0, on = (chosen[0] | 0) === (colors[i] | 0);
-    v.style.background = none ? '#fff' : argb(colors[i]);
-    v.style.border = (on ? 3 : 1) + 'px solid ' + (on ? ACCENT : '#C7C7CC');
-  });
+  let more = null;
+  const refresh = () => {
+    let custom = true;
+    sw.forEach((v, i) => {
+      const none = (colors[i] >>> 24) === 0, on = (chosen[0] | 0) === (colors[i] | 0);
+      if (on) custom = false;
+      v.style.background = none ? '#fff' : argb(colors[i]);
+      v.style.border = (on ? 3 : 1) + 'px solid ' + (on ? ACCENT : '#C7C7CC');
+    });
+    more.style.background = custom ? argb(chosen[0] >>> 0) : RAINBOW;
+    more.style.border = custom ? '3px solid ' + ACCENT : '1px solid #C7C7CC';
+  };
   colors.forEach((c, i) => {
     const v = h('div', { class: 'm2-cdot', role: 'button', 'aria-label': (c >>> 24) === 0 ? '없음' : '색상' });
     // semi transparent fills are drawn at their alpha over white
     v.addEventListener('click', () => { chosen[0] = c | 0; refresh(); });
     sw.push(v); row.append(v);
   });
+  more = h('div', { class: 'm2-cdot m2-cdot-more', role: 'button', 'aria-label': '다른 색·투명도 선택', dataset: { tag: 'color_more' } });
+  more.addEventListener('click', () => ColorPicker.show(null, '색·투명도', chosen[0] === 0 ? 0x80007AFF | 0 : chosen[0] | 0, true, c => { chosen[0] = c | 0; refresh(); }));
+  row.append(more);
   refresh();
   return row;
 };
@@ -350,20 +378,21 @@ F.showActionSheet = function (title, labels, checked, pick) {
 
 /** Centered memo/highlight editor card (MainActivity.showMemoEditor). */
 M.showMemoEditor = function (title, mark, saveLabel, onSave, dangerLabel, onDanger, extraLabel, onExtra) {
-  const style = [mark.paper | 0, mark.fontSp, mark.boxSize];
+  const style = [mark.paper | 0, mark.fontSp, mark.boxSize], origBox = mark.boxSize;
   const card = h('div', { class: 'm2-memo', dataset: { tag: 'memo_editor' } });
   card.append(h('div', { class: 'm2-memo-h' }, title));
   const input = editText({ hint: '메모를 입력하세요', value: mark.note == null ? '' : mark.note, minLines: 3, maxLines: 6, cls: 'm2-memo-in' });
   card.append(input);
   const preview = h('div', { class: 'm2-memo-pv' });
   const applyPreview = () => { preview.style.background = argb(style[0] >>> 0); preview.style.fontSize = style[1] + 'px'; preview.textContent = '미리보기 · ' + style[1] + 'pt'; };
-  const sizeRow = h('div', { class: 'm2-memo-size' }, h('div', { style: { flex: '1 1 0', fontSize: '13px', color: GRAY } }, '글자 크기'));
+  const sizeRow = h('div', { class: 'm2-memo-size' }, h('div', { style: { flex: '1 1 0', fontSize: '13px', color: GRAY } }, '메모 안 글자 크기'));
   const minus = this.stepButton('−', '글자 작게'); minus.style.cssText = 'width:34px;height:32px'; minus.addEventListener('click', () => { style[1] = Math.max(9, style[1] - 1); applyPreview(); });
   const plus = this.stepButton('＋', '글자 크게'); plus.style.cssText = 'width:34px;height:32px;margin-left:6px'; plus.addEventListener('click', () => { style[1] = Math.min(28, style[1] + 1); applyPreview(); });
   sizeRow.append(minus, plus); card.append(sizeRow);
+  card.append(h('div', { class: 'm2-memo-boxlabel', dataset: { tag: 'memo_box_label' } }, '메모 상자 크기 (메모를 한 번 탭하면 모서리를 끌어 직접 조절)'));
   const box = this.segmented(['작게', '보통', '크게'], () => style[2], i => { style[2] = i; });
-  box.dataset.tag = 'memo_box_size'; box.style.cssText = 'height:44px;padding:0 6px 0 2px;margin-top:0'; card.append(box);
-  const paper = this.swatches(PAPER_COLORS, () => style[0], c => { style[0] = c | 0xFF000000 | 0; applyPreview(); }, 30);
+  box.dataset.tag = 'memo_box_size'; box.style.cssText = 'height:44px;padding:6px 6px 2px 2px;margin-top:0;box-sizing:content-box'; card.append(box);
+  const paper = this.swatches(PAPER_COLORS, () => style[0], c => { style[0] = c | 0; applyPreview(); }, 30, 2);
   paper.dataset.tag = 'memo_paper_colors'; paper.style.cssText += ';height:42px;padding:4px 0'; card.append(paper);
   card.append(preview); applyPreview();
   card.append(h('div', { class: 'm2-memo-line' }));
@@ -373,7 +402,7 @@ M.showMemoEditor = function (title, mark, saveLabel, onSave, dangerLabel, onDang
   buttons.append(h('div', { style: { flex: '1 1 0' } }));
   if (dangerLabel != null) buttons.append(this.dialogButton(dangerLabel, RED, false, () => { dlg.dismiss(); onDanger && onDanger(); }));
   buttons.append(this.dialogButton('취소', GRAY, false, () => dlg.dismiss()));
-  buttons.append(this.dialogButton(saveLabel, ACCENT, true, () => { mark.paper = style[0]; mark.fontSp = style[1]; mark.boxSize = style[2]; dlg.dismiss(); onSave(input.value.trim()); }));
+  buttons.append(this.dialogButton(saveLabel, ACCENT, true, () => { mark.paper = style[0]; mark.fontSp = style[1]; if (style[2] !== origBox) { mark.boxW = mark.boxH = 0; } mark.boxSize = style[2]; dlg.dismiss(); onSave(input.value.trim()); }));
   card.append(buttons);
   const scroll = h('div', { class: 'm2-memo-wrap' }, card);
   dlg = new Overlay(scroll, {});
@@ -676,11 +705,28 @@ M.showLibrary = function () {
   });
   this.libraryDialog.show();
 };
+/** Lets the user pick a PDF or picture to use as the background of new note pages (kept as a private copy). */
+M.requestTemplate = async function (target) {
+  this.templateTarget = target;
+  let picked;
+  try { picked = await host.openDialog('서식 PDF·이미지 고르기', [{ name: 'PDF·이미지', exts: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }], false); }
+  catch (e) { toast('파일 선택기를 열 수 없습니다'); return; }
+  const path = Array.isArray(picked) ? picked[0] : picked;
+  if (path) await this.receiveTemplate(path);
+};
+M.receiveTemplate = async function (source) {
+  const target = this.templateTarget; if (!target) return;
+  try {
+    const copy = await NotebookFiles.importTemplate(source);   // private copy in <data>\templates (NotebookFiles.importTemplate)
+    if (target.setTemplate) target.setTemplate(copy);
+  } catch (e) { toast('서식 파일을 가져오지 못했습니다'); }
+};
 M.newNotebook = function () { this.createNotebook(this.libraryFolder == null ? this.library.root : this.libraryFolder, () => {}); };
 M.createNotebook = function (folder, refresh) {
   const panel = h('div');
   const name = inputField({ hint: '노트 이름', text: '새 노트', cls: 'lib-notename' });
   const paper = new PaperChoiceView(this);
+  if (paper.onTemplateRequest) paper.onTemplateRequest(() => this.requestTemplate(paper));
   panel.append(name.view, paper.el);
   const dialog = new AlertDialog.Builder().setTitle('새 노트').setView(panel).setPositiveButton('만들기', null).setNegativeButton('취소', null).create();
   dialog.show();
@@ -708,7 +754,8 @@ M.choosePageToInsert = function (afterIndex) {
   const same = this.library.paper(session.uri);
   if (same != null) { this.insertPage(session, same, afterIndex); return; }
   const paper = new PaperChoiceView(this);
-  alertCard({ title: '추가할 페이지 · p.' + (afterIndex + 1) + ' 뒤', view: paper.el, positive: ['추가', () => this.insertPage(session, paper.paper(), afterIndex)], negative: ['취소'] });
+  if (paper.onTemplateRequest) paper.onTemplateRequest(() => this.requestTemplate(paper));
+  alertCard({ title: '추가할 페이지 · p.' + (afterIndex + 1) + ' 뒤', view: paper.el, positive: ['추가', () => { let chosen; try { chosen = paper.paper(); } catch (e) { toast(errMsg(e)); return; } this.insertPage(session, chosen, afterIndex); }], negative: ['취소'] });
 };
 M.insertPage = function (session, paper, afterIndex) {
   const file = session.uri;
@@ -839,6 +886,16 @@ export async function exportAnnotatedPdf(sourcePath, annotations, pageCount) {
   } finally { AnnotationPainter.dark = prevDark; }
   return await doc.save();
 }
+/** Saves the untouched source file (no ink, notes or other annotations) wherever the user picks. */
+M.exportOriginal = async function () {
+  if (!this.activeSession || this.documentUri == null) { toast('문서를 먼저 여세요'); return; }
+  const source = this.documentUri;
+  let target;
+  try { target = await host.saveDialog('원본 파일 내보내기', baseName(this.documentTitle || source) || baseName(source), null); } catch (e) { toast('저장 위치를 열 수 없습니다'); return; }
+  if (!target) return;
+  try { await host.copy(source, target); toast('원본 파일을 내보냈습니다'); }
+  catch (e) { toast('원본 내보내기에 실패했습니다'); }
+};
 M.exportPdf = async function () {
   if (!this.activeSession) return;
   const session = this.activeSession;
@@ -900,7 +957,7 @@ M.createPlacedElement = async function (page, x, y) {
     if (existing) { this.beginInlineText(existing, false); return; }
     this.beginInlineText(this.newTextBox(page, x, y), true); return;
   }
-  const element = new PageElement(); element.page = page; element.kind = this.placementKind; element.asset = this.placementAsset; element.text = this.placementText; this.placementText = '';
+  const element = new PageElement(); element.page = page; element.kind = this.placementKind; element.asset = this.placementAsset; element.text = this.placementText; this.placementText = ''; element.rot = this.placementRot || 0; this.placementRot = 0;
   const kind = element.kind;
   const pr = this.pageView.pageRect();
   const pageRatio = pr.height() > 0 ? pr.width() / pr.height() : .707;
@@ -1110,11 +1167,7 @@ M.showInsertMenu = function (anchor) {
 M.showInsertMenuAt = function (view, page, x, y, viewX, viewY) {
   if (!this.renderer || !view) return;
   this.dropTarget = [page, x, y]; this.dropTime = Date.now();
-  const r = view.el.getBoundingClientRect();
-  const left = r.left + viewX, top = r.top + viewY;
-  const anchor = { getBoundingClientRect: () => ({ left, top, right: left + 2, bottom: top + 2, width: 2, height: 2 }) };
-  const above = viewY > (view.height != null ? view.height : r.height) * .5;
-  later(() => AnchoredMenu.show(anchor, above, this.insertRows(), null));
+  later(() => this.showMenuAt(view, viewX, viewY, this.insertRows(), null));
 };
 M.placeOrDrop = function (kind, asset) { this.placeElement(kind, asset); };
 
@@ -1144,12 +1197,17 @@ M.showShapeDialog = function (existing) {
   const bar = h('input', { type: 'range', min: 1, max: 12, step: 1, value: width[0], class: 'm2-seek', 'aria-label': '선 굵기' });
   bar.addEventListener('input', () => { width[0] = +bar.value; widthLabel.textContent = '선 굵기 ' + width[0]; });
   box.append(bar);
+  const turn = [existing == null ? 0 : (existing.rot || 0)];
+  const turnLabel = this.sectionLabel('회전 ' + Math.round(turn[0]) + '°'); box.append(turnLabel);
+  const turnBar = h('input', { type: 'range', min: 0, max: 72, step: 1, value: Math.round(turn[0] / 5) % 73, class: 'm2-seek', 'aria-label': '회전', dataset: { tag: 'shape_rotation' } });
+  turnBar.addEventListener('input', () => { turn[0] = +turnBar.value * 5; turnLabel.textContent = '회전 ' + Math.round(turn[0]) + '°'; });
+  box.append(turnBar);
   alertCard({
     title: existing == null ? '도형' : '도형 모양 수정', view: wrapScroll(box, { maxHeight: 'calc(100vh - 220px)' }),
     positive: [existing == null ? '넣기' : '적용', () => {
       const spec = Shapes.shapeSpec(kind[0], stroke[0], fill[0], width[0]);
-      if (existing == null) { this.placementText = spec; this.placeElement('shape', ''); }
-      else { existing.text = spec; this.store.save(); this.redrawPages(); }
+      if (existing == null) { this.placementText = spec; this.placementRot = turn[0]; this.placeElement('shape', ''); }
+      else { existing.text = spec; existing.rot = turn[0]; this.store.save(); this.redrawPages(); }
     }],
     negative: ['취소'],
   });
@@ -1557,14 +1615,16 @@ M.swipeToDelete = function (row, del) {
 M.rebuildOutlinePanel = function () { this.rebuildOutlineItems(); this.appendMarkList(); };
 /** Lists every highlight and sticky memo of the document under the outline so any annotation is one tap away. */
 M.appendMarkList = function () {
-  if (!this.store || this.store.marks.length === 0) return;
-  this.outlineList.append(h('div', { class: 'm2-marks-h' }, '하이라이트·메모 ' + this.store.marks.length));
-  const marks = [...this.store.marks].sort((a, b) => a.page - b.page || a.top - b.top);
+  if (!this.store) return;
+  const listed = this.store.marks.filter(m => m.noteOnly || (m.note != null && m.note.trim() !== ''));
+  if (listed.length === 0) return;
+  this.outlineList.append(h('div', { class: 'm2-marks-h' }, '메모 ' + listed.length));
+  const marks = [...listed].sort((a, b) => a.page - b.page || a.top - b.top);
   for (const mark of marks) {
     const row = h('div', { class: 'm2-mark', dataset: { tag: 'mark_item' }, role: 'button' });
     const dot = h('div', { class: 'm2-mark-dot', style: { background: argb(((mark.noteOnly ? mark.paper : (mark.color | 0xFF000000)) | 0) >>> 0) } });
     const note = mark.note == null ? '' : mark.note.trim();
-    row.append(dot, h('div', { class: 'm2-mark-text' }, (mark.noteOnly ? '메모' : '하이라이트') + ' · 페이지 ' + (mark.page + 1) + (note === '' ? '' : '\n' + note)));
+    row.append(dot, h('div', { class: 'm2-mark-text' }, (mark.noteOnly ? '메모' : '하이라이트') + ' (p' + (mark.page + 1) + ')' + (note === '' ? '' : '\n' + note)));
     row.addEventListener('click', () => this._goTo(mark.page, (mark.left + mark.right) / 2, (mark.top + mark.bottom) / 2));
     this.swipeToDelete(row, () => { const a = this.store.marks, i = a.indexOf(mark); if (i >= 0) a.splice(i, 1); this.store.save(); this.redrawPages(); this.rebuildOutlinePanel(); toast('삭제했습니다'); });
     this.outlineList.append(row);
@@ -1580,7 +1640,7 @@ M.rebuildOutlineItems = function () {
   if (items.length === 0) { this.outlineList.append(h('div', { class: 'm2-empty' }, '기억할 위치를 제목과 함께 저장하세요.\n위의 ‘개요 추가’를 누른 뒤 본문을 탭합니다.')); return; }
   for (const item of items) {
     const row = h('div', { class: 'm2-outline', dataset: { tag: 'outline_item' }, role: 'button' });
-    row.append(h('div', { class: 'm2-outline-t' }, item.title + '\n페이지 ' + (item.page + 1)));
+    row.append(h('div', { class: 'm2-outline-t' }, item.title, h('span', { class: 'm2-outline-p' }, '  (p' + (item.page + 1) + ')')));
     row.addEventListener('click', () => this._goTo(item.page, item.x, item.y));
     this.swipeToDelete(row, () => { const a = this.store.outlines, i = a.indexOf(item); if (i >= 0) a.splice(i, 1); this.store.save(); this.rebuildOutlinePanel(); toast('개요를 삭제했습니다'); });
     row.append(iconButton('ic_more_vert', '개요 관리', NAVY, () => this.showOutlineItem(item)));
@@ -1808,7 +1868,7 @@ F.updateThumbnailSelection = function () {
 // install
 // ====================================================================================================================
 export function initMain2(app) {
-  app.dropTarget = null; app.dropTime = 0; app.placementText = '';
+  app.dropTarget = null; app.dropTime = 0; app.placementText = ''; app.placementRot = 0; app.exportOriginalSource = null;
   app.placementKind = app.placementKind || ''; app.placementAsset = app.placementAsset || '';
   app.pendingJsonExport = null; app.pendingExport = null; app.exportSource = null; app.exportSnapshot = null; app.exportPageCount = 0;
   app.importTarget = null; app.importSession = null; app.searchCanceled = null;

@@ -248,11 +248,119 @@ await pg.evaluate(`(async()=>{
   document.body.append(bar);
 })()`);
 await pg.waitForTimeout(500);
-await pg.locator('select').selectOption('2'); await pg.locator('[data-tag="paper_color:2"]').click(); await pg.waitForTimeout(200);
+await pg.locator('select').selectOption('2'); await pg.locator('[data-tag="paper_color:3"]').click(); await pg.waitForTimeout(200);
 await shot(pg, '40-paper-grid');
 ok(JSON.stringify(await pg.evaluate('({k:pc.paper().kind,c:pc.paper().color})')) === JSON.stringify({ k: 2, c: -1 - 0xFFFFFF + 0xEFF6FF }), 'paper() value');
+ok(await pg.evaluate('pc.paper().template') === null, 'no template for ruled paper');
 await pg.locator('select').selectOption('1'); await pg.locator('[data-tag="paper_color:1"]').click(); await pg.waitForTimeout(200);
 await shot(pg, '41-paper-lined');
+await pg.close();
+
+// ---------------------------------------------------------------- v1.27 templates: spec/parse, all ruled kinds rendered, custom PDF/image templates
+pg = await b.newPage({ viewport: { width: 1400, height: 1000 } });
+await pg.goto('http://localhost:8141/dev/library-test.html'); await pg.waitForFunction('window.__ready');
+await pg.evaluate('T.setup()'); await pg.waitForSelector('.lib-card'); await pg.evaluate("document.querySelectorAll('.ad-root').forEach(e=>e.remove())");
+const tpl = await pg.evaluate(`(async()=>{
+  const r = {}, { NotebookFiles: NF, Paper } = T, L = T.root, lib = T.library;
+  r.names = NF.PAPER_NAMES.length; r.colors = NF.COLORS.length; r.colorNames = NF.COLOR_NAMES.length; r.custom = NF.CUSTOM;
+  r.spec = [new Paper(3, NF.COLORS[2]).spec(), new Paper(9, -1, 'C:\\\\t\\\\a.pdf').spec()];
+  const p9 = Paper.parse(r.spec[1]); r.parse9 = [p9.kind, p9.color, p9.template];
+  const p3 = Paper.parse('3:-1'); r.parse3 = [p3.kind, p3.color, p3.template];
+  for (const bad of ['x', '3', 'a:b', '10:-1', '9:-1']) { try { Paper.parse(bad); r['bad' + bad] = 'no error'; } catch (e) { r['bad' + bad] = 'err'; } }
+  try { new Paper(9, -1); } catch (e) { r.noTemplate = e.message; }
+  r.layoutCounts = [0,1,2,3,4,5,6,7,8].map(k => NF.layout(k, 595.27563, 841.8898).length);
+  // every ruled kind x light/dark paper as a real PDF rendered with pdf.js
+  const { PdfDoc } = await import('/web/js/pdfdoc.js');
+  const grid = document.createElement('div'); grid.id = 'tplgrid'; grid.style.cssText = 'position:fixed;left:0;top:0;right:0;bottom:0;background:#789;z-index:99999;display:flex;flex-wrap:wrap;gap:8px;padding:8px;overflow:auto';
+  const kinds = [0,1,2,3,4,5,6,7,8], colors = [NF.COLORS[0], NF.COLORS[2], NF.COLORS[8]];
+  r.pdfPages = [];
+  for (const k of kinds) for (const c of (k === 0 ? [NF.COLORS[0]] : (k === 3 ? [NF.COLORS[2]] : (k === 6 || k === 8 ? [NF.COLORS[0], NF.COLORS[8]] : [NF.COLORS[0]])))) {
+    const f = await lib.createNote(L, 'tpl-' + k + '-' + (c & 255), new Paper(k, c)); const p = lib.paper(f); r.pdfPages.push([k, p.kind, p.color === (c | 0)]);
+    const bytes = await T.host.readBytes(f); const doc = await PdfDoc.open(bytes); const bmp = await doc.renderPage(0, 0.4);
+    const cv = document.createElement('canvas'); cv.width = bmp.width; cv.height = bmp.height; cv.getContext('2d').drawImage(bmp, 0, 0); cv.style.cssText = 'border:1px solid #000;height:300px'; grid.append(cv); doc.destroy();
+  }
+  // dark paper: lines are lightened, not invisible
+  r.dark = NF.ruleColorOn(0, NF.COLORS[8]); r.light = NF.ruleColorOn(0, NF.COLORS[0]);
+  document.body.append(grid);
+  // custom templates: a PDF page and a PNG (and a webp-less jpeg path via png only here)
+  const tp = 'C:\\Users\\dev\\Downloads\\form.pdf'; T.host._fake.put(tp, new Uint8Array(await (await fetch('/dev/samples/sample.pdf')).arrayBuffer()));
+  const cv = document.createElement('canvas'); cv.width = 300; cv.height = 200; const g = cv.getContext('2d'); g.fillStyle = '#c33'; g.fillRect(0, 0, 300, 200); g.fillStyle = '#fff'; g.fillRect(20, 20, 260, 160);
+  const png = new Uint8Array(await (await new Promise(res => cv.toBlob(res, 'image/png'))).arrayBuffer());
+  const ip = 'C:\\Users\\dev\\Downloads\\bg.png'; T.host._fake.put(ip, png);
+  const cp = await NF.importTemplate(tp), ci = await NF.importTemplate(ip);
+  r.copies = [cp.endsWith('.pdf'), ci.endsWith('.png'), cp.includes('templates')];
+  const f1 = await lib.createNote(L, 'custom-pdf', new Paper(9, -1, cp)); const f2 = await lib.createNote(L, 'custom-img', new Paper(9, NF.COLORS[1], ci));
+  r.customPaper = [lib.paper(f1).template === cp, lib.paper(f2).template === ci, lib.paper(f2).color === (NF.COLORS[1] | 0)];
+  r.append = [await lib.append(f1, new Paper(9, -1, cp)), await lib.insertPage(f2, new Paper(9, NF.COLORS[1], ci), 0), await lib.insertPage(f1, new Paper(1, -1), 0)];
+  const d2 = await PdfDoc.open(await T.host.readBytes(f2)); r.imgPages = d2.pageCount; const b2 = await d2.renderPage(0, 0.35); d2.destroy();
+  const cv2 = document.createElement('canvas'); cv2.width = b2.width; cv2.height = b2.height; cv2.getContext('2d').drawImage(b2, 0, 0); cv2.style.cssText = 'border:1px solid #000;height:300px'; grid.append(cv2);
+  const d1 = await PdfDoc.open(await T.host.readBytes(f1)); r.pdfTplPages = d1.pageCount; const b1 = await d1.renderPage(2, 0.35); d1.destroy();
+  const cv1 = document.createElement('canvas'); cv1.width = b1.width; cv1.height = b1.height; cv1.getContext('2d').drawImage(b1, 0, 0); cv1.style.cssText = 'border:1px solid #000;height:300px'; grid.append(cv1);
+  // import round trip keeps template spec
+  const ext = 'C:\\Users\\dev\\Downloads\\c.pdf'; await T.host.copy(f2, ext); const imp = await lib.importPdf(ext, 'c.pdf', L); r.importSpec = lib.paper(imp) && lib.paper(imp).spec() === lib.paper(f2).spec(); r.dbg = [lib.paper(imp) && lib.paper(imp).spec(), lib.paper(f2).spec(), imp];
+  return r;
+})()`);
+console.log(JSON.stringify(tpl));
+await pg.waitForTimeout(400); await shot(pg, '42-templates');
+ok(tpl.names === 10 && tpl.colors === 9 && tpl.colorNames === 9 && tpl.custom === 9, 'PAPER_NAMES/COLORS counts');
+ok(tpl.spec[0].startsWith('3:') && tpl.spec[1].endsWith(':C:\\t\\a.pdf'), 'spec() ' + tpl.spec);
+ok(JSON.stringify(tpl.parse9) === '[9,-1,"C:\\\\t\\\\a.pdf"]'.replace(/\\\\/g, '\\') || tpl.parse9[2].endsWith('a.pdf') && tpl.parse9[2].startsWith('C:'), 'parse keeps ":" inside the template path ' + JSON.stringify(tpl.parse9));
+ok(JSON.stringify(tpl.parse3) === '[3,-1,null]', 'parse without template');
+ok(['x', '3', 'a:b', '10:-1', '9:-1'].every(k => tpl['bad' + k] === 'err'), 'malformed specs throw');
+ok(tpl.noTemplate === '서식 파일을 먼저 고르세요', 'CUSTOM without template throws');
+ok(tpl.layoutCounts[0] === 0 && tpl.layoutCounts[1] === 29 + 0 || tpl.layoutCounts[1] > 20, 'layout counts ' + tpl.layoutCounts);
+ok(tpl.layoutCounts.slice(1).every(n => n > 0), 'every ruled kind has marks');
+ok(tpl.pdfPages.every(x => x[0] === x[1] && x[2]), 'notebooks of every kind keep kind+colour in prefs');
+ok(tpl.dark[0] > tpl.light[0] - 100 && tpl.dark[0] === Math.trunc(185 / 2) + 90, 'dark paper lightens rules ' + tpl.dark);
+ok(tpl.copies.every(Boolean), 'importTemplate copies into <data>\\templates keeping the extension');
+ok(tpl.customPaper.every(Boolean), 'custom paper (pdf + image) stored with template path');
+ok(JSON.stringify(tpl.append) === '[2,2,3]' && tpl.imgPages === 2 && tpl.pdfTplPages === 3, 'custom pages append/insert ' + JSON.stringify(tpl.append));
+ok(tpl.importSpec, 'imported custom-template notebook keeps its paper spec');
+// PaperChoiceView with the template button
+await pg.evaluate("document.getElementById('tplgrid').remove()");
+await pg.evaluate(`(async()=>{ const { AlertDialog } = await import('/web/js/ui/alert.js'); const pc = window.pc2 = new T.PaperChoiceView({}); window.reqs = 0; pc.onTemplateRequest(() => { window.reqs++; });
+  window.dlg2 = new AlertDialog.Builder().setTitle('새 노트').setView(pc.el).setPositiveButton('만들기').setNegativeButton('취소').show(); })()`);
+await pg.waitForTimeout(400);
+ok(await pg.locator('.lib-tplbtn').isHidden(), 'template button hidden for ruled paper');
+for (const k of [3, 6, 7, 8]) { await pg.locator('select').last().selectOption(String(k)); await pg.waitForTimeout(150); await shot(pg, '43-paper-kind' + k); }
+await pg.locator('[data-tag="paper_color:8"]').last().click(); await pg.waitForTimeout(150); await shot(pg, '44-paper-dot-dark');
+await pg.locator('select').last().selectOption('9'); await pg.waitForTimeout(200);
+ok(await pg.locator('.lib-tplbtn').isVisible(), 'template button shown for kind 9');
+await shot(pg, '45-paper-custom-empty');
+await pg.locator('.lib-tplbtn').click();
+ok((await pg.evaluate('window.reqs')) === 1, 'tapping the button calls onTemplateRequest');
+ok((await pg.evaluate("(()=>{ try { pc2.paper(); return 'no error'; } catch (e) { return e.message; } })()")) === '서식 파일을 먼저 고르세요', 'paper() before picking a template throws');
+await pg.evaluate("pc2.setTemplate('C:\\\\data\\\\templates\\\\abc.pdf')"); await pg.waitForTimeout(150);
+ok((await pg.locator('.lib-tplbtn').textContent()).startsWith('서식: abc.pdf'), 'button shows the template name');
+ok(await pg.evaluate("pc2.paper().template.endsWith('abc.pdf') && pc2.paper().kind === 9"), 'paper() carries the template');
+await shot(pg, '46-paper-custom-picked');
+await pg.close();
+// ---------------------------------------------------------------- ColorPicker
+pg = await b.newPage({ viewport: { width: 700, height: 800 } });
+await pg.goto('http://localhost:8141/dev/library-test.html'); await pg.waitForFunction('window.__ready');
+ok(await pg.evaluate('T.ColorPicker.PALETTE.length === 32 && T.ColorPicker.PALETTE[8] === (0xFFFF3B30|0) && T.ColorPicker.PALETTE.every(c => (c >>> 24) === 255)'), 'PALETTE: 4 rows of 8 opaque colours');
+await pg.evaluate("window.picked = []; T.ColorPicker.show(null, '색 선택', 0x80007AFF|0, true, c => window.picked.push(c))");
+await pg.waitForSelector('.cp-box'); await pg.waitForTimeout(250);
+ok((await pg.locator('.cp-row').count()) === 4 && (await pg.locator('.cp-hex').textContent()) === '#007AFF · 투명도 50%', 'alpha picker: 4 sliders + hex/opacity label ' + await pg.locator('.cp-hex').textContent());
+await shot(pg, '50-colorpicker');
+const sl = pg.locator('.cp-slider'); const bb = async i => await sl.nth(i).boundingBox();
+let r0 = await bb(0); await pg.mouse.click(r0.x + 14 + (r0.width - 28) * 0.0, r0.y + 18);       // hue 0 -> red
+let r1 = await bb(1); await pg.mouse.click(r1.x + r1.width, r1.y + 18);                         // saturation 100%
+let r2 = await bb(2); await pg.mouse.click(r2.x + r2.width, r2.y + 18);                         // brightness 100%
+let r3 = await bb(3); await pg.mouse.click(r3.x + 14 + (r3.width - 28) * 0.25, r3.y + 18);      // opacity 25%
+ok((await pg.locator('.cp-hex').textContent()).startsWith('#FF0000 · 투명도 25%'), 'sliders drive colour + opacity ' + await pg.locator('.cp-hex').textContent());
+await shot(pg, '51-colorpicker-red');
+await pg.locator('.ad-btn', { hasText: '적용' }).click();
+ok((await pg.evaluate('window.picked')).join() === String(((64 << 24) | 0xFF0000) | 0), 'onPick gets ARGB int ' + await pg.evaluate('window.picked'));
+await pg.waitForTimeout(350); await pg.evaluate("T.ColorPicker.show(null, '색 선택', 0xFF34C759|0, false, c => window.picked.push(c))"); await pg.waitForSelector('.cp-box');
+ok((await pg.locator('.cp-row').count()) === 3 && (await pg.locator('.cp-hex').textContent()) === '#34C759', 'no-alpha picker has 3 sliders');
+await pg.locator('.cp-slider').first().focus(); await pg.keyboard.press('ArrowRight'); await pg.waitForTimeout(100);
+await pg.locator('.ad-btn', { hasText: '적용' }).last().click(); await pg.waitForTimeout(350);
+const last = await pg.evaluate('window.picked[window.picked.length-1]');
+ok((last >>> 24) === 255 && last !== (0xFF34C759 | 0), 'keyboard moves the hue; opacity stays 255');
+await pg.evaluate("T.ColorPicker.show(null, 'x', 0xFF123456|0, false, c => window.picked.push('applied'))"); await pg.waitForSelector('.cp-box');
+await pg.locator('.ad-btn', { hasText: '취소' }).last().click(); await pg.waitForTimeout(250);
+ok((await pg.evaluate('window.picked')).includes('applied') === false, 'cancel does not call onPick');
 await pg.close();
 ok(errors.length === 0, 'no page errors');
 console.log(fails ? `${fails} FAILURES` : 'ALL OK');

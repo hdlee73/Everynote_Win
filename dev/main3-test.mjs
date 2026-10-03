@@ -47,10 +47,27 @@ await page.waitForSelector('.m3-inline-text'); await page.waitForTimeout(200);
 await page.keyboard.type('안녕하세요 PDF Note\n두번째 줄 입력');
 await shot('04-inline');
 check('inline textarea has focus + text', await ev(() => app.inlineEdit.value.includes('두번째') && app.inlineElement.text.includes('안녕')));
+// v1.27: slim one-row bar, above the box, font/colour rows only after "Aa"
+const geo = await ev(() => { const b = app.inlineBar.getBoundingClientRect(), t = app.inlineEdit.getBoundingClientRect(), l = app.viewportLayer.getBoundingClientRect(); return { barBottom: b.bottom, boxTop: t.top, barH: b.height, panelShown: getComputedStyle(app.inlineBar.querySelector('.m3-inline-panel')).display !== 'none', barL: b.left - l.left, barR: b.right - l.left, w: l.width }; });
+check('style bar is one slim row, hidden font/colour panel', geo.barH < 50 && !geo.panelShown, JSON.stringify(geo));
+check('style bar sits above the box (clear of the text)', geo.barBottom <= geo.boxTop, JSON.stringify(geo));
+await shot('04b-inline-bar-above');
 await page.click('[data-tag="text_bold"]'); await page.click('[aria-label="글자 크게"]'); await page.click('[aria-label="글자 크게"]');
+await page.click('[data-tag="text_style_toggle"]'); await page.waitForTimeout(150);
+check('Aa opens font + colour rows (+ rainbow chip)', await ev(() => getComputedStyle(app.inlineBar.querySelector('.m3-inline-panel')).display !== 'none') && (await page.locator('[data-tag="text_colors"] [data-tag="color_more"]').count()) === 1);
+await shot('04c-inline-bar-open');
 await page.click('[data-tag="text_fonts"] .m2-seg-chip:nth-child(2)'); await page.click('[data-tag="text_colors"] .m2-dot:nth-child(3)');
 await shot('05-inline-styled');
 check('size 18pt', (await ev(() => app.inlineSize.textContent)) === '18pt', await ev(() => app.inlineSize.textContent));
+// box near the top of the viewport: bar goes below; handles stay on screen
+await ev(() => { const e = app.inlineElement; const h = e.bottom - e.top; e.top = 0; e.bottom = h; e.left = 0; e.right = Math.max(e.right - 0, .45); });
+await page.waitForTimeout(250);
+const geo2 = await ev(() => { const b = app.inlineBar.getBoundingClientRect(), t = app.inlineEdit.getBoundingClientRect(), l = app.viewportLayer.getBoundingClientRect(); const hs = [app.inlineMove, app.inlineDelete, app.inlineResize].map(x => { const r = x.getBoundingClientRect(); return r.left >= l.left && r.top >= l.top && r.right <= l.right && r.bottom <= l.bottom; }); return { below: b.top >= t.bottom - 1 || b.top <= l.top + 6, barTop: b.top - l.top, boxTop: t.top - l.top, hs }; });
+check('bar moves below/top when there is no room above', geo2.barTop >= 0 && !(geo2.barTop < 0), JSON.stringify(geo2));
+check('handles clamped inside the viewport', geo2.hs.every(Boolean), JSON.stringify(geo2));
+await shot('05b-inline-top');
+await ev(() => { const e = app.inlineElement; const h = e.bottom - e.top; e.top = .3; e.bottom = .3 + h; });
+await page.waitForTimeout(300);
 // drag move handle
 const before = await ev(() => app.inlineElement.left);
 const mb = await page.locator('.m3-handle').first().boundingBox();
@@ -101,6 +118,14 @@ await ev(async () => { app.onStop(); await app.flushAll(); });
 check('onStop/flushAll ok', true);
 // ---- help
 await ev(() => app.showHelp()); await shot('21-help');
-await page.click('.ad-btn:has-text("확인")'); await page.waitForTimeout(300);
+const help = await ev(() => { const c = document.querySelector('.m3-help'), r = c.getBoundingClientRect(); return { heads: [...c.querySelectorAll('.m3-help-h')].map(x => x.textContent), items: c.querySelectorAll('.m3-help-item').length, align: getComputedStyle(c).textAlign, titleAlign: getComputedStyle(c.querySelector('.m3-help-title')).textAlign, w: r.width, h: r.height, win: innerHeight }; });
+check('help: 13 chapters, 46 items, left aligned, tall card', help.heads.length === 13 && help.items === 46 && help.align === 'left' && help.h > help.win * .85 && help.heads[0] === '1. 기본 원리' && help.heads[12].startsWith('13.'), JSON.stringify({ ...help, heads: help.heads.length }));
+await page.evaluate(() => document.querySelector('.m3-help-body').scrollTo(0, 99999)); await shot('21b-help-end');
+await page.click('.m3-help-ok'); await page.waitForTimeout(300);
+check('help closed', (await page.locator('.m3-help').count()) === 0);
+await ev(() => app.showTools()); await page.waitForTimeout(300);
+check('export tiles: 원본 파일 내보내기 present, 본문 미리보기 저장 removed', (await page.locator('.m2-tile[aria-label="원본 파일 내보내기"]').count()) === 1 && (await page.locator('.m2-tile[aria-label="본문 미리보기 저장"]').count()) === 0);
+await page.click('.m2-bs-head [aria-label=닫기]'); await page.waitForTimeout(300);
+
 console.log(errors ? `ERRORS: ${errors}` : 'no console errors', fails ? `FAILS: ${fails}` : 'all passed');
 await browser.close(); server.close(); process.exit(fails || errors ? 1 : 0);

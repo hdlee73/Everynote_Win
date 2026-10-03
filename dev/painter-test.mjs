@@ -8,7 +8,11 @@ const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-119
 const pg = await b.newPage({ viewport: { width: 1360, height: 960 }, deviceScaleFactor: 1 });
 pg.on('console', m => console.log('console', m.text())); pg.on('pageerror', e => console.log('ERR', e.message));
 await pg.goto('http://localhost:8137/dev/painter-test.html'); await pg.waitForFunction('window.__done', null, { timeout: 15000 });
-console.log(JSON.stringify(await pg.evaluate('window.__done')));
+const done = await pg.evaluate('window.__done'); console.log(JSON.stringify(done));
+let bad = 0; const ok = (c, m) => { if (!c) { bad++; console.log('FAIL', m); } else console.log('ok  ', m); };
+ok(done.v127.rotates.join() === 'true,true,true,true,false', 'rotates() only image/sticker/shape/table');
+ok(done.v127.names.length === 5, 'five pen names');
+ok(done.v127.minG >= 170 && done.v127.minG <= 178, 'translucent loop is one flat tone where it overlaps itself (darkest G=' + done.v127.minG + ', flat core 174)');
 fs.mkdirSync(path.join(root, 'dev/out'), { recursive: true });
-for (const id of ['all-light', 'all-dark']) await (await pg.$('#' + id)).screenshot({ path: path.join(root, `dev/out/painter-${id}.png`) });
-await b.close(); srv.close();
+for (const id of ['all-light', 'all-dark', 'v127']) await (await pg.$('#' + id)).screenshot({ path: path.join(root, `dev/out/painter-${id}.png`) });
+await b.close(); srv.close(); if (bad) process.exitCode = 1;

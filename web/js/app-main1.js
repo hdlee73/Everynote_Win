@@ -12,15 +12,19 @@ import { AnchoredMenu, Row, Shortcut } from './ui/menu.js';
 import { toast } from './ui/toast.js';
 import { PdfDoc, ocrHook, TextRegion } from './pdfdoc.js';
 import { PdfPageView } from './pageview.js';
+import { AnnotationPainter } from './painter.js';
 import { PageCurlView, snapshotSlice, animateCurl, commitDecision, mirror, paperBack } from './curl.js';
 import { AnnotationStore, Mark, OutlineItem, TranslationNote } from './store.js';
 import { LibraryRepository, samePath } from './library.js';
 import { FolderIconDrawable, ProgressDialog, rebindButton } from './library-dialog.js';
 import * as office from './office.js';
+import { ColorPicker } from './ui/colorpicker.js';
 
 // ------------------------------------------------------------------------------------------------ constants
 const NAVY = 0xFF1C1C1E, ACCENT = 0xFF007AFF, ACTIVE_BG = 0xFFE5F0FF, ACTIVE_FG = 0xFF007AFF;
-const INK_COLORS = [0xFF1C1C1E, 0xFF007AFF, 0xFFFF3B30, 0xFF16835B, 0xFF7C3AED, 0xFFEA580C, 0xFFDB2777];
+const INK_COLORS = [0xFF1C1C1E, 0xFF636366, 0xFF007AFF, 0xFF16835B, 0xFF7C3AED, 0xFFEA580C, 0xFFDB2777, 0xFFFF3B30];
+const INK_COLORS2 = [0xFF8E1B14, 0xFFB35900, 0xFF8A6D00, 0xFF00746E, 0xFF0040A8, 0xFF2E2C8A, 0xFFFF9AA2, 0xFFA6CBFF];
+const RAINBOW = 'conic-gradient(#FF3B30,#FFCC00,#34C759,#00C7BE,#007AFF,#AF52DE,#FF3B30)';
 const INK_WIDTHS = [0.0022, 0.004, 0.0065, 0.009];
 const HIGHLIGHT_COLORS = [0x66FFDE59, 0x6654C27A, 0x66FF6B9A, 0x66549CF5, 0x66B67CF2];
 const OFFICE_EXTS = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'hwp', 'hwpx'];
@@ -56,21 +60,53 @@ function segmentedView(labels, current, choose) {
   refresh();
   return row;
 }
-/** swatches(colors, current, choose, size): colour dots (MainActivity.swatches). */
-function swatchesView(colors, current, choose, size = 32) {
+/**
+ * swatches(colors, current, choose, size, more): colour dots (MainActivity.swatches).
+ * more: 0 = presets only, 1 = adds a rainbow chip that opens ColorPicker, 2 = the same with an opacity slider.
+ * known: every preset colour of the whole menu (a chip next to only a part of them must not show them as "custom").
+ * The returned row has refresh() to repaint after a change made elsewhere.
+ */
+function swatchesView(colors, current, choose, size = 32, more = 0, known = colors) {
   const row = h('div', { class: 'm-sw' });
+  let chip = null;
   const dots = colors.map((color, i) => {
     const dot = h('div', { class: 'dot', role: 'button', 'aria-label': '색상 ' + (i + 1), style: { width: size + 'px', height: size + 'px', background: argb(color | 0xFF000000) } });
-    dot.addEventListener('click', () => { choose(color); refresh(); });
+    dot.addEventListener('click', () => { choose(color); row.refresh(); });
     row.append(dot); return dot;
   });
-  const refresh = () => dots.forEach((dot, i) => {
-    const on = sameColor(colors[i], current());
-    dot.classList.toggle('on', on);
-    const g = dot.querySelector('.ico'); if (g) g.remove();
-    if (on) dot.append(mkIcon('ic_check', 24, '#fff'));
-  });
-  refresh();
+  if (more > 0) {
+    chip = h('div', { class: 'dot chip-more', role: 'button', 'aria-label': '다른 색 선택', dataset: { tag: 'color_more' }, style: { width: size + 'px', height: size + 'px' } });
+    chip.addEventListener('click', () => ColorPicker.show(null, '색 선택', current() | 0, more === 2, c => { choose(c | 0); row.refresh(); }));
+    row.append(chip);
+  }
+  row.refresh = () => {
+    const now = current() | 0;
+    dots.forEach((dot, i) => {
+      const on = sameColor(colors[i], now);
+      dot.classList.toggle('on', on);
+      const g = dot.querySelector('.ico'); if (g) g.remove();
+      if (on) dot.append(mkIcon('ic_check', 24, '#fff'));
+    });
+    if (chip) {
+      const custom = !known.some(c => sameColor(c, now));
+      chip.classList.toggle('on', custom);
+      chip.style.background = custom ? argb(now >>> 0) : RAINBOW;
+      const g = chip.querySelector('.ico'); if (g) g.remove();
+      if (custom) chip.append(mkIcon('ic_check', 24, '#fff'));
+    }
+  };
+  row.refresh();
+  return row;
+}
+/** "투명도 NN%" slider (10-100%) for colours that carry their own alpha (MainActivity.opacityBar). */
+function opacityBar(alpha, set) {
+  const pct = () => Math.round(alpha() * 100 / 255);
+  const label = h('div', { class: 'm-oplabel' }, '투명도 ' + pct() + '%');
+  const bar = h('input', { type: 'range', min: 10, max: 100, step: 1, class: 'm-opbar', 'aria-label': '투명도', dataset: { tag: 'opacity_bar' } });
+  bar.value = Math.max(10, pct());
+  bar.addEventListener('input', () => { const percent = +bar.value; label.textContent = '투명도 ' + percent + '%'; set(Math.round(percent * 255 / 100)); });
+  const row = h('div', { class: 'm-opacity' }, label, bar);
+  row.refresh = () => { bar.value = Math.max(10, pct()); label.textContent = '투명도 ' + pct() + '%'; };
   return row;
 }
 
@@ -174,7 +210,7 @@ export function initMain1(app) {
     pendingSource: null, pendingBounds: null, pendingSession: null, pendingPage: 0,
     awaitingOfficeReturn: false, officeConverting: false, hwpConversion: null, officeToken: null,
     dragCurl: null, curlOrigin: 0, dragSpan: 120, curlConsumed: false, _showGen: 0, _prefetchGen: 0, _textSelectWanted: false,
-    descriptor: null,
+    descriptor: null, inkPen: 0, templateTarget: null,
   });
   if (app.inlineElement === undefined) app.inlineElement = null;
   app.dockHider = () => app.hideFullscreenDock(true);
@@ -202,6 +238,8 @@ const methods = {
     this.buildUi();
     this.pageView.setLassoShape(this.lassoShape);
     this.applyDarkPage();
+    this.inkPen = p.getInt('ink_pen', 0);
+    this.pageView.setInkPen(this.inkPen);
     this.pageView.setFingerInk(this.fingerInk);
     this.pageView.setPageSwipeEnabled(this.swipeEnabled);
     this.pageView.setVerticalPageSwipe(this.verticalPageSwipe);
@@ -388,12 +426,12 @@ const methods = {
     this.bookmarkButton = this.barIcon(readBar, 'ic_star_outline', '즐겨찾기', 0xFFF5A623, () => this.toggleBookmark());
     this.barIcon(readBar, 'ic_insert', '삽입 · 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
     this.inkButton = this.barIcon(readBar, 'ic_ink', '필기 모드', 0xFF5856D6, () => this.setWriteMode(true));
+    this.textButton = this.barIcon(readBar, 'ic_text', '타이핑', 0xFF34C759, () => this.toggleTyping());
     this.barIcon(writeBar, 'ic_book', '읽기 모드', 0xFF007AFF, () => this.setWriteMode(false));
     this.penButton = this.barIcon(writeBar, 'ic_ink', '펜', 0xFF1C1C1E, v => this.penTap(v));
     this.hlButton = this.barIcon(writeBar, 'ic_highlight', '형광펜', 0xFFF5C400, v => this.highlightTap(v));
     this.eraserButton = this.barIcon(writeBar, 'ic_eraser', '지우개', 0xFFFF6B8A, () => { if (this.renderer == null) toast('문서를 먼저 여세요'); else this.setInkMode(2); });
     this.lassoButton = this.barIcon(writeBar, 'ic_lasso', '올가미 선택', 0xFFAF52DE, () => this.toggleLasso());
-    this.textButton = this.barIcon(writeBar, 'ic_text', '타이핑', 0xFF34C759, () => this.toggleTyping());
     this.memoButton = this.barIcon(writeBar, 'ic_note_add', '메모 추가', 0xFFFF9500, () => this.toggleMemoMode());
     this.barIcon(writeBar, 'ic_insert', '삽입 · 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
     this.barIcon(writeBar, 'ic_undo', '실행 취소', 0xFF8E8E93, () => this.undoInk());
@@ -482,12 +520,21 @@ const methods = {
   },
   showPenMenu(anchor) {
     const box = h('div', { class: 'm-menubox', style: { padding: '4px 2px 0' } });
+    const apply = () => { this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools(); this.updateInkButton(); };
     box.append(segmentedView(['얇게', '보통', '굵게', '최대'], () => this.widthIndex(), i => {
       this.inkWidth = INK_WIDTHS[i]; this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools();
     }));
-    box.append(swatchesView(INK_COLORS, () => this.inkColor, c => {
-      this.inkColor = c; this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools(); this.updateInkButton();
-    }, 25));
+    const penLabel = h('div', { class: 'm-seclabel', style: { padding: '6px 0 2px 8px' } }, '펜 종류');
+    box.append(penLabel);
+    box.append(segmentedView(AnnotationPainter.PEN_NAMES, () => this.inkPen, i => {
+      this.inkPen = i; this.pageView.setInkPen(i); this.recentPrefs.putInt('ink_pen', i); this.syncOtherTools();
+    }));
+    const known = INK_COLORS.concat(INK_COLORS2);
+    const pickInk = c => { this.inkColor = ((this.inkColor & 0xFF000000) | (c & 0xFFFFFF)) | 0; apply(); row1.refresh(); row2.refresh(); };
+    const row1 = swatchesView(INK_COLORS, () => this.inkColor | 0xFF000000, pickInk, 22, 0, known);
+    const row2 = swatchesView(INK_COLORS2, () => this.inkColor | 0xFF000000, pickInk, 22, 1, known);
+    box.append(row1, row2);
+    box.append(opacityBar(() => (this.inkColor >>> 24) & 255, a => { this.inkColor = ((a << 24) | (this.inkColor & 0xFFFFFF)) | 0; apply(); }));
     AnchoredMenu.show(anchor, true, [
       Row.custom(box), Row.divider(),
       new Row('직선', 'ic_line', () => this.setInkMode(3)).selected(this.inkMode === 3).tint(argb(this.inkColor | 0xFF000000)),
@@ -496,8 +543,8 @@ const methods = {
   showHighlightMenu(anchor) {
     const box = h('div', { class: 'm-menubox', style: { padding: '6px 2px 0' } });
     box.append(swatchesView(HIGHLIGHT_COLORS, () => this.selectedColor, c => {
-      this.selectedColor = c; this.pageView.setHighlightMode(this.highlightMode, this.selectedColor); this.syncOtherTools(); this.updateInkButton();
-    }, 30));
+      this.selectedColor = c | 0; this.pageView.setHighlightMode(this.highlightMode, this.selectedColor); this.syncOtherTools(); this.updateInkButton();
+    }, 30, 2));
     AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
   },
 
@@ -1127,7 +1174,7 @@ const methods = {
   onInkChanged() { if (this.store != null) { this.store.save(); if (this.activeSession != null) this.activeSession.redoStrokes.length = 0; } },
   onTextSelectionFinished(selection, anchorX, anchorY) { this.showTextSelectionPopup(selection, anchorX, anchorY); },
   onTranslationTapped(note) { this.editTranslation(note); },
-  onSelectionAdjustStarted() { if (this.selectionPopup) { this.selectionPopup.remove(); this.selectionPopup = null; } },
+  onSelectionAdjustStarted() { const p = this.selectionPopup; if (p) { this.selectionPopup = null; if (p.close) p.close(); else if (p.remove) p.remove(); } },
 
   // ============================================================ page turning
   resetPageTransforms() {
@@ -1336,35 +1383,39 @@ const methods = {
     row.append(tile);
     return title;
   },
+  /** One menu for everything: the selection actions on top, then the same insert rows as the long-press menu, in the same card style. */
   showTextSelectionPopup(selection, anchorX, anchorY) {
     this.onSelectionAdjustStarted();
-    const panel = h('div', { class: 'm-selpop', dataset: { tag: 'selection_popup' } });
+    const view = this.pageView, page = this.currentPage;
+    const after = () => { this.onSelectionAdjustStarted(); view.clearTextSelectionOverlay(); };
     const labels = ['하이라이트', '복사', '번역', '읽어주기', '단어장', '개요', '메모', '발췌', '링크'];
     const icons = ['ic_highlight', 'ic_copy', 'ic_translate', 'ic_speaker', 'ic_dictionary', 'ic_outline', 'ic_note_add', 'ic_copy', 'ic_link'];
+    const tints = ['#F5A623', '#8E8E93', '#007AFF', '#34C759', '#30B0C7', '#5856D6', '#FF9500', '#AF52DE', '#5856D6'];
     const u = selection.unionBounds;
     const actions = [
       () => this.addOcrHighlights(selection.bounds), () => this.copySelectedText(selection.text), () => this.translateText(selection.text, selection.unionBounds),
-      () => this.readAloud(selection.text), () => this.openDictionary(selection.text), () => this.promptOutline(this.currentPage, u.left, u.top, selection.text),
-      () => this.onMemoPointRequested(this.currentPage, u.right, u.top),
+      () => this.readAloud(selection.text), () => this.openDictionary(selection.text), () => this.promptOutline(page, u.left, u.top, selection.text),
+      () => this.onMemoPointRequested(page, u.right, u.top),
       () => this.addStudyEntry(selection.text, u.left, u.top, true), () => this.createHyperlink(selection)];
-    for (let row = 0; row < 3; row++) {
-      const group = h('div', { class: 'm-selrow' }); panel.append(group);
-      for (let col = 0; col < 4; col++) {
-        const index = row * 4 + col;
-        if (index >= labels.length) { group.append(h('div', { class: 'm-selempty' })); continue; }
-        this.menuTile(group, labels[index], icons[index], () => { this.onSelectionAdjustStarted(); actions[index](); this.pageView.clearTextSelectionOverlay(); });
-      }
-    }
-    const rootW = this.root.clientWidth, rootH = this.root.clientHeight;
-    const width = Math.min(376, rootW - 20);
-    panel.style.width = width + 'px';
-    const pv = this.pageView.el.getBoundingClientRect(), r = this.root.getBoundingClientRect();
-    let y = pv.top + Math.round(anchorY) + 20;
-    if (y + 160 > r.top + rootH) y = pv.top + Math.round(anchorY) - 176;
-    panel.style.left = Math.round(r.left + (rootW - width) / 2) + 'px';
-    panel.style.top = Math.round(Math.max(r.top + 8, y)) + 'px';
-    document.body.append(panel);
-    this.selectionPopup = panel;
+    const rows = labels.map((label, i) => new Row(label, icons[i], () => { actions[i](); after(); }).tint(tints[i]));
+    rows.push(Row.divider());
+    this.dropTarget = [page, u.left, u.bottom]; this.dropTime = Date.now();
+    for (const row of this.insertRows()) if (row.label !== '하이퍼링크') rows.push(row);
+    this.showMenuAt(view, anchorX, anchorY, rows, () => view.clearTextSelectionOverlay());
+  },
+  /** Shows a floating menu card next to a point inside a page view (above the point when it is in the lower half). */
+  showMenuAt(view, viewX, viewY, rows, onDismiss) {
+    if (!view) return null;
+    const r = view.el.getBoundingClientRect();
+    const left = r.left + viewX, top = r.top + viewY;
+    const anchor = { getBoundingClientRect: () => ({ left, top, right: left + 2, bottom: top + 2, width: 2, height: 2 }) };
+    const above = viewY > (view.height != null ? view.height : r.height) * .5;
+    const handle = AnchoredMenu.show(anchor, above, rows, null, onDismiss ? () => {
+      if (this.selectionPopup === handle) this.selectionPopup = null;
+      onDismiss();
+    } : null);
+    if (onDismiss) this.selectionPopup = handle;
+    return handle;
   },
   async copySelectedText(text) {
     try { await navigator.clipboard.writeText(text); }

@@ -235,10 +235,16 @@ export class AnnotationPainter {
         if (e.page !== page || e === AnnotationPainter.skip) continue;
         const b = AnnotationPainter.box(d, e);
         c.save();
+        if (e.rot && AnnotationPainter.rotates(e)) AnnotationPainter.rotateAround(c, e.rot, b.centerX(), b.centerY());
         try { AnnotationPainter._element(c, d, dw, store, e, b); } finally { c.restore(); }
       }
     } finally { c.restore(); }
   }
+
+  /** Elements that can be turned around their centre. */
+  static rotates(e) { return e.kind === 'image' || e.kind === 'sticker' || e.kind === 'shape' || e.kind === 'table'; }
+  /** Canvas.rotate(degrees, px, py): clockwise rotation around a pivot. */
+  static rotateAround(c, deg, px, py) { c.translate(px, py); c.rotate(deg * Math.PI / 180); c.translate(-px, -py); }
 
   static _roundRect(c, b, rx, ry) {
     const w = b.width(), h = b.height(), k = Math.min(1, w / (2 * rx || 1), h / (2 * ry || 1));
@@ -314,28 +320,74 @@ export class AnnotationPainter {
   }
 
   // ------------------------------------------------------------------------------------------ strokes
-  /** Pressure-sensitive pen strokes of one page. Shared by the page view, export and handwriting search. */
+  /** Pen strokes of one page. Shared by the page view, export and handwriting search. */
   static strokes(c, d0, store, page) {
-    const d = RectF.from(d0), dw = d.width(), dh = d.height();
-    c.save();
-    try {
-      c.lineCap = 'round';
-      for (const s of store.strokes) {
-        if (s.page !== page) continue;
-        const col = argb(AnnotationPainter.adj(s.color));
-        c.strokeStyle = col; c.fillStyle = col;
-        const pts = s.points;
-        for (let i = 0; i < pts.length; i++) {
-          const b = pts[i], a = pts[Math.max(0, i - 1)];
-          const width = Math.max(1.5, s.width * dw * (.45 + (a.pressure + b.pressure) / 2 * 1.15));
-          if (i === 0) { c.beginPath(); c.arc(d.left + b.x * dw, d.top + b.y * dh, width / 2, 0, Math.PI * 2); c.fill(); }
-          else {
-            c.lineWidth = width; c.beginPath();
-            c.moveTo(d.left + a.x * dw, d.top + a.y * dh); c.lineTo(d.left + b.x * dw, d.top + b.y * dh); c.stroke();
-          }
-        }
+    const d = RectF.from(d0);
+    for (const s of store.strokes) if (s.page === page) AnnotationPainter.stroke(c, d, s);
+  }
+  /** Names of the pen types (InkStroke.pen 0..4). */
+  static PEN_NAMES = ['볼펜', '연필', '만년필', '붓', '사인펜'];
+
+  /**
+   * One stroke in the style of its pen: ballpoint, pencil, fountain pen (nib angle), brush (taper) or felt marker.
+   * Translucent colours do not darken where the stroke overlaps itself (the stroke is drawn opaque on a layer that is
+   * composited with the alpha once).
+   */
+  static stroke(c, d0, s) {
+    const d = RectF.from(d0), pts = s.points, n = pts.length, dw = d.width(), dh = d.height();
+    if (n === 0 || dw <= 0) return;
+    const pen = s.pen | 0, argbv = AnnotationPainter.adj(s.color);
+    const penAlpha = pen === 1 ? .78 : pen === 3 ? .92 : pen === 4 ? .82 : 1;
+    const eff = Math.round(((argbv >>> 24) & 255) * penAlpha);
+    const base = s.width * dw;
+    const widthAt = (i) => {
+      const b = pts[i], a = pts[Math.max(0, i - 1)];
+      const pr = (a.pressure + b.pressure) / 2;
+      const ax = d.left + a.x * dw, ay = d.top + a.y * dh, bx = d.left + b.x * dw, by = d.top + b.y * dh;
+      let w;
+      switch (pen) {
+        case 1: w = base * .75 * (.5 + pr * .9); break;
+        case 2: { const ang = Math.atan2(by - ay, bx - ax), cut = Math.abs(Math.sin(ang + Math.PI / 4)); w = base * (.32 + 1.05 * cut) * (.65 + pr * .7); break; }
+        case 3: { const t = n <= 1 ? .5 : i / (n - 1), taper = Math.min(1, Math.min(t, 1 - t) * 7); w = base * 2.1 * (.35 + pr * .95) * (.35 + .65 * taper); break; }
+        case 4: w = base * 1.5; break;
+        default: w = base * (.45 + pr * 1.15);
       }
-    } finally { c.restore(); }
+      return { w: Math.max(1.5, w), ax, ay, bx, by };
+    };
+    const paintInto = (g, ox, oy) => {
+      g.save();
+      try {
+        g.strokeStyle = g.fillStyle = argb(argbv | 0xFF000000);
+        g.lineCap = pen === 4 ? 'square' : 'round'; g.lineJoin = 'round';
+        for (let i = 0; i < n; i++) {
+          const { w, ax, ay, bx, by } = widthAt(i);
+          if (i === 0) { g.beginPath(); g.arc(bx - ox, by - oy, w / 2, 0, Math.PI * 2); g.fill(); }
+          else { g.lineWidth = w; g.beginPath(); g.moveTo(ax - ox, ay - oy); g.lineTo(bx - ox, by - oy); g.stroke(); }
+        }
+      } finally { g.restore(); }
+    };
+    if (eff >= 255) { paintInto(c, 0, 0); return; }
+    // translucent: bounding box layer
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of pts) { const x = d.left + p.x * dw, y = d.top + p.y * dh; if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+    const pad = base * 2.6 + 3;
+    const L = Math.max(d.left, minX - pad), T = Math.max(d.top, minY - pad), R = Math.min(d.right, maxX + pad), B = Math.min(d.bottom, maxY + pad);
+    if (R <= L || B <= T) return;
+    const m = c.getTransform ? c.getTransform() : null;
+    const sx = Math.min(4, Math.max(.25, m ? Math.hypot(m.a, m.b) : 1)), sy = Math.min(4, Math.max(.25, m ? Math.hypot(m.c, m.d) : 1));
+    const lw = Math.max(1, Math.ceil((R - L) * sx)), lh = Math.max(1, Math.ceil((B - T) * sy));
+    const layer = AnnotationPainter._layer(lw, lh), g = layer.getContext('2d');
+    if (!g) return;
+    g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, lw, lh);
+    g.setTransform(sx, 0, 0, sy, 0, 0);
+    paintInto(g, L, T);
+    c.save();
+    try { c.globalAlpha *= Math.max(8, eff) / 255; c.imageSmoothingEnabled = true; c.drawImage(layer, 0, 0, lw, lh, L, T, lw / sx, lh / sy); } finally { c.restore(); }
+  }
+  static _layer(w, h) {
+    const l = AnnotationPainter._layerCanvas || (AnnotationPainter._layerCanvas = (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : document.createElement('canvas')));
+    if (l.width < w || l.height < h) { l.width = Math.max(l.width, w); l.height = Math.max(l.height, h); }
+    return l;
   }
 
   /** Everything of one page for export / thumbnails (flat note boxes, not the rounded stickies of the page view). */

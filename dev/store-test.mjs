@@ -215,6 +215,8 @@ test('exportJson matches org.json toString(2) byte for byte', () => {
       "paper": -3162,
       "fontSp": 13,
       "boxSize": 1,
+      "boxW": 0,
+      "boxH": 0,
       "page": 2,
       "left": 0.10000000149011612,
       "top": 0.25,
@@ -244,6 +246,7 @@ test('exportJson matches org.json toString(2) byte for byte', () => {
       "page": 0,
       "color": -14935010,
       "width": 0.004000000189989805,
+      "pen": 0,
       "points": [
         {
           "x": 0.5,
@@ -262,7 +265,7 @@ test('sidecar toJson is compact with the Android key order', () => {
   const s = new AnnotationStore(); s.bookmarks.add(3);
   assert.equal(s.toJson(), '{"elements":[],"studyEntries":[],"marks":[],"bookmarks":[3],"outlines":[],"strokes":[],"translations":[]}');
   assert.deepEqual(Object.keys(JSON.parse(s.toJson())), ['elements', 'studyEntries', 'marks', 'bookmarks', 'outlines', 'strokes', 'translations']);
-  const e = el({ text: '/' }); assert.equal(stringify(e.toJson()), '{"page":0,"kind":"text","text":"\\/","asset":"","left":0.10000000149011612,"top":0.10000000149011612,"right":0.800000011920929,"bottom":0.30000001192092896,"textSize":0.027000000700354576,"color":-14935010,"font":"sans","bold":false,"italic":false}');
+  const e = el({ text: '/' }); assert.equal(stringify(e.toJson()), '{"rot":0,"page":0,"kind":"text","text":"\\/","asset":"","left":0.10000000149011612,"top":0.10000000149011612,"right":0.800000011920929,"bottom":0.30000001192092896,"textSize":0.027000000700354576,"color":-14935010,"font":"sans","bold":false,"italic":false}');
 });
 test('number formatting follows org.json / Double.toString', () => {
   assert.equal(stringify([0, 1, -1, 1.5, 1e-3, 9.99e-4, 1e7, 12345678.5, 2147483647, -0.0, 0.0022000000812113286]), '[0,1,-1,1.5,0.001,9.99E-4,10000000,1.23456785E7,2147483647,-0,0.0022000000812113286]');
@@ -360,6 +363,27 @@ test('assets: names, save/read/delete, referencedAssets', async () => {
 });
 
 // ------------------------------------------------------------------ painter pure helpers
+test('v1.27: element rot, stroke pen, memo boxW/boxH round-trip with Android key order and clamps', () => {
+  const e = el({ kind: 'shape', text: Shapes.shapeSpec('rect', 0xFF007AFF | 0, 0, 3) }); e.rot = 37.5;
+  assert.equal(stringify(e.toJson()).startsWith('{"rot":37.5,"page":0,"kind":"shape"'), true);
+  assert.equal(PageElement.fromJson(JSON.parse(stringify(e.toJson()))).rot, 37.5);
+  assert.equal(PageElement.fromJson({ page: 0, kind: 'text', text: 'x', left: .1, top: .1, right: .5, bottom: .2 }).rot, 0);   // v1.26 data
+  const st = new InkStroke(); st.pen = 3; st.points.push(new InkPoint(.1, .2, .5));
+  assert.equal(stringify(st.toJson()), '{"page":0,"color":0,"width":0,"pen":3,"points":[{"x":0.10000000149011612,"y":0.20000000298023224,"p":0.5}]}');
+  assert.equal(InkStroke.fromJson(st.toJson()).pen, 3);
+  assert.equal(InkStroke.fromJson({ pen: 9 }).pen, 4); assert.equal(InkStroke.fromJson({ pen: -2 }).pen, 0); assert.equal(InkStroke.fromJson({}).pen, 0);
+  const m = new Mark(); m.boxW = 180.5; m.boxH = 90;
+  assert.equal(stringify(m.toJson()).startsWith('{"paper":-3162,"fontSp":13,"boxSize":1,"boxW":180.5,"boxH":90,"page":0'), true);
+  const back = Mark.fromJson(m.toJson()); assert.equal(back.boxW, 180.5); assert.equal(back.boxH, 90);
+  const big = Mark.fromJson({ boxW: 5000, boxH: 5000 }); assert.equal(big.boxW, 800); assert.equal(big.boxH, 1200);
+  const neg = Mark.fromJson({ boxW: -4, boxH: -4 }); assert.equal(neg.boxW, 0); assert.equal(neg.boxH, 0);
+  assert.equal(Mark.fromJson({}).boxW, 0);
+  // an Android v1.27 sidecar round-trips byte for byte
+  const a = '{"elements":[{"rot":90,"page":0,"kind":"sticker","text":"\u2b50","asset":"","left":0.1,"top":0.1,"right":0.3,"bottom":0.2,"textSize":0.027,"color":-14935010,"font":"sans","bold":false,"italic":false}],"studyEntries":[],"marks":[{"paper":-3162,"fontSp":13,"boxSize":1,"boxW":200,"boxH":120,"page":0,"left":0.1,"top":0.1,"right":0.5,"bottom":0.2,"color":1,"note":"n","noteOnly":true,"visible":true,"minimized":false}],"bookmarks":[],"outlines":[],"strokes":[{"page":0,"color":-16777216,"width":0.004,"pen":2,"points":[{"x":0.1,"y":0.2,"p":0.5}]}],"translations":[]}';
+  const s = AnnotationStore.fromJson(a, { strict: true });
+  assert.equal(s.elements[0].rot, 90); assert.equal(s.marks[0].boxW, 200); assert.equal(s.strokes[0].pen, 2);
+  assert.equal(AnnotationStore.fromJson(s.toJson()).toJson(), s.toJson());
+});
 test('painter.adj lightens dark colours only on dark pages', () => {
   AnnotationPainter.dark = false; assert.equal(AnnotationPainter.adj(0xFF1C1C1E | 0), 0xFF1C1C1E | 0);
   AnnotationPainter.dark = true;

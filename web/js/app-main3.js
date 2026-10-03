@@ -99,7 +99,7 @@ const methods = {
         t.push(tile('노트·발췌 내보내기', 'ic_copy', run('exportStudy')));
         t.push(tile('주석 백업', 'ic_copy', run('exportAnnotations')));
         t.push(tile('주석 백업 복원', 'ic_undo', run('importSidecar')));
-        t.push(tile('본문 미리보기 저장', 'ic_folder_open', run('saveToLibrary')));
+        t.push(tile('원본 파일 내보내기', 'ic_folder_open', run('exportOriginal')));
         break;
     }
     return t;
@@ -272,12 +272,31 @@ const methods = {
     if (edit.style.width !== width + 'px') { edit.style.width = width + 'px'; changed = true; }
     if (changed || this._inlineDirty) { this._inlineDirty = false; edit.style.height = 'auto'; edit.style.height = edit.scrollHeight + 2 + 'px'; }
     const height = edit.offsetHeight;
+    const editBottom = top + Math.max(18, height);
     this.placeHandle(this.inlineMove, left - 8, top - 34);
     this.placeHandle(this.inlineDelete, left + width - 22, top - 34);
-    this.placeHandle(this.inlineResize, left + width - 12, top + Math.max(18, height) - 10);
+    this.placeHandle(this.inlineResize, left + width - 12, editBottom - 10);
+    this.placeInlineBar(top, editBottom);
+  },
+  /** Keeps the toolbar clear of the text being typed: above the box first (the keyboard covers the lower part), else below, else at the top. */
+  placeInlineBar(editTop, editBottom) {
+    const bar = this.inlineBar, layer = this.viewportLayer;
+    if (!bar || !layer || layer.clientHeight <= 0) return;
+    const barH = bar.offsetHeight > 0 ? bar.offsetHeight : 42, H = layer.clientHeight, gap = 4;
+    let topMargin;
+    if (editTop - 36 - barH - gap >= 2) topMargin = editTop - 36 - barH - gap;
+    else if (H - editBottom - 14 >= barH + gap) topMargin = editBottom + 14 + gap;
+    else topMargin = 4;
+    topMargin = Math.max(0, Math.min(topMargin, Math.max(0, H - barH)));
+    if (bar.style.top !== topMargin + 'px') bar.style.top = topMargin + 'px';
   },
   placeHandle(handle, left, top) {
     if (!handle) return;
+    const layer = this.viewportLayer;
+    if (layer && layer.clientWidth > 0) {
+      left = Math.max(2, Math.min(left, layer.clientWidth - handle.offsetWidth - 2));
+      top = Math.max(2, Math.min(top, layer.clientHeight - handle.offsetHeight - 2));
+    }
     if (handle.style.left !== left + 'px') handle.style.left = left + 'px';
     if (handle.style.top !== top + 'px') handle.style.top = top + 'px';
   },
@@ -294,29 +313,37 @@ const methods = {
     const points = Math.max(8, Math.min(72, this.pointsOf(this.inlineElement) + delta));
     this.inlineElement.textSize = points / TEXT_PAGE_POINTS; this.applyInlineStyle();
   },
-  /** Compact three-row style card (font / bold-italic-size-actions / colors) that floats at the bottom while typing. */
+  /** Slim one-row toolbar (Aa · B · I · size · delete · done); the font and colour rows open only when "Aa" is tapped. */
   buildInlineBar(e) {
     const card = h('div', { class: 'm3-inline-bar', dataset: { tag: 'inline_style_bar' } });
+    const panel = h('div', { class: 'm3-inline-panel', style: { display: 'none' } });
     const faces = this.segmented(FONT_NAMES, () => Math.max(0, FONT_IDS.indexOf(e.font)), i => { e.font = FONT_IDS[i]; this.applyInlineStyle(); });
-    faces.dataset.tag = 'text_fonts'; faces.style.padding = '2px 0'; faces.style.height = '40px'; card.append(faces);
+    faces.dataset.tag = 'text_fonts'; faces.style.padding = '2px 0'; faces.style.height = '40px'; panel.append(faces);
+    const palette = this.swatches(TEXT_COLORS, () => e.color | 0xFF000000, c => { e.color = c | 0xFF000000; this.applyInlineStyle(); }, 26, 1);
+    palette.dataset.tag = 'text_colors'; palette.style.padding = '2px 0'; palette.style.height = '34px'; panel.append(palette);
     const row = h('div', { class: 'm3-inline-row' });
     const bold = [!!e.bold], italic = [!!e.italic];
+    const style = this.stepButton('Aa', '글꼴·색 펼치기'); style.dataset.tag = 'text_style_toggle';
+    Object.assign(style.style, { width: '38px', height: '32px', margin: '0 6px 0 2px', fontSize: '14px', fontWeight: '700' });
+    style.addEventListener('click', () => {
+      const open = panel.style.display === 'none'; panel.style.display = open ? '' : 'none';
+      style.style.background = open ? '#D6E6FF' : '#F2F2F7';
+    });
+    row.append(style);
     const boldChip = this.toggleChip('B', 1, bold, () => { e.bold = bold[0]; this.applyInlineStyle(); }); boldChip.dataset.tag = 'text_bold';
     const italicChip = this.toggleChip('I', 2, italic, () => { e.italic = italic[0]; this.applyInlineStyle(); }); italicChip.dataset.tag = 'text_italic';
-    Object.assign(boldChip.style, { width: '34px', height: '32px', margin: '0 2px' });
-    Object.assign(italicChip.style, { width: '34px', height: '32px', margin: '0 8px 0 2px' });
+    Object.assign(boldChip.style, { width: '32px', height: '32px', margin: '0 2px' });
+    Object.assign(italicChip.style, { width: '32px', height: '32px', margin: '0 6px 0 2px' });
     row.append(boldChip, italicChip);
     const minus = this.stepButton('−', '글자 작게'); minus.style.cssText += 'width:30px;height:32px;'; minus.addEventListener('click', () => this.changeInlineSize(-1));
     this.inlineSize = h('div', { class: 'm3-inline-size', dataset: { tag: 'text_size' } });
     const plus = this.stepButton('＋', '글자 크게'); plus.style.cssText += 'width:30px;height:32px;'; plus.addEventListener('click', () => this.changeInlineSize(1));
     row.append(minus, this.inlineSize, plus, h('div', { style: { flex: '1' } }));
-    row.append(iconButton('ic_delete', '글상자 삭제', DANGER, () => this.deleteInlineText(), 36, 36, 7));
-    const done = iconButton('ic_check', '입력 완료', 0xFFFFFFFF | 0, () => this.commitInlineText(), 36, 36, 7);
-    done.dataset.tag = 'text_done'; done.style.background = css(ACCENT); done.style.borderRadius = '18px'; done.style.marginLeft = '4px';
+    row.append(iconButton('ic_delete', '글상자 삭제', DANGER, () => this.deleteInlineText(), 34, 34, 7));
+    const done = iconButton('ic_check', '입력 완료', 0xFFFFFFFF | 0, () => this.commitInlineText(), 34, 34, 7);
+    done.dataset.tag = 'text_done'; done.style.background = css(ACCENT); done.style.borderRadius = '17px'; done.style.marginLeft = '4px';
     row.append(done);
-    card.append(row);
-    const palette = this.swatches(TEXT_COLORS, () => e.color | 0xFF000000, c => { e.color = c | 0xFF000000; this.applyInlineStyle(); }, 26);
-    palette.dataset.tag = 'text_colors'; palette.style.padding = '2px 0'; palette.style.height = '34px'; card.append(palette);
+    card.append(row, panel);
     this.inlineBar = card;
     this.viewportLayer.append(card);
   },
@@ -494,8 +521,28 @@ const methods = {
   },
 
   // ================================================================== help
+  /** Large, left aligned help card: sections by principle and by menu (13 chapters), scrolls inside the card. */
   showHelp() {
-    new AlertDialog.Builder().setTitle('PDF Note 사용법 · v' + this.appVersion()).setMessage(HELP_TEXT).setPositiveButton('확인').show();
+    const card = h('div', { class: 'm3-help', dataset: { tag: 'help_card' } });
+    card.append(h('div', { class: 'm3-help-title' }, 'PDF Note 사용법'), h('div', { class: 'm3-help-ver' }, '버전 ' + this.appVersion()));
+    const body = h('div', { class: 'm3-help-body' });
+    for (const sec of HELP) {
+      body.append(h('div', { class: 'm3-help-h' }, sec[0]));
+      for (let k = 1; k < sec.length; k++) {
+        const bar = sec[k].indexOf('|');
+        body.append(h('div', { class: 'm3-help-item' }, h('b', null, sec[k].slice(0, bar)), '\n' + sec[k].slice(bar + 1)));
+      }
+    }
+    card.append(body, h('div', { class: 'm3-help-line' }));
+    const root = h('div', { class: 'ad-root' }), dim = h('div', { class: 'ad-dim' }, card); root.append(dim);
+    let done = false;
+    const close = () => { if (done) return; done = true; document.removeEventListener('keydown', onKey, true); root.classList.remove('in'); root.classList.add('out'); setTimeout(() => root.remove(), 120); };
+    const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); close(); } };
+    const ok = h('div', { class: 'm3-help-ok', role: 'button', 'aria-label': '확인' }, '확인'); ok.addEventListener('click', close);
+    card.append(ok);
+    dim.addEventListener('mousedown', e => { if (e.target === dim) close(); });
+    document.addEventListener('keydown', onKey, true);
+    document.body.append(root); requestAnimationFrame(() => root.classList.add('in'));
   },
   appVersion() { return this._appVersion || ''; },
   toast(s) { showToast(s); },
@@ -547,4 +594,63 @@ export function initMain3(app) {
   window.addEventListener('pagehide', () => app.onDestroy());
 }
 
-const HELP_TEXT = '• 읽기: 본문을 빠르게 스와이프해 페이지 넘기기, 확대 상태에서는 드래그로 이동\n• 텍스트 선택: 단어를 길게 누른 뒤 드래그, 또는 필기·삽입의 텍스트 선택 모드\n• 선택 팝업: 하이라이트·복사·번역·읽어주기·단어장 찾기·개요 추가·메모\n• 단어장 연결: ‘단어장 찾기’ 후 사전앱의 ‘PDF로 돌아가기’ 버튼\n• 포스트잇: 메모와 번역을 펼치기·최소화·숨기기로 관리, 메모는 글자 크기·색상·크기 조절 가능\n• 문서 추가: 상단 폴더 또는 탭의 + 버튼\n• HWP·HWPX·DOC·DOCX·PPT·PPTX·XLS·XLSX: PDF로 변환해 문서함에 가져와 엽니다(변환 임시 파일은 따로 남기지 않습니다). 서식은 변환 엔진과 글꼴에 따라 달라질 수 있습니다\n• HWP·DOC 본문 미리보기는 글자만 표시합니다\n• 문서 전환·닫기: 상단 문서 탭과 × 버튼\n• 앱 재실행: 열었던 탭과 마지막 페이지 자동 복원\n• 첨부·링크: 삽입 메뉴에서 사진·스티커·동영상을 넣고 모서리를 끌어 크기를 조절합니다. 글자를 선택해 ‘링크’를 누르면 웹 주소나 페이지로 연결됩니다\n• 전체 화면: 아래에서 위로 쓸어올리면 도구 모음이 나타납니다\n• 읽기·필기 모드: 아래 막대의 펜 아이콘으로 필기 모드, 책 아이콘으로 읽기 모드. 펜·형광펜을 다시 누르면 굵기·색상 카드가 열립니다\n• 페이지 패널: 상단 페이지 목록 아이콘 또는 돋보기. 검색·미리보기·개요·음성 녹음 탭으로 구성됩니다. 미리보기의 ⋮ 메뉴에서 ★즐겨찾기만 / 전체 보기, 페이지 추가·삭제\n• 개요 저장: 선택 팝업 또는 패널 개요 탭의 ‘개요 추가’\n• 페이지 넘김: 본문 양옆의 반투명 화살표\n• 스와이프 넘김: 읽기 모드에서 본문을 빠르게 좌우로 밀기. 확대 시 가장자리에서 넘기기, 보기·이동에서 방향 변경\n• 두 쪽 보기: 도구에서 전환, 각 페이지 터치 후 필기\n• 문서함: 정렬·표지/목록 보기·이름 검색, 폴더의 ⋮에서 색상 변경\n• 문서 선택: 여러 문서 복사·이동·삭제, 휴지통에서 복원\n• 메뉴: 문서 / 보기·이동 / 필기·삽입 / 학습·주석 / 내보내기·백업\n• PDF 가져오기: 선택한 폴더에 자동 저장, 탭 이름을 길게 눌러 이름 변경\n• 새 노트: 백지·줄노트·모눈종이와 배경색 선택, 마지막 장에서 넘기면 자동 추가\n• 페이지 미리보기: ＋ 페이지로 새 장 추가\n• 타이핑: 하단 ‘텍스트’ 버튼 → 페이지의 원하는 곳을 탭하면 그 자리에서 바로 입력합니다(별도 입력창 없음). 아래 서식 막대에서 글꼴·굵게·기울임·크기·색상을 바꾸고 ✥로 이동, ↔로 폭 조절. 쓴 글은 탭해서 수정·삭제\n• 문서명 변경: 맨 위 문서명을 눌러 바로 변경\n• 글상자 삭제: 입력 중인 글상자 오른쪽 위의 빨간 ✕ 버튼\n• 음성 녹음: 메뉴의 필기·삽입 ‘음성 녹음’ 또는 패널의 녹음 탭 → 정지하면 현재 페이지에 ▶ 표시로 첨부, 탭하면 재생·삭제\n• 문서 공유: 문서함에서 문서를 길게 눌러 선택 → 공유\n• 문서 즐겨찾기: 문서를 길게 눌러 선택 → 즐겨찾기, 왼쪽 메뉴의 ‘즐겨찾기’에서 모아보기\n• 문서함: 왼쪽 아이콘/메뉴에서 전체 문서·즐겨찾기·최근·휴지통·폴더 이동, 오른쪽 아래 버튼으로 새 노트·폴더·파일 가져오기\n• 페이지 추가·삭제: 메뉴의 보기·이동 또는 페이지 미리보기의 ⋮ 버튼\n• 이미지 붙여넣기·웹/YouTube 링크: 메뉴의 필기·삽입에서 선택 후 페이지에 배치\n• PDF 내보내기: 필기·타이핑·이미지를 포함해 저장\n• 검색: 상단 돋보기 → 검색어 입력 후 Enter. 현재 페이지부터 찾아 결과가 바로 쌓이고, 결과를 눌러도 목록이 유지됩니다(▲▼로 이전·다음 이동). 스캔·손글씨는 ‘정밀(OCR)’을 켜세요\n• 올가미: 하단 도구막대의 올가미 버튼 → 위쪽 막대에서 자유·네모·원 선택\n• 확대: 두 손가락으로 핀치\n• 확대 화면 이동: 한 손가락으로 상하좌우 드래그\n• 전체 화면: 위쪽 확장 아이콘, 하단 작은 도구막대로 개요·필기·메모 사용\n• 즐겨찾기: 별 아이콘\n\n필기·번역·개요·하이라이트·메모·즐겨찾기는 문서별로 저장되며 원본 PDF는 변경하지 않습니다. 번역은 번역 창에서 Google 번역으로 열거나 직접 붙여넣어 사용합니다(기기 내 번역은 지원하지 않습니다).';
+const HELP = [
+  ["1. 기본 원리",
+    "문서 위에 겹쳐 쓰기|필기·하이라이트·메모·도형·사진 같은 모든 기록은 PDF 위에 얹는 별도 ‘주석 층’으로 앱 안에 저장됩니다. 원본 PDF 파일은 바뀌지 않으며, 내보내기를 하면 기록이 합쳐진 새 PDF가 만들어집니다.",
+    "자동 저장|기록은 바로 저장되고, 앱을 다시 열면 열어 둔 탭과 마지막 페이지가 복원됩니다.",
+    "문서함|상단 왼쪽 폴더 버튼에서 PDF·노트·Office 문서를 폴더별로 관리합니다. 새 문서는 폴더 버튼 또는 탭 줄의 + 버튼으로 추가합니다.",
+    "여러 문서|상단 탭으로 문서를 전환하고 × 로 닫습니다. 기록은 문서마다 따로 저장됩니다."],
+  ["2. 화면 구성",
+    "상단 줄|문서함, 문서 이름, 페이지 미리보기, 검색, 전체 화면, 더보기(⋮) 메뉴가 있습니다.",
+    "하단 도구 줄|읽기 · 펜 · 하이라이트 · 지우개 · 올가미 · 텍스트 · 메모 · 삽입 · 실행 취소 · 다시 실행 순서입니다. 선택한 도구는 배경이 진하게 표시되고, 선택된 도구를 한 번 더 누르면 굵기·색 같은 세부 설정이 열립니다.",
+    "왼쪽 패널|검색 · 페이지 미리보기 · 개요 · 음성 녹음 탭이 있습니다. 개요 아이콘으로 열고 × 로 닫습니다.",
+    "반투명 화살표|본문 양옆의 화살표를 누르면 이전·다음 페이지로 이동합니다."],
+  ["3. 읽기와 이동",
+    "페이지 넘기기|본문을 좌우로 쓸어 넘깁니다. 손가락을 따라 책장이 접히며, 아래쪽을 잡으면 아래 모서리부터, 위쪽을 잡으면 위쪽부터 넘어갑니다. 더보기 메뉴의 ‘넘김 효과’에서 책장 넘김 · 슬라이드 · 효과 없음 중에서 고를 수 있습니다.",
+    "확대·이동|두 손가락으로 확대하고, 확대한 상태에서는 드래그로 화면을 옮깁니다. 확대 중에는 화면 가장자리에서 쓸어야 페이지가 넘어갑니다.",
+    "전체 화면|상단의 전체 화면 버튼을 누르면 메뉴가 숨겨집니다. 화면 아래에서 위로 쓸어올리면 도구 모음이 다시 나타납니다.",
+    "검은 문서 배경|더보기 메뉴에서 켜면 종이를 검게, 글자는 밝게 표시합니다. 어두운 색 필기는 자동으로 밝게 보정됩니다.",
+    "두 쪽 보기|가로로 넓은 화면(태블릿·폴드)에서 두 페이지를 나란히 봅니다."],
+  ["4. 텍스트 선택과 단어 찾기",
+    "선택하기|단어를 길게 누른 뒤 드래그해서 범위를 정합니다.",
+    "선택 팝업|하이라이트 · 복사 · 번역 · 읽어주기 · 단어장 찾기 · 개요 · 메모 · 발췌 · 링크가 나타납니다.",
+    "단어장 연결|‘단어장 찾기’ 후 사전 앱의 ‘PDF로 돌아가기’ 버튼으로 돌아옵니다."],
+  ["5. 필기 (펜)",
+    "펜 선택|하단의 연필 아이콘을 눌러 필기 모드로 들어갑니다. S펜은 바로 쓰이고, 손가락 필기는 펜 메뉴의 ‘손가락 필기’를 켜야 합니다.",
+    "펜 종류|펜 메뉴에서 볼펜 · 연필 · 만년필 · 붓 · 사인펜을 고릅니다. 연필은 가늘고 살짝 흐리며, 만년필은 펜촉 각도에 따라 굵기가 변하고, 붓은 시작과 끝이 가늘어지며, 사인펜은 일정한 굵기로 쓰입니다.",
+    "굵기·색·투명도|굵기는 얇게~최대 4단계, 색은 기본 팔레트 또는 무지개 칩으로 원하는 색을 만들고, 투명도 막대로 흐리게 할 수 있습니다.",
+    "직선|펜 메뉴의 ‘직선’을 켜면 시작점과 끝점을 잇는 반듯한 선을 긋습니다.",
+    "지우개|지우개 아이콘으로 필기와 하이라이트를 지웁니다. 지울 부분을 문지르거나 눌러서 한 획(하이라이트는 한 덩어리)씩 지워집니다. 실행 취소·다시 실행도 사용할 수 있습니다.",
+    "올가미|영역을 그려 필기를 선택하고 옮기거나 지웁니다. 올가미 모양은 도구에서 바꿀 수 있습니다."],
+  ["6. 하이라이트",
+    "만드는 법|하이라이트 아이콘을 켜고 글자를 드래그하거나, 글자를 선택한 뒤 팝업의 ‘하이라이트’를 누릅니다.",
+    "색·투명도|하이라이트 아이콘을 한 번 더 누르면 색을 고를 수 있고, 무지개 칩에서 투명도까지 조절합니다.",
+    "삭제|지우개로 문지르면 지워집니다. 하이라이트는 개요 목록에 나타나지 않습니다(메모가 붙은 것만 ‘메모’ 목록에 표시됩니다)."],
+  ["7. 텍스트 상자",
+    "넣기|하단의 T 아이콘을 누르고 문서를 탭하면 입력할 수 있습니다. 입력 중에는 글꼴 · 굵게/기울임 · 크기 · 색을 바꾸는 카드가 글상자 위나 아래에 나타나 입력 내용을 가리지 않습니다.",
+    "이동·크기·삭제|입력 중 상자 위의 핸들로 이동하고, 모서리 핸들로 너비를 조절하며, 빨간 휴지통 또는 상자 위의 × 로 삭제합니다. ✓ 버튼으로 입력을 마칩니다."],
+  ["8. 메모 포스트잇",
+    "만들기|하단의 메모 아이콘을 누르고 문서를 탭해 내용을 입력합니다. 글자를 선택한 뒤 팝업의 ‘메모’로도 만들 수 있습니다.",
+    "크기 조절|메모를 한 번 탭하면 점선 테두리와 오른쪽 아래 둥근 핸들이 나타납니다. 핸들을 끌어 가로·세로 크기를 자유롭게 바꿉니다. 이미 선택된 메모를 다시 탭하면 편집 창이 열립니다.",
+    "편집 창|글자 크기(− ＋)는 메모 안 글자의 크기이고, 메모 상자 크기(작게·보통·크게)는 상자의 기본 크기입니다. 상자 크기를 고르면 직접 조절한 크기는 초기화됩니다. 메모 색은 기본 색, 무지개 칩, 투명도로 정합니다.",
+    "숨기기·최소화|메모와 번역 포스트잇은 펼치기 · 최소화 · 숨기기로 관리합니다."],
+  ["9. 삽입: 사진 · 스티커 · 도형 · 표 · 링크",
+    "삽입 메뉴|하단의 + 상자 아이콘을 누르거나 문서의 빈 곳을 길게 눌러 열고, 넣을 종류를 고릅니다. 사진·동영상·유튜브 주소는 끌어다 놓거나 붙여넣기(Ctrl+V)도 됩니다.",
+    "선택·이동·크기|넣은 개체를 한 번 탭하면 테두리와 모서리 핸들이 보입니다. 안쪽을 끌어 옮기고 모서리를 끌어 크기를 바꿉니다.",
+    "회전|사진·스티커·도형·표는 선택하면 위쪽에 ↻ 핸들이 나타납니다. 끌면 돌아가고 15° 단위 근처에서 자석처럼 맞춰집니다. 도형은 모양 수정 창의 ‘회전’ 막대로 각도를 정할 수도 있습니다.",
+    "도형·표|선 색, 채우기 색, 선 굵기를 정하고, 색마다 무지개 칩으로 원하는 색과 투명도를 고릅니다. 표는 행·열 수, 머리글 색, 칸 내용을 편집할 수 있습니다.",
+    "하이퍼링크|글자를 선택한 뒤 팝업의 ‘링크’를 눌러 웹 주소, 현재 문서의 다른 페이지, 다른 문서로 연결합니다. 링크 글자는 파란 밑줄과 작은 화살표 배지로 표시되고, 탭하면 이동합니다."],
+  ["10. 개요와 북마크",
+    "개요 추가|개요 패널의 ‘＋ 개요 추가’를 누르고 문서의 원하는 위치를 탭한 뒤 제목을 입력합니다. 목록에는 ‘제목 (p19)’ 형식으로 표시되고 탭하면 그 위치로 이동합니다.",
+    "관리|목록을 옆으로 밀면 삭제되고, ⋮ 버튼으로 이름 변경·삭제를 할 수 있습니다. 즐겨찾기(별)는 현재 페이지를 표시합니다."],
+  ["11. 새 노트와 서식",
+    "새 노트|문서함에서 새 노트를 만들면 종이 서식을 고릅니다. 백지 · 줄노트(보통·좁게·넓게) · 모눈종이 · 리걸노트 · 점 격자 · 코넬 노트 · 오선지가 있고, 종이 색도 고를 수 있습니다.",
+    "내 서식|‘내 PDF·이미지 서식’을 고르면 가지고 있는 PDF의 첫 페이지나 이미지를 모든 페이지의 배경으로 씁니다.",
+    "페이지 추가|노트의 마지막 장에서 다음으로 넘기면 같은 서식의 새 페이지가 붙습니다."],
+  ["12. 음성 녹음 · 검색 · 번역",
+    "음성 녹음|개요 패널의 마이크 탭에서 녹음하면 현재 페이지에 ‘▶ 녹음’ 표시가 붙고, 탭하면 재생합니다.",
+    "검색|돋보기 아이콘으로 본문 글자를 찾고, 손글씨 필기도 검색됩니다.",
+    "번역·읽어주기|글자를 선택한 뒤 팝업에서 번역 또는 읽어주기를 고릅니다. 번역은 번역 창에서 Google 번역으로 열거나 직접 붙여넣어 사용합니다(기기 내 번역은 지원하지 않습니다)."],
+  ["13. 문서 변환 · 내보내기",
+    "Office·한글 문서|HWP · HWPX · DOC · DOCX · PPT · PPTX · XLS · XLSX는 PDF로 변환해 문서함에 가져와 엽니다. 서식은 변환 엔진과 글꼴에 따라 달라질 수 있고, HWP·DOC의 본문 미리보기는 글자만 표시합니다.",
+    "내보내기·백업|더보기 메뉴에서 기록이 포함된 PDF를 내보내거나 기록을 파일로 백업·복원합니다."]];

@@ -92,3 +92,9 @@ parseColor(hex), drawShape(c,b,spec,pageWidth), drawTable(c,b,text,pageWidth)`; 
 * Video file / audio playback is not part of this module: use `await AnnotationStore.assetUrl(name)`; for `kind:'video'` the mp4 name is `element.text`, the thumbnail `element.asset`.
 * Hand font and serif quality depend on installed Windows fonts; the stacks degrade to generic families.
 * Android never trims whitespace of the hyperlink regex target with Unicode spaces; the JS port uses Java's ASCII `\S` semantics.
+
+## v1.27.0 additions
+* `PageElement.rot` (float degrees clockwise, JSON `rot`, first key), `InkStroke.pen` (0..4, JSON `pen` after `width`, clamped on read), `Mark.boxW/boxH` (dp, 0 = use `boxSize`; JSON after `boxSize`; clamped 0..800 / 0..1200). Old data reads with 0 defaults; Android 1.27 sidecars round-trip byte for byte.
+* painter.js: `AnnotationPainter.stroke(c, d, stroke)` (one stroke in its pen style; translucent colours are drawn opaque on a layer and composited once, so self-overlaps do not darken), `strokes()` uses it, `rotates(e)`, `rotateAround(c, deg, px, py)`, `PEN_NAMES`. `elements()` rotates image/sticker/shape/table around the box centre. Pen look: 1 pencil (.78 alpha, thinner), 2 fountain (width follows direction, 45° nib), 3 brush (taper at both ends, .92 alpha), 4 marker (square caps, constant 1.5x width, .82 alpha).
+* shapes.js is unchanged (rotation is applied by the painter).
+* `ui/colorpicker.js`: `ColorPicker.PALETTE` (32 ARGB ints, 4 rows of 8), `ColorPicker.show(context, title, initialArgb, alpha, onPick)` (context ignored; returns the AlertDialog; `onPick(argbInt)`, opacity 255 when `alpha` is false), plus `ColorPicker.colorToHSV/HSVToColor`. Styles in `css/colorpicker.css` (linked in index.html).

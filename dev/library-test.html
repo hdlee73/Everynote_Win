@@ -1,14 +1,15 @@
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>library test</title>
-<link rel="stylesheet" href="/web/css/app.css"><link rel="stylesheet" href="/web/css/library.css">
+<link rel="stylesheet" href="/web/css/app.css"><link rel="stylesheet" href="/web/css/library.css"><link rel="stylesheet" href="/web/css/colorpicker.css">
 <script>for (const C of [Map, WeakMap]) { C.prototype.getOrInsertComputed ||= function (k, f) { if (!this.has(k)) this.set(k, f(k)); return this.get(k); }; C.prototype.getOrInsert ||= function (k, v) { if (!this.has(k)) this.set(k, v); return this.get(k); }; }</script>
 </head><body><div id="app" style="padding:20px">library test harness (background page)</div>
 <script type="module">
 import { host } from '/web/js/host.js';
 import { LibraryRepository, NotebookFiles, Paper } from '/web/js/library.js';
 import { LibraryDialog, PaperChoiceView, FolderIconDrawable, FolderShapeDrawable } from '/web/js/library-dialog.js';
-const T = window.T = { host, LibraryRepository, NotebookFiles, Paper, LibraryDialog, PaperChoiceView, FolderIconDrawable, FolderShapeDrawable, log: [] };
+import { ColorPicker } from '/web/js/ui/colorpicker.js';
+const T = window.T = { ColorPicker, host, LibraryRepository, NotebookFiles, Paper, LibraryDialog, PaperChoiceView, FolderIconDrawable, FolderShapeDrawable, log: [] };
 const bytes = async u => new Uint8Array(await (await fetch(u)).arrayBuffer());
 T.setup = async function (opts = {}) {
   const ko = await bytes('/dev/samples/sample-ko.pdf'), en = await bytes('/dev/samples/sample.pdf');

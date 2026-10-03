@@ -1,0 +1,12 @@
+/* ColorPicker (ui/colorpicker.js) */
+.cp-box{padding:6px 18px;display:flex;flex-direction:column;user-select:none;-webkit-user-select:none}
+.cp-preview{height:48px;border-radius:12px;border:1px solid #C7C7CC;margin-bottom:2px;
+  background:linear-gradient(var(--cp-color,transparent),var(--cp-color,transparent)),
+    repeating-conic-gradient(#e5e5ea 0 25%,#fff 0 50%) 0 0/12px 12px}
+.cp-row{display:flex;align-items:center;height:40px}
+.cp-name{width:44px;flex:none;font-size:12px;color:#8E8E93}
+.cp-slider{position:relative;flex:1;height:36px;touch-action:none;cursor:pointer;outline:none}
+.cp-bar{position:absolute;left:14px;right:14px;top:10px;height:16px;border-radius:8px;background:#ddd}
+.cp-thumb{position:absolute;top:6px;width:20px;height:20px;margin-left:-12px;border-radius:50%;background:#fff;border:2px solid #8E8E93;box-sizing:content-box;transform:translateX(0);pointer-events:none}
+.cp-slider:focus-visible .cp-thumb{border-color:#007AFF}
+.cp-hex{height:28px;line-height:28px;text-align:center;font-size:12px;color:#8E8E93}

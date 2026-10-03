@@ -176,6 +176,74 @@ check('not managed -> toast', (await textOf('.toast')).includes('문서함에 �
 await ev(() => T.app.renameDocument(T.app.sessions[1])); await shot('34-rename'); await page.fill('.lib-inwrap input', '이름바꿈'); await page.click('.ad-btn >> text=저장'); await page.waitForTimeout(800);
 check('renamed', await ev(() => T.app.sessions[1].title === '이름바꿈.pdf' && T.app.sessions[1].uri.endsWith('이름바꿈.pdf')), await ev(() => T.app.sessions[1].title));
 
+// ---------------------------------------------------------------- v1.27 additions
+await ev(async () => { document.querySelectorAll('.ad-root').forEach(r => r.remove()); await T.app.switchDocument(T.app.sessions[0]); });   // drop the delete-page confirm left open above
+// memo editor: two size notions, rainbow chip + opacity, box size resets the free size
+await ev(() => { const m = T.app.store.marks[1]; m.boxW = 200; m.boxH = 120; window.__m = m; T.app.showMemoEditor('v127', m, '저장', () => {}, null, null, null, null); }); await page.waitForTimeout(300);
+const lbl = await ev(() => [...document.querySelectorAll('.m2-memo div')].map(d => d.textContent).filter(t => /크기/.test(t) && t.length < 80));
+check('memo editor: 메모 안 글자 크기 / 메모 상자 크기', lbl.some(t => t === '메모 안 글자 크기') && lbl.some(t => t.startsWith('메모 상자 크기')), JSON.stringify(lbl));
+check('memo paper colours have a rainbow chip', (await page.locator('[data-tag="memo_paper_colors"] [data-tag="color_more"]').count()) === 1);
+await shot('37-memo-editor-v127');
+await page.click('[data-tag="memo_paper_colors"] [data-tag="color_more"]'); await page.waitForSelector('[data-tag="color_picker"]'); await shot('38-memo-colorpicker');
+check('memo colour picker has opacity row', (await page.locator('.cp-box .cp-row').count()) === 4);
+await page.click('.ad-btn >> text=적용'); await page.waitForTimeout(250);
+check('memo paper takes picked colour (opaque initial -> same rgb)', await ev(() => (document.querySelector('.m2-memo-pv').style.background || '').length > 0));
+await page.click('.m2-seg-chip >> nth=0'); await page.click('.m2-dbtn >> text=저장'); await page.waitForTimeout(250);
+check('changing the box size clears the free size', await ev(() => window.__m.boxW === 0 && window.__m.boxH === 0 && window.__m.boxSize === 0));
+await ev(() => { const m = T.app.store.marks[1]; m.boxW = 200; m.boxH = 120; T.app.showMemoEditor('v127', m, '저장', () => {}, null, null, null, null); }); await page.waitForTimeout(250);
+await page.click('.m2-dbtn >> text=저장'); await page.waitForTimeout(250);
+check('keeping the box size keeps the free size', await ev(() => window.__m.boxW === 200 && window.__m.boxH === 120));
+// outline panel: 'title (p19)', highlights excluded unless a memo is attached
+await ev(() => { const s = T.app.store; const m = new T.Mark(); m.page = 2; m.left = .1; m.top = .1; m.right = .3; m.bottom = .15; m.color = 0x66FFDE59; m.note = ''; s.marks.push(m); window.__plain = m; T.app.selectPanelTab(2); });
+await page.waitForTimeout(300);
+const ol = await ev(() => ({ outline: [...document.querySelectorAll('.m2-outline')].map(e => e.textContent), marks: document.querySelectorAll('.m2-mark').length, head: document.querySelector('.m2-marks-h').textContent,
+  small: getComputedStyle(document.querySelector('.m2-outline-t')).fontSize, p: getComputedStyle(document.querySelector('.m2-outline-p')).color, markText: document.querySelector('.m2-mark-text').textContent }));
+check('outline item text is "제목  (pN)" with a small grey page', ol.outline[0].includes('서론') && /서론\s+\(p2\)/.test(ol.outline[0]) && ol.small === '12.5px' && ol.p === 'rgb(142, 142, 147)', JSON.stringify(ol));
+check('plain highlight (no memo) is not listed; heading says 메모', ol.marks === 2 && ol.head === '메모 2' && /\(p\d+\)/.test(ol.markText), JSON.stringify(ol));
+await shot('39-outline-panel');
+await ev(() => { window.__plain.note = '붙은 메모'; T.app.rebuildOutlinePanel(); });
+check('highlight with a memo is listed', (await page.locator('.m2-mark').count()) === 3);
+await ev(() => { const a = T.app.store.marks, i = a.indexOf(window.__plain); a.splice(i, 1); T.app.closeSidePanel(); });
+// colour rows in shape/table dialogs have the rainbow chip; picker result lands in the spec
+await ev(() => T.app.showShapeDialog(null)); await page.waitForTimeout(250);
+check('shape dialog: chip on stroke + fill rows, rotation bar', (await page.locator('.m2-colorrow [data-tag="color_more"]').count()) === 2 && (await page.locator('[data-tag="shape_rotation"]').count()) === 1);
+await page.locator('.m2-colorrow [data-tag="color_more"]').nth(1).click(); await page.waitForSelector('[data-tag="color_picker"]');
+await page.click('.ad-btn >> text=적용'); await page.waitForTimeout(250);
+await ev(() => { const b = document.querySelector('[data-tag="shape_rotation"]'); b.value = 9; b.dispatchEvent(new Event('input', { bubbles: true })); });
+check('rotation label follows the bar (45°)', (await page.locator('.m2-seclabel >> text=회전 45°').count()) === 1);
+await shot('40-shape-dialog');
+await page.click('.ad-btn >> text=넣기'); await page.waitForTimeout(250);
+check('shape placement carries the rotation', await ev(() => T.app.placementRot === 45 && /^rect\|/.test(T.app.placementText)), await ev(() => T.app.placementText));
+await ev(() => T.app.createPlacedElement(T.app.currentPage, .5, .5)); await page.waitForTimeout(200);
+check('placed element has rot 45; placementRot reset', await ev(() => T.app.store.elements.at(-1).rot === 45 && T.app.placementRot === 0));
+await ev(() => T.app.showShapeDialog(T.app.store.elements.at(-1))); await page.waitForTimeout(250);
+check('editing a shape shows its angle', (await page.locator('.m2-seclabel >> text=회전 45°').count()) === 1);
+await ev(() => { const b = document.querySelector('[data-tag="shape_rotation"]'); b.value = 18; b.dispatchEvent(new Event('input', { bubbles: true })); });
+await page.click('.ad-btn >> text=적용'); await page.waitForTimeout(200);
+check('edit applies the new angle (90°)', await ev(() => T.app.store.elements.at(-1).rot === 90));
+await ev(() => T.app.showTableDialog(null)); await page.waitForTimeout(200);
+check('table dialog: chip on 3 colour rows', (await page.locator('.m2-colorrow [data-tag="color_more"]').count()) === 3); await page.click('.ad-btn >> text=취소'); await page.waitForTimeout(200);
+// export original (copy of the untouched file through host.saveDialog + host.copy)
+await ev(() => { window.__calls = []; const h0 = T.host; window.__save = h0.saveDialog; h0.saveDialog = async (t, n) => { window.__calls.push(['save', t, n]); return 'C:\\Out\\' + n; }; });
+await ev(async () => { await T.app.exportOriginal(); }); await page.waitForTimeout(300);
+const orig = await ev(async () => { const b = await T.host.readBytes('C:\\Out\\sample-ko.pdf'); return { len: b.length, same: b.length === T.bytes.length, head: String.fromCharCode(...b.slice(0, 5)), calls: window.__calls }; });
+check('원본 파일 내보내기 copies the original bytes', orig.same && orig.head === '%PDF-' && orig.calls[0][2] === 'sample-ko.pdf', JSON.stringify(orig));
+check('toast 원본 파일을 내보냈습니다', (await textOf('.toast')) === '원본 파일을 내보냈습니다');
+// own PDF / image as template: new-note dialog -> host.openDialog -> NotebookFiles.importTemplate -> paper.setTemplate
+await ev(() => { T.host.openDialog = async () => { T.host._fake.put('C:\\Users\\dev\\Downloads\\my-form.pdf', T.bytes); return ['C:\\Users\\dev\\Downloads\\my-form.pdf']; }; T.app.libraryFolder = T.app.library.root; T.app.newNotebook(); }); await page.waitForTimeout(300);
+await page.selectOption('.lib-paper select', { index: 9 }); await page.waitForTimeout(200);
+await shot('41-new-note-template');
+check('template button appears for 내 PDF·이미지 서식', await page.locator('.lib-paper >> text=PDF·이미지 서식 고르기').isVisible());
+await page.click('.lib-paper >> text=PDF·이미지 서식 고르기'); await page.waitForTimeout(500);
+const tpl = await ev(() => { const b = [...document.querySelectorAll('.lib-paper *')].map(x => x.textContent).find(t => /^서식: /.test(t)); return { label: b, target: !!T.app.templateTarget, path: T.app.templateTarget && T.app.templateTarget.template }; });
+check('picked template is copied (private copy) and shown', /^서식: .+다시 고르기/.test(tpl.label || '') && /templates\\/.test(tpl.path || ''), JSON.stringify(tpl));
+await page.fill('.lib-notename input', 'V127 서식 노트'); await page.click('.ad-btn >> text=만들기'); await page.waitForTimeout(2500);
+check('note created from own template', await ev(() => T.calls.some(c => c[0] === 'openPdf' && String(c[1]).endsWith('V127 서식 노트.pdf'))));
+await shot('42-template-note');
+await ev(() => T.app.newNotebook()); await page.waitForTimeout(300); await page.selectOption('.lib-paper select', { index: 9 }); await page.click('.ad-btn >> text=만들기'); await page.waitForTimeout(400);
+check('custom paper without a template stays open with an error', (await page.locator('.ad-root').count()) >= 1);
+await page.click('.ad-btn >> text=취소'); await page.waitForTimeout(200);
+
 // ---------------------------------------------------------------- PDF export (annotations flattened)
 const exp = await ev(async () => {
   await T.app.switchDocument(T.app.sessions[0]);

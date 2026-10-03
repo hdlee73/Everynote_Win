@@ -126,21 +126,42 @@ export { dateText };
 const stripPdf = n => n.replace(/\.pdf$/i, '');
 
 // ================================================================= PaperChoiceView =================================================================
+const TEMPLATE_LABEL = 'PDF·이미지 서식 고르기';
 export class PaperChoiceView {
   constructor(activity) {
     this.kind = 0; this.color = -1;
     const sel = h('select', { 'aria-label': '종이 형식' }, NotebookFiles.PAPER_NAMES.map((n, i) => h('option', { value: i }, n)));
-    sel.addEventListener('change', () => { this.kind = +sel.value; this.draw(); });
+    sel.addEventListener('change', () => { this.kind = +sel.value; this.templateButton.style.display = this.kind === NotebookFiles.CUSTOM ? '' : 'none'; this.draw(); });
+    this.template = null; this._request = null;
+    this.templateButton = h('div', { class: 'lib-tplbtn', role: 'button', style: { display: 'none' }, dataset: { tag: 'paper_template' } }, TEMPLATE_LABEL);
+    this.templateButton.addEventListener('click', () => this._pickTemplate());
     this.canvas = h('canvas', { 'aria-label': '선택한 종이 미리보기', role: 'img' });
     this.chips = h('div', { class: 'lib-chips' });
-    this.el = h('div', { class: 'lib-paper' }, sel, this.canvas, this.chips);
+    this.el = h('div', { class: 'lib-paper' }, sel, this.templateButton, this.canvas, this.chips);
     this.select = sel;
     this.refreshColors();
     if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => this.draw()).observe(this.canvas);
     requestAnimationFrame(() => this.draw());
   }
   /** NotebookFiles.Paper */
-  paper() { return new Paper(this.kind, this.color); }
+  paper() { return new Paper(this.kind, this.color, this.template); }
+  /**
+   * Called when the user taps "PDF·이미지 서식 고르기"; the host opens a file picker and answers with setTemplate(path).
+   * Without a request handler the view opens the file dialog itself, copies the pick into the app (NotebookFiles.importTemplate) and calls setTemplate.
+   */
+  onTemplateRequest(request) { this._request = request; }
+  /** path of the PDF or image to use as the page background of every new page (null clears it). */
+  setTemplate(file) {
+    this.template = file || null;
+    this.templateButton.textContent = file ? '서식: ' + baseName(file) + ' · 다시 고르기' : TEMPLATE_LABEL;
+    this.draw();
+  }
+  async _pickTemplate() {
+    if (this._request) { this._request(); return; }
+    let r; try { r = await host.openDialog('서식으로 쓸 PDF·이미지', [{ name: 'PDF·이미지', exts: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif'] }], false); } catch (e) { return; }
+    if (!r || !r[0]) return;
+    try { this.setTemplate(await NotebookFiles.importTemplate(r[0])); } catch (e) { toast(e && e.message || '서식 파일을 읽을 수 없습니다'); }
+  }
   refreshColors() {
     this.chips.textContent = '';
     NotebookFiles.COLORS.forEach((c, i) => {
@@ -160,12 +181,20 @@ export class PaperChoiceView {
     g.fillStyle = argb(this.color); g.fillRect(left, top, w, hh);
     g.strokeStyle = '#BBC4CE'; g.lineWidth = 1 / dpr; g.beginPath();
     g.rect(left, top, w, hh);
-    const step = (this.kind === 1 ? 25 : 18) * hh / 842;
-    if (this.kind !== 0) {
-      for (let y = top + 54 * hh / 842; y < bottom - 42 * hh / 842; y += step) { g.moveTo(left + 36 * w / 595, y); g.lineTo(right - 36 * w / 595, y); }
-      if (this.kind === 2) for (let x = left + 36 * w / 595; x < right - 36 * w / 595; x += step) { g.moveTo(x, top + 54 * hh / 842); g.lineTo(x, bottom - 42 * hh / 842); }
-    }
     g.stroke();
+    if (this.kind === NotebookFiles.CUSTOM) {
+      g.fillStyle = MUTED; g.font = '11px sans-serif'; g.textAlign = 'center';
+      g.fillText(this.template ? baseName(this.template) : '서식을 고르세요', (left + right) / 2, (top + bottom) / 2); g.textAlign = 'left';
+      return;
+    }
+    const f = hh / 842, fw = w / 595;
+    for (const seg of NotebookFiles.layout(this.kind, 595, 842)) {
+      const c = NotebookFiles.ruleColorOn(seg[4], this.color);
+      g.strokeStyle = g.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
+      const x1 = left + seg[0] * fw, y1 = bottom - seg[1] * f, x2 = left + seg[2] * fw, y2 = bottom - seg[3] * f;
+      if (seg[4] === 3) { g.beginPath(); g.arc(x1, y1, Math.max(.6, fw * .9), 0, Math.PI * 2); g.fill(); }
+      else { g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); }
+    }
   }
 }
 

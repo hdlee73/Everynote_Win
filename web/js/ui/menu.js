@@ -18,13 +18,18 @@ let current = null;
 export function dismissMenu() { if (current) { current.close(); current = null; } }
 
 /** @param anchor HTMLElement  @param above true = above the anchor (toolbar menus), false = below, right aligned */
-export function show(anchor, above, rows, shortcuts) {
+export function show(anchor, above, rows, shortcuts, onDismiss) {
   dismissMenu();
   const screenW = window.innerWidth, screenH = window.innerHeight;
   const card = h('div', { class: 'amenu', dataset: { tag: 'anchored_menu' } });
   const list = h('div', { class: 'amenu-list' });
   let wide = false;
-  const close = () => { backdrop.remove(); card.remove(); document.removeEventListener('keydown', onKey, true); if (current && current.card === card) current = null; };
+  let closed = false;
+  const close = () => {
+    if (closed) return; closed = true;
+    backdrop.remove(); card.remove(); document.removeEventListener('keydown', onKey, true); if (current && current.card === card) current = null;
+    if (onDismiss) onDismiss();
+  };
   for (const row of rows) {
     if (row.customEl) { list.append(row.customEl); wide = true; continue; }
     if (row.dividerV) { list.append(h('div', { class: 'amenu-div' })); continue; }

@@ -119,10 +119,12 @@ export class Mark {
     this.color = 0; this.note = null; this.noteOnly = false; this.visible = true; this.minimized = false;
     /** Sticky-note look: paper color, text size in sp, and box size (0 small, 1 medium, 2 large). */
     this.paper = 0xFFFFF3A6 | 0; this.fontSp = 13; this.boxSize = 1;
+    /** Own box size in dp (0 = use boxSize); set by dragging the corner handle of a selected memo. */
+    this.boxW = 0; this.boxH = 0;
   }
   toJson() {
     return {
-      paper: i32(this.paper), fontSp: i32(this.fontSp), boxSize: i32(this.boxSize),
+      paper: i32(this.paper), fontSp: i32(this.fontSp), boxSize: i32(this.boxSize), boxW: f(this.boxW), boxH: f(this.boxH),
       page: i32(this.page), left: f(this.left), top: f(this.top), right: f(this.right), bottom: f(this.bottom),
       color: i32(this.color), note: this.note == null ? '' : this.note,
       noteOnly: !!this.noteOnly, visible: !!this.visible, minimized: !!this.minimized,
@@ -137,6 +139,7 @@ export class Mark {
     m.paper = optInt(o, 'paper', 0xFFFFF3A6 | 0);
     m.fontSp = Math.max(9, Math.min(28, optInt(o, 'fontSp', 13)));
     m.boxSize = Math.max(0, Math.min(2, optInt(o, 'boxSize', 1)));
+    m.boxW = f(Math.max(0, Math.min(800, optFloat(o, 'boxW', 0)))); m.boxH = f(Math.max(0, Math.min(1200, optFloat(o, 'boxH', 0))));
     return m;
   }
 }
@@ -158,11 +161,12 @@ export class InkPoint {
 }
 
 export class InkStroke {
-  constructor() { this.page = 0; this.color = 0; this.width = 0; this.points = []; }
-  toJson() { return { page: i32(this.page), color: i32(this.color), width: f(this.width), points: this.points.map(p => p.toJson()) }; }
+  constructor() { this.page = 0; this.color = 0; /** 0 ballpoint, 1 pencil, 2 fountain pen, 3 brush, 4 felt marker. */ this.pen = 0; this.width = 0; this.points = []; }
+  toJson() { return { page: i32(this.page), color: i32(this.color), width: f(this.width), pen: i32(this.pen), points: this.points.map(p => p.toJson()) }; }
   static fromJson(o) {
     const s = new InkStroke();
     s.page = optInt(o, 'page'); s.color = optInt(o, 'color', 0xFF1C1C1E | 0); s.width = optFloat(o, 'width', .004);
+    s.pen = Math.max(0, Math.min(4, optInt(o, 'pen', 0)));
     const a = optArray(o, 'points');
     if (a) for (let i = 0; i < a.length; i++) s.points.push(InkPoint.fromJson(itemObj(a, i)));
     return s;
@@ -215,9 +219,11 @@ export class PageElement {
     /** Text height as a fraction of the page width (typing boxes only). */
     this.textSize = PageElement.DEFAULT_TEXT_SIZE; this.color = PageElement.DEFAULT_TEXT_COLOR;
     this.font = 'sans'; this.bold = false; this.italic = false;
+    /** Clockwise rotation in degrees around the box centre (pictures, stickers, shapes and tables). */
+    this.rot = 0;
   }
   toJson() {
-    return { page: i32(this.page), kind: this.kind, text: this.text, asset: this.asset,
+    return { rot: f(this.rot), page: i32(this.page), kind: this.kind, text: this.text, asset: this.asset,
       left: f(this.left), top: f(this.top), right: f(this.right), bottom: f(this.bottom),
       textSize: f(this.textSize), color: i32(this.color), font: this.font, bold: !!this.bold, italic: !!this.italic };
   }
@@ -227,6 +233,7 @@ export class PageElement {
     e.page = getInt(o, 'page');
     e.kind = optString(o, 'kind', 'text'); e.text = optString(o, 'text'); e.asset = optString(o, 'asset');
     e.left = optFloat(o, 'left', .1); e.top = optFloat(o, 'top', .1); e.right = optFloat(o, 'right', .8); e.bottom = optFloat(o, 'bottom', .3);
+    e.rot = optFloat(o, 'rot', 0);
     e.textSize = optFloat(o, 'textSize', PageElement.DEFAULT_TEXT_SIZE);
     e.color = optInt(o, 'color', PageElement.DEFAULT_TEXT_COLOR);
     e.font = optString(o, 'font', 'sans');

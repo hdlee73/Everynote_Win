@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><title>main3 test</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="stylesheet" href="/css/app.css"><link rel="stylesheet" href="/css/pageview.css"><link rel="stylesheet" href="/css/main1.css"><link rel="stylesheet" href="/css/main2.css"><link rel="stylesheet" href="/css/main3.css">
+<link rel="stylesheet" href="/css/app.css"><link rel="stylesheet" href="/css/pageview.css"><link rel="stylesheet" href="/css/main1.css"><link rel="stylesheet" href="/css/main2.css"><link rel="stylesheet" href="/css/main3.css"><link rel="stylesheet" href="/css/colorpicker.css">
 <style>#root{display:flex;flex-direction:column;width:100vw;height:100vh}#hdr{height:52px;background:#F9F9F9;flex:none}#row{flex:1;display:flex;min-height:0}#vp{position:relative;flex:1;display:flex;min-width:0}#papers{display:flex;flex:1}</style>
 </head><body><div id="root"><div id="hdr"></div><div id="row"></div></div>
 <script type="module">
@@ -17,7 +17,7 @@ const stub = (n, f) => { if (!MainActivity.prototype[n]) MainActivity.prototype[
 ['onSelectionAdjustStarted','syncOtherTools','placeElement','toggleOutlineMode','showPageMenu','showOutlineItem','chooseAddedPage','confirmDeletePage','choosePageToInsert',
  'toggleSidebar','goToPage','toggleTwoPage','toggleFullscreen','choosePageSwipeDirection','choosePageAnimation','startTextSelection',
  'pickImage','showStickerPicker','pickVideo','startHyperlink','pasteImage','askYoutube','toggleMemoMode','showStudy','recognizePageText',
- 'exportPdf','exportStudy','exportAnnotations','importSidecar','saveToLibrary','saveSessionState','applyKeepAwake','updateThumbnailSelection'].forEach(n => stub(n));
+ 'exportPdf','exportOriginal','exportStudy','exportAnnotations','importSidecar','saveToLibrary','saveSessionState','applyKeepAwake','updateThumbnailSelection'].forEach(n => stub(n));
 MainActivity.prototype.updateToolStates = function () { this.updateLassoBar(); };
 MainActivity.prototype.setInkMode = function (m) { calls.push(['setInkMode', m]); this.inkMode = m; if (m === 0) this.pageView.setLassoMode(false); this.updateLassoBar(); };
 MainActivity.prototype.setWriteMode = function (m) { calls.push(['setWriteMode', m]); };

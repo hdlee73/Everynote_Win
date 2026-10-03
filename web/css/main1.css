@@ -70,8 +70,14 @@
 .m-sw .dot.on{border:3px solid #1C1C1E}
 .m-sw .dot .ico{position:absolute;left:50%;top:50%;margin:-12px 0 0 -12px}
 .m-menubox{display:flex;flex-direction:column}
+.m-sw .dot.chip-more{border:1px solid #D5DCE6}
+.m-sw .dot.chip-more.on{border:3px solid #1C1C1E}
+.m-seclabel{font-size:12px;color:#8E8E93}
+.m-opacity{display:flex;align-items:center;padding:2px 8px 4px}
+.m-oplabel{flex:none;width:72px;font-size:12px;color:#8E8E93;white-space:nowrap}
+.m-opbar{flex:1 1 0;min-width:0;height:32px;margin:0;accent-color:#007AFF}
 
-/* ---- text selection popup (227 high) ---- */
+/* ---- text selection (v1.27: now one AnchoredMenu list, .m-selpop kept for legacy callers) ---- */
 .m-selpop{position:fixed;z-index:8000;height:227px;padding:7px;background:#fff;border-radius:20px;box-shadow:0 6px 24px rgba(0,0,0,.22),0 0 0 1px rgba(0,0,0,.05);box-sizing:border-box}
 .m-selrow{display:flex;height:71px}
 .m-tile{flex:1 1 0;min-width:0;height:65px;margin:3px;border-radius:16px;background:#F4F7FB;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer}
@@ -88,3 +94,6 @@
 .m-edittext{display:block;width:100%;resize:none;min-height:92px;max-height:172px;line-height:20px;overflow:auto}
 .m-statusview{font-size:16px;padding:20px 24px;text-align:center;color:#1C1C1E}
 .m-dim-btn{opacity:.4;pointer-events:none}
+
+/* the colour chooser opens over a still-open pen / highlight menu (menus sit at z 9500) */
+.ad-root:has([data-tag="color_picker"]){z-index:9700}

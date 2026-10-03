@@ -93,11 +93,46 @@ const A4_W = 595.27563, A4_H = 841.8898;
 const asInt = c => c | 0;
 
 export class Paper {
-  constructor(kind, color) {
-    if (!(kind >= 0 && kind <= 2) || !Number.isInteger(kind)) throw new Error('종이 형식');
-    this.kind = kind; this.color = asInt(color);
+  /** template: for kind CUSTOM the path of the PDF or image used as the page background (a copy kept inside the app). */
+  constructor(kind, color, template = null) {
+    if (!(kind >= 0 && kind <= CUSTOM) || !Number.isInteger(kind)) throw new Error('종이 형식');
+    if (kind === CUSTOM && !template) throw new Error('서식 파일을 먼저 고르세요');
+    this.kind = kind; this.color = asInt(color); this.template = kind === CUSTOM ? String(template) : null;
+  }
+  /** "kind:color" or, for a custom template, "kind:color:path" (stored in the PDF Info /PDFNotePaper and the library prefs). */
+  spec() { return `${this.kind}:${this.color}${this.template == null ? '' : ':' + this.template}`; }
+  /** Throws on malformed values like Java Integer.parseInt / the constructor. */
+  static parse(value) {
+    const str = String(value), i = str.indexOf(':'); if (i < 0) throw new Error('paper spec');
+    const j = str.indexOf(':', i + 1), kindS = str.slice(0, i), colorS = j < 0 ? str.slice(i + 1) : str.slice(i + 1, j);
+    if (!/^-?\d+$/.test(kindS) || !/^-?\d+$/.test(colorS)) throw new Error('paper spec');
+    return new Paper(parseInt(kindS, 10), parseInt(colorS, 10), j < 0 ? null : str.slice(j + 1));
   }
 }
+export const CUSTOM = 9;
+
+/** One ruling mark of a paper type in PDF points (origin bottom-left): [x1,y1,x2,y2,style]. style 0 = faint line, 1 = red, 2 = dark, 3 = dot (x1==x2). */
+export function layout(kind, w, h) {
+  const out = [];
+  switch (kind) {
+    case 1: case 4: case 5: { const step = kind === 1 ? 25 : kind === 4 ? 18 : 32; for (let y = h - 54; y >= 42; y -= step) out.push([36, y, w - 36, y, 0]); break; }
+    case 2: { for (let y = h - 54; y >= 42; y -= 18) out.push([36, y, w - 36, y, 0]); for (let x = 36; x <= w - 36; x += 18) out.push([x, 42, x, h - 54, 0]); break; }
+    case 3: { out.push([36, h - 72, w - 36, h - 72, 1]); for (let y = h - 96; y >= 48; y -= 22) out.push([36, y, w - 36, y, 0]); out.push([74, h - 36, 74, 36, 1]); out.push([78, h - 36, 78, 36, 1]); break; }
+    case 6: { for (let y = h - 54; y >= 42; y -= 18) for (let x = 36; x <= w - 36; x += 18) out.push([x, y, x, y, 3]); break; }
+    case 7: { out.push([36, h - 60, w - 36, h - 60, 2]); for (let y = h - 84; y >= 190; y -= 24) out.push([36, y, w - 36, y, 0]); out.push([160, h - 60, 160, 190, 2]); out.push([36, 190, w - 36, 190, 2]); for (let y = 166; y >= 48; y -= 24) out.push([36, y, w - 36, y, 0]); break; }
+    case 8: { for (let top = h - 60; top >= 110; top -= 72) for (let i = 0; i < 5; i++) out.push([36, top - i * 8, w - 36, top - i * 8, 2]); break; }
+    default: break;
+  }
+  return out;
+}
+/** RGB (0..255) of a ruling style. */
+export function ruleColor(style) { switch (style) { case 1: return [232, 140, 140]; case 2: return [120, 130, 140]; case 3: return [150, 160, 170]; default: return [185, 195, 205]; } }
+/** Rule colour on a paper of the given colour (lines on a dark paper are lightened). */
+export function ruleColorOn(style, paperColor) {
+  const c = ruleColor(style), dark = ((paperColor >> 16) & 255) + ((paperColor >> 8) & 255) + (paperColor & 255) < 300;
+  return dark ? c.map(v => Math.min(255, Math.trunc(v / 2) + 90)) : c;
+}
+const isPdfName = f => !!f && /\.pdf$/i.test(String(f));
 
 function infoDict(doc) {
   if (doc.getInfoDict) { try { return doc.getInfoDict(); } catch { /* fall through */ } }
@@ -123,25 +158,66 @@ export async function readNotebookPaper(bytes) {
     const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false, throwOnInvalidObject: false });
     const info = infoDict(doc), text = k => { const v = info.get(PDFName.of(k)); return v && v.decodeText ? v.decodeText() : null; };
     if (text('PDFNoteNotebook') !== 'true') return null;
-    const s = String(text('PDFNotePaper')).split(':'); const p = new Paper(parseInt(s[0], 10), parseInt(s[1], 10));
-    return Number.isNaN(p.color) ? null : p;
+    return Paper.parse(String(text('PDFNotePaper')));
   } catch { return null; }
 }
 
-async function addPaper(doc, paper, afterIndex = -1) {
-  const { rgb, pushOperators, setStrokingRgbColor, setLineWidth, moveTo, lineTo, stroke } = await pdfLib();
+async function templateImage(doc, file, cache) {
+  const key = 'img:' + file; if (cache[key]) return cache[key];
+  const bytes = await host.readBytes(file);
+  let img;
+  try {
+    const head = bytes.subarray ? bytes.subarray(0, 4) : new Uint8Array(bytes).subarray(0, 4);
+    if (head[0] === 0x89 && head[1] === 0x50) img = await doc.embedPng(bytes);
+    else if (head[0] === 0xFF && head[1] === 0xD8) img = await doc.embedJpg(bytes);
+    else { // any other format the browser can decode (webp, bmp, gif ...): re-encode as JPEG
+      const bmp = await createImageBitmap(new Blob([bytes]));
+      const cv = document.createElement('canvas'); cv.width = bmp.width; cv.height = bmp.height;
+      const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); g.drawImage(bmp, 0, 0);
+      const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', .9));
+      img = await doc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+    }
+  } catch { throw new IOException('서식 이미지를 읽을 수 없습니다'); }
+  return (cache[key] = img);
+}
+
+/** cache: per-operation scratch (parsed template PDF / embedded image) so several pages share one template. */
+async function addPaper(doc, paper, afterIndex = -1, cache = {}) {
+  const { rgb, pushOperators, setStrokingRgbColor, setLineWidth, setLineCap, LineCapStyle, moveTo, lineTo, stroke } = await pdfLib();
   const n = doc.getPageCount();
-  const page = (afterIndex < 0 || afterIndex >= n) ? doc.addPage([A4_W, A4_H]) : doc.insertPage(afterIndex + 1, [A4_W, A4_H]);
+  const at = (afterIndex < 0 || afterIndex >= n) ? -1 : afterIndex + 1;
+  if (paper.kind === CUSTOM && isPdfName(paper.template)) {
+    let source = cache.pdf;
+    if (!source) {
+      const { PDFDocument } = await pdfLib();
+      try { source = cache.pdf = await PDFDocument.load(await host.readBytes(paper.template), { updateMetadata: false, ignoreEncryption: true }); }
+      catch { throw new IOException('PDF를 읽을 수 없습니다'); }
+    }
+    if (source.getPageCount() < 1) throw new IOException('서식 PDF에 페이지가 없습니다');
+    const [copy] = await doc.copyPages(source, [0]);
+    if (at < 0) doc.addPage(copy); else doc.insertPage(at, copy);
+    return;
+  }
+  const page = at < 0 ? doc.addPage([A4_W, A4_H]) : doc.insertPage(at, [A4_W, A4_H]);
   const width = A4_W, height = A4_H;
   const r = (paper.color >> 16) & 255, g = (paper.color >> 8) & 255, b = paper.color & 255;
   page.drawRectangle({ x: 0, y: 0, width, height, color: rgb(r / 255, g / 255, b / 255), borderWidth: 0 });
+  if (paper.kind === CUSTOM) {
+    const img = await templateImage(doc, paper.template, cache);
+    const scale = Math.min(width / img.width, height / img.height), w = img.width * scale, h = img.height * scale;
+    page.drawImage(img, { x: (width - w) / 2, y: (height - h) / 2, width: w, height: h });
+    return;
+  }
   if (paper.kind === 0) return;
-  const ops = [setStrokingRgbColor(185 / 255, 195 / 255, 205 / 255), setLineWidth(0.45)];
-  const step = paper.kind === 1 ? 25 : 18;
-  for (let y = height - 54; y >= 42; y -= step) ops.push(moveTo(36, y), lineTo(width - 36, y));
-  if (paper.kind === 2) for (let x = 36; x <= width - 36; x += step) ops.push(moveTo(x, 42), lineTo(x, height - 54));
-  ops.push(stroke());
-  page.pushOperators(...ops);
+  const segs = layout(paper.kind, width, height);
+  for (let style = 0; style <= 3; style++) {
+    const mine = segs.filter(sg => sg[4] === style); if (!mine.length) continue;
+    const c = ruleColorOn(style, paper.color);
+    const ops = [setStrokingRgbColor(c[0] / 255, c[1] / 255, c[2] / 255), setLineWidth(style === 3 ? 1.6 : style === 2 ? 0.7 : 0.45), setLineCap(style === 3 ? LineCapStyle.Round : LineCapStyle.Butt)];
+    for (const sg of mine) ops.push(moveTo(sg[0], sg[1]), lineTo(sg[2], sg[3]));
+    ops.push(stroke());
+    page.pushOperators(...ops);
+  }
 }
 
 async function loadForEdit(file, message) {
@@ -155,15 +231,25 @@ async function loadForEdit(file, message) {
 }
 
 export const NotebookFiles = {
-  PAPER_NAMES: ['백지', '줄노트', '모눈종이'],
-  COLORS: [0xFFFFFFFF, 0xFFFFF9E8, 0xFFEFF6FF, 0xFFF0F8EE, 0xFFFFF0F4, 0xFFEDEFF2].map(asInt),
-  COLOR_NAMES: ['흰색', '크림', '하늘', '연두', '분홍', '회색'],
-  Paper,
+  PAPER_NAMES: ['백지', '줄노트 (보통)', '모눈종이', '리걸노트', '줄노트 (좁게)', '줄노트 (넓게)', '점 격자', '코넬 노트', '오선지', '내 PDF·이미지 서식'],
+  CUSTOM,
+  COLORS: [0xFFFFFFFF, 0xFFFFF9E8, 0xFFFFF6B0, 0xFFEFF6FF, 0xFFF0F8EE, 0xFFFFF0F4, 0xFFEDEFF2, 0xFFF3ECFF, 0xFF1C1C1E].map(asInt),
+  COLOR_NAMES: ['흰색', '크림', '리갈 옐로', '하늘', '연두', '분홍', '회색', '연보라', '검정'],
+  Paper, layout, ruleColor, ruleColorOn, isPdf: isPdfName,
   WHITE: -1,
 
   /** NotebookFiles.root(Context): the library folder (created). */
   async root() { const r = (await host.info()).library; await host.mkdir(r); return normPath(r); },
 
+  /** Copies a picked PDF/image into <data>\\templates so a CUSTOM paper keeps working when the original moves. Returns the copy's path. */
+  async importTemplate(source) {
+    const dir = (await host.info()).data.replace(/[\\/]+$/, '') + '\\templates';
+    await host.mkdir(dir);
+    const m = /\.[A-Za-z0-9]{1,5}$/.exec(String(source)), ext = m ? m[0].toLowerCase() : '.png';
+    const target = joinP(dir, uuid() + ext);
+    try { await host.copy(source, target); } catch { throw new IOException('서식 파일을 읽을 수 없습니다'); }
+    return target;
+  },
   name(text) {
     const n = String(text).trim();
     // eslint-disable-next-line no-control-regex
@@ -192,8 +278,9 @@ export const NotebookFiles = {
       doc.setProducer('PDF Note'); doc.setCreator('PDF Note');
       const info = infoDict(doc);
       info.set(PDFName.of('PDFNoteNotebook'), PDFString.of('true'));
-      info.set(PDFName.of('PDFNotePaper'), PDFString.of(`${paper.kind}:${asInt(paper.color)}`));
-      for (let i = 0; i < pages; i++) await addPaper(doc, paper);
+      info.set(PDFName.of('PDFNotePaper'), PDFString.of(paper.spec().replace(/[\\()]/g, m => '\\' + m)));
+      const cache = {};
+      for (let i = 0; i < pages; i++) await addPaper(doc, paper, -1, cache);
       await host.writeBytes(temp, await doc.save({ useObjectStreams: false }));
       await NotebookFiles.replace(temp, target);
       return target;
@@ -451,9 +538,9 @@ export class LibraryRepository {
   paper(file) {
     const value = this._get('paper:' + normPath(file), null);
     if (value == null) return null;
-    try { const p = String(value).split(':'); const kind = parseInt(p[0], 10), color = parseInt(p[1], 10); if (Number.isNaN(kind) || Number.isNaN(color)) return null; return new Paper(kind, color); } catch { return null; }
+    try { return Paper.parse(value); } catch { return null; }
   }
-  _putPaper(file, paper) { this._put('paper:' + normPath(file), `${paper.kind}:${asInt(paper.color)}`); }
+  _putPaper(file, paper) { this._put('paper:' + normPath(file), paper.spec()); }
 
   // ---- import
   /** library copy created earlier for this external source path (or null) */

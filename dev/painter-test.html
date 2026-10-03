@@ -73,5 +73,42 @@ function render(label, dark, method) {
 render('all-light', false, 'all'); render('all-dark', true, 'all');
 // fitHeight sanity next to the page
 const fh = AnnotationPainter.fitHeight('일반 텍스트 상자\nSecond line 두 번째 줄', .45, .027, H / W, AnnotationPainter.typeface('sans', false, false));
-window.__done = { fh, w: W, h: H };
+// ---- v1.27: pen types, translucent overlap, rotated elements ------------------------------------------------------
+const s2 = new AnnotationStore();
+function wave(y, color, pen, width, pts = 70) {
+  const k = new InkStroke(); k.page = 0; k.color = color; k.pen = pen; k.width = width;
+  for (let i = 0; i < pts; i++) { const t = i / (pts - 1); k.points.push(new InkPoint(.08 + .84 * t, y + .022 * Math.sin(t * 11), 0.55 + .35 * Math.sin(t * 5))); }
+  s2.strokes.push(k); return k;
+}
+const penY = [.05, .13, .21, .29, .37];
+penY.forEach((y, pen) => wave(y, 0xFF1C1C1E | 0, pen, .004));
+penY.forEach((y, pen) => wave(y + .04, 0xFF007AFF | 0, pen, .004, 70));
+// translucent self-overlapping loop: must stay one flat tone where it crosses itself
+const loop = new InkStroke(); loop.page = 0; loop.color = 0x80FF3B30 | 0; loop.pen = 4; loop.width = .012;
+for (let i = 0; i <= 120; i++) { const t = i / 120 * Math.PI * 4; loop.points.push(new InkPoint(.25 + .12 * Math.cos(t) + .02 * t / 6, .52 + .07 * Math.sin(t * 1.0), .6)); }
+s2.strokes.push(loop);
+const hlp = new InkStroke(); hlp.page = 0; hlp.color = 0x6600C853 | 0; hlp.pen = 0; hlp.width = .02;
+for (let i = 0; i <= 40; i++) hlp.points.push(new InkPoint(.55 + .35 * i / 40, .50 + .03 * Math.sin(i / 3), .65)); for (let i = 40; i >= 0; i--) hlp.points.push(new InkPoint(.55 + .35 * i / 40, .52 + .03 * Math.sin(i / 3), .65));
+s2.strokes.push(hlp);
+const add2 = (o) => s2.elements.push(E(Object.assign({ page: 0 }, o)));
+[0, 15, 45, 90, 180].forEach((rot, i) => add2({ kind: 'image', asset: img, rot, left: .05 + i * .19, top: .62, right: .05 + i * .19 + .15, bottom: .69 }));
+[0, 30, 90, 200].forEach((rot, i) => add2({ kind: 'sticker', text: '⭐', rot, left: .06 + i * .12, top: .72, right: .06 + i * .12 + .09, bottom: .77 }));
+[0, 20, 60, 120].forEach((rot, i) => add2({ kind: 'shape', rot, text: Shapes.shapeSpec(i % 2 ? 'arrow' : 'star', 0xFF7B2FA3 | 0, i % 2 ? 0 : 0x55FFB300, 3), left: .06 + i * .12 + .5, top: .72, right: .06 + i * .12 + .6, bottom: .77 }));
+const tb = Table.create(2, 3, 0xFF3A3A3C | 0, 0xFFE5F0FF | 0, 0x00FFFFFF); tb.cells[0] = 'A'; tb.cells[1] = 'B'; tb.cells[2] = 'C';
+add2({ kind: 'table', rot: 12, text: tb.serialize(), left: .1, top: .83, right: .5, bottom: .9 });
+add2({ kind: 'text', rot: 40, text: 'text boxes do not rotate', left: .55, top: .85, right: .95, bottom: .9 });
+{
+  const c = paper(false), g = c.getContext('2d'); AnnotationPainter.dark = false; AnnotationPainter.all(g, new RectF(0, 0, W, H), s2, 0);
+  const wrap = document.createElement('div'); wrap.id = 'v127'; wrap.append(Object.assign(document.createElement('div'), { textContent: 'v127 pens + rotation' }), c); out.append(wrap);
+  // pixel probes: the crossing of the translucent loop must have the same colour as a single pass
+  const probe = (x, y) => Array.from(g.getImageData(x, y, 1, 1).data);
+  window.__v127 = { n: s2.strokes.length, rotates: ['image', 'sticker', 'shape', 'table', 'text'].map(k => AnnotationPainter.rotates({ kind: k })), names: AnnotationPainter.PEN_NAMES };
+  // layer-vs-direct sanity: stroke with alpha 255 vs 0x80 on a white page, count distinct red tones inside the loop path
+  const t2 = document.createElement('canvas'); t2.width = W; t2.height = H; const g2 = t2.getContext('2d'); g2.fillStyle = '#fff'; g2.fillRect(0, 0, W, H);
+  AnnotationPainter.stroke(g2, new RectF(0, 0, W, H), loop);
+  const px = g2.getImageData(0, 0, W, H).data; let minG = 255;
+  for (let i = 0; i < px.length; i += 4) if (px[i + 1] < minG) minG = px[i + 1];
+  window.__v127.minG = minG;   // 0x80 * .82 felt-marker alpha on #FF3B30 over white = G 174 when flat; an overlap would reach ~120
+}
+window.__done = { fh, w: W, h: H, v127: window.__v127 };
 </script>

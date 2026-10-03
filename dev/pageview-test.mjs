@@ -128,7 +128,9 @@ await shot('03-memo');
 await clearLog();
 const box = await ev(() => { const m = T.store.marks[T.store.marks.length - 1]; const b = T.view.memoHitBoxes.get(m); return [b.left + 10, b.top + 10]; });
 await drag([box, box], { type: 'touch', id: 7 });
-check('onMarkTapped on memo sticky', (await logOf('onMarkTapped')) === 1);
+check('v1.27: first tap selects the memo (no onMarkTapped yet)', (await logOf('onMarkTapped')) === 0);
+await drag([box, box], { type: 'touch', id: 71 });
+check('onMarkTapped on memo sticky (second tap)', (await logOf('onMarkTapped')) === 1);
 
 // --- text selection ---------------------------------------------------------------------------------------
 const nreg = await ev(() => T.view.textRegions.length);
@@ -262,6 +264,70 @@ const rs = await ev(() => [T.el.left, T.el.top, T.el.right, T.el.bottom].map(v =
 check('element resized (BR corner)', rs[2] > moved[2] + 0.03, JSON.stringify(rs));
 await shot('10-element-resized');
 await ev(() => T.view.selectElement(null));
+
+// --- v1.27: rotation handle, rotated hit-testing, memo resize, pen plumbing -------------------------------------
+await ev(() => { T.view.selectElement(T.el); T.view.invalidate(); });
+const geo = () => ev(() => { const el = T.el, d = T.view.pageRect(); const L = d.left + el.left * d.width(), R = d.left + el.right * d.width(), Tp = d.top + el.top * d.height(), B = d.top + el.bottom * d.height(); return { cx: (L + R) / 2, cy: (Tp + B) / 2, top: Tp, w: R - L, h: B - Tp }; });
+let g = await geo();
+check('rotates(): shape yes, text no', await ev(async () => { const { AnnotationPainter } = await import('/js/painter.js'); return AnnotationPainter.rotates(T.el) && !AnnotationPainter.rotates({ kind: 'text' }); }));
+await shot('12-rot-handle');
+await clearLog();
+// drag the knob (centre, 28 above the top) to the right of the centre -> 90 degrees (snapped)
+await drag(line(g.cx, g.top - 28, g.cx + 100, g.cy + 2, 8), { type: 'touch', id: 51 });
+let rot = await ev(() => T.el.rot);
+check('rotation handle drag snaps to 90', rot === 90, 'rot=' + rot);
+check('rotation reports onInkChanged', (await logOf('onInkChanged')) === 1);
+await shot('13-rotated-90');
+// the knob of a 90deg element sits to the right of the centre: pick it there and turn to ~45 (up-right) -> snap 45
+await ev(() => { T.el.rot = 90; T.view.invalidate(); });
+g = await geo();
+await drag(line(g.cx + g.h / 2 + 28, g.cy, g.cx + 100, g.cy - 100, 8), { type: 'touch', id: 53 });
+rot = await ev(() => T.el.rot);
+check('rotated element: knob found at rotated position, turns to 45', rot === 45, 'rot=' + rot);
+await shot('14-rotated-45');
+// hit-test: a point inside the unrotated box but outside the rotated one is a miss; a point in the rotated area is a hit
+await ev(() => { T.el.rot = 90; T.view.invalidate(); });
+g = await geo();
+const hits = await ev(([cx, cy, w, h]) => { const v = T.view, el = T.el; return [v.elementContains(el, cx + w / 2 - 3, cy), v.elementContains(el, cx, cy + w / 2 - 3), v.elementContains(el, cx + w / 2 - 3, cy + h / 2 - 3)]; }, [g.cx, g.cy, g.w, g.h]);
+check('rotated hit-test (w>h, 90deg): wide edge now vertical', hits[0] === false && hits[1] === true, JSON.stringify(hits));
+// resize of a rotated element keeps working in the element frame
+await ev(() => { T.el.rot = 90; T.view.selectElement(T.el); T.view.invalidate(); });
+g = await geo(); const w0 = g.w;
+// BR corner of the rotated box is at (cx - h/2, cy + w/2) (rotated 90 cw: local (+w/2,+h/2) -> (-h/2,+w/2))
+await drag(line(g.cx - g.h / 2, g.cy + w0 / 2, g.cx - g.h / 2, g.cy + w0 / 2 + 30, 6), { type: 'touch', id: 54 });
+const g2 = await geo();
+check('rotated element resizes along its own axis', g2.w > w0 + 5, `w ${w0.toFixed(0)} -> ${g2.w.toFixed(0)}`);
+await ev(() => { T.el.rot = 0; T.view.selectElement(null); });
+// pen type plumbing
+await ev(() => { T.view.setInkTool(1, 0xFF1C1C1E | 0, 0.004); T.view.setInkPen(3); T.view.setFingerInk(true); T.store.strokes.length = 0; });
+await drag(line(px(.2), py(.9), px(.5), py(.92), 8), { type: 'touch', id: 55 });
+const pens = await ev(() => T.store.strokes.map(s => s.pen));
+check('new stroke carries the selected pen', pens.length === 1 && pens[0] === 3, JSON.stringify(pens));
+await ev(() => { T.view.setInkPen(99); }); check('setInkPen clamps to 0..4', (await ev(() => T.view.inkPen)) === 4);
+await shot('15-pen-stroke');
+await ev(() => { T.view.setInkTool(0, 0xFF1C1C1E | 0, 0.004); T.view.setFingerInk(false); T.store.strokes.length = 0; T.el.rot = 0; T.view.selectElement(null); });
+// memo: first tap selects (dashed frame + handle), handle drag resizes, second tap edits
+await ev(() => { const m = new T.Mark(); m.page = 0; m.left = .1; m.right = .2; m.top = .3; m.bottom = .32; m.noteOnly = true; m.note = '메모 크기 조절 테스트'; T.store.marks.push(m); T.memo = m; T.view.invalidate(); T.view.flush(); });
+const mb = () => ev(() => { const b = T.view.memoHitBoxes.get(T.memo); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; });
+let mbox = await mb(); await clearLog();
+await drag([[ (mbox.l + mbox.r) / 2, (mbox.t + mbox.b) / 2 ], [ (mbox.l + mbox.r) / 2, (mbox.t + mbox.b) / 2 ]], { type: 'touch', id: 61 });
+check('first memo tap selects instead of opening', (await ev(() => T.view.selectedMemo === T.memo)) && (await logOf('onMarkTapped')) === 0);
+await shot('16-memo-selected');
+await drag(line(mbox.r, mbox.b, mbox.r + 70, mbox.b + 50, 8), { type: 'touch', id: 62 });
+const sized = await ev(() => [T.memo.boxW, T.memo.boxH]);
+check('memo handle drag sets own mbox size (dp)', sized[0] > (mbox.r - mbox.l) + 40 && sized[1] > (mbox.b - mbox.t) + 30, JSON.stringify(sized));
+check('memo resize reports onInkChanged', (await logOf('onInkChanged')) >= 1);
+await shot('17-memo-resized');
+mbox = await mb();
+await clearLog();
+await drag([[ (mbox.l + mbox.r) / 2, mbox.t + 20 ], [ (mbox.l + mbox.r) / 2, mbox.t + 20 ]], { type: 'touch', id: 63 });
+check('second tap opens the memo', (await logOf('onMarkTapped')) === 1 && (await ev(() => T.view.selectedMemo)) === null);
+await ev(() => { T.store.marks.length = 0; T.view.invalidate(); });
+// text recognition radius: 3dp (touch) / 10dp (direct selection) instead of 16dp
+const radius = await ev(() => { const v = T.view, d = v.contentRect(); v.textSelectMode = true; const R = { wordBounds: { left: .4, top: .4, right: .5, bottom: .42 } }; v.textRegions = [R];
+  const at = dx => v.textRegionAt(d.left + .5 * d.width() + dx, d.top + .41 * d.height(), d) === R;
+  v.directTextSelection = false; const a = [at(2), at(5)]; v.directTextSelection = true; const b = [at(8), at(13)]; v.textRegions = []; return a.concat(b); });
+check('text recognition radius 3dp / 10dp', JSON.stringify(radius) === '[true,false,true,false]', JSON.stringify(radius));
 
 // --- dark page, snapshot -----------------------------------------------------------------------------------
 await ev(() => T.view.setDarkPage(true));

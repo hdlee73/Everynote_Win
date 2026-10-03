@@ -201,7 +201,8 @@ export class PdfPageView {
     this.panX = 0; this.panY = 0;
     this.drawing = false; this.panning = false; this.gestureMoved = false; this.scalingOccurred = false;
     this.verticalPageSwipe = false; this.outlineMode = false;
-    this.inkMode = 0; this.inkColor = 0xFF1C1C1E | 0; this.inkWidth = 0.004;
+    this.inkMode = 0; this.inkColor = 0xFF1C1C1E | 0; this.inkWidth = 0.004; this.inkPen = 0;
+    this.selectedMemo = null; this.memoDrag = 0; this.memoStartX = 0; this.memoStartY = 0; this.memoW0 = 0; this.memoH0 = 0; this.elementRot0 = 0;
     this.activeStroke = null; this.stylusDrawing = false;
     this.fingerInk = false; this.pageSwipeEnabled = false;
     this.scale = 1;
@@ -325,7 +326,7 @@ export class PdfPageView {
   showPage(pageBitmap, pageNumber, allMarks, allStrokes, allTranslations) {
     this.clearLassoSelection();
     this.stopTextSelection();
-    this.noteHitBoxes.clear(); this.memoHitBoxes.clear(); this._selectedElement = null; this.elementDrag = 0;
+    this.noteHitBoxes.clear(); this.memoHitBoxes.clear(); this._selectedElement = null; this.elementDrag = 0; this.selectedMemo = null; this.memoDrag = 0;
     if (this.bitmap !== pageBitmap) this._darkBitmap = null;
     this.bitmap = pageBitmap;
     this.page = pageNumber;
@@ -372,6 +373,8 @@ export class PdfPageView {
     if (enabled) { this.setLassoMode(false); this.highlightMode = false; this.memoMode = false; }
     this.invalidate();
   }
+  /** Pen type of new strokes: 0 ballpoint, 1 pencil, 2 fountain pen, 3 brush, 4 felt marker. */
+  setInkPen(pen) { this.inkPen = Math.max(0, Math.min(4, pen | 0)); }
   setInkTool(mode, color, width) {
     this.inkMode = mode; this.inkColor = color; this.inkWidth = width;
     if (mode !== 0) { this.setLassoMode(false); this.highlightMode = this.memoMode = this.outlineMode = false; }
@@ -381,7 +384,7 @@ export class PdfPageView {
   copyToolsFrom(other) {
     this.darkPage = other.darkPage; this._darkBitmap = null; this.applyBackground(); this.directTextSelection = other.directTextSelection;
     this.highlightMode = other.highlightMode; this.memoMode = other.memoMode; this.outlineMode = other.outlineMode; this.highlightColor = other.highlightColor;
-    this.inkMode = other.inkMode; this.inkColor = other.inkColor; this.inkWidth = other.inkWidth; this.fingerInk = other.fingerInk;
+    this.inkMode = other.inkMode; this.inkColor = other.inkColor; this.inkWidth = other.inkWidth; this.inkPen = other.inkPen; this.fingerInk = other.fingerInk;
     this.pageSwipeEnabled = other.pageSwipeEnabled; this.verticalPageSwipe = other.verticalPageSwipe; this.lassoShape = other.lassoShape;
     if (this.lassoMode !== other.lassoMode) { this.lassoMode = other.lassoMode; this.clearLassoSelection(); }
     this.invalidate();
@@ -495,13 +498,35 @@ export class PdfPageView {
   _drawElementHandles(ctx, dest) {
     const se = this._selectedElement;
     if (!se || se.page !== this.page || !this.annotationStore || !this.annotationStore.elements.includes(se) || dest.width() <= 0) return;
-    const d = DP, b = boxOf(dest, se);
+    const d = DP, b = boxOf(dest, se), turns = AnnotationPainter.rotates(se);
+    ctx.save();
+    if (turns && se.rot) AnnotationPainter.rotateAround(ctx, se.rot, b.centerX(), b.centerY());
     ctx.lineWidth = 2 * d; ctx.strokeStyle = argb(0xFF007AFF); ctx.strokeRect(b.left, b.top, b.width(), b.height());
+    if (turns) {
+      // rotation handle: a stem above the top edge ending in a round ↻ knob
+      ctx.beginPath(); ctx.moveTo(b.centerX(), b.top); ctx.lineTo(b.centerX(), b.top - 24 * d); ctx.stroke();
+      ctx.beginPath(); ctx.arc(b.centerX(), b.top - 28 * d, 10 * d, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
+      ctx.fillStyle = argb(0xFF007AFF); ctx.font = `${13 * d}px ${FONT_SANS}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText('↻', b.centerX(), b.top - 23.5 * d); ctx.textAlign = 'left';
+    }
     const corners = [[b.left, b.top], [b.right, b.top], [b.left, b.bottom], [b.right, b.bottom]];
     for (const c of corners) {
       ctx.beginPath(); ctx.arc(c[0], c[1], 9 * d, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill();
       ctx.beginPath(); ctx.arc(c[0], c[1], 9 * d, 0, Math.PI * 2); ctx.stroke();
     }
+    ctx.restore();
+  }
+
+  /** Rotates the point (x, y) by -rot degrees around (cx, cy): view space -> the element's own (unrotated) box space. */
+  static unrotate(x, y, cx, cy, rot) {
+    const a = -rot * Math.PI / 180, dx = x - cx, dy = y - cy;
+    return [cx + dx * Math.cos(a) - dy * Math.sin(a), cy + dx * Math.sin(a) + dy * Math.cos(a)];
+  }
+  /** True when the view point (x, y) is inside the element's (possibly rotated) box. */
+  elementContains(el, x, y, dest = this.contentRect()) {
+    const b = boxOf(dest, el); let tx = x, ty = y;
+    if (el.rot && AnnotationPainter.rotates(el)) [tx, ty] = PdfPageView.unrotate(x, y, b.centerX(), b.centerY(), el.rot);
+    return b.contains(tx, ty);
   }
 
   _handleElementGesture(e, dest) {
@@ -511,13 +536,16 @@ export class PdfPageView {
     const action = e.action, density = DP;
     if (action === DOWN && e.pointerCount === 1 && !this.isStylus(e)) {
       const b = boxOf(dest, se), reach = 24 * density; let hit = 0;
-      if (Math.hypot(e.x - b.left, e.y - b.top) <= reach) hit = 2; else if (Math.hypot(e.x - b.right, e.y - b.top) <= reach) hit = 3;
-      else if (Math.hypot(e.x - b.left, e.y - b.bottom) <= reach) hit = 4; else if (Math.hypot(e.x - b.right, e.y - b.bottom) <= reach) hit = 5;
-      else if (b.contains(e.x, e.y)) hit = 1;
+      let tx = e.x, ty = e.y; const turns = AnnotationPainter.rotates(se);
+      if (turns && se.rot) [tx, ty] = PdfPageView.unrotate(tx, ty, b.centerX(), b.centerY(), se.rot);
+      if (turns && Math.hypot(tx - b.centerX(), ty - (b.top - 28 * density)) <= reach) hit = 6;
+      else if (Math.hypot(tx - b.left, ty - b.top) <= reach) hit = 2; else if (Math.hypot(tx - b.right, ty - b.top) <= reach) hit = 3;
+      else if (Math.hypot(tx - b.left, ty - b.bottom) <= reach) hit = 4; else if (Math.hypot(tx - b.right, ty - b.bottom) <= reach) hit = 5;
+      else if (b.contains(tx, ty)) hit = 1;
       if (hit === 0) { this._selectedElement = null; this.invalidate(); return false; }
-      if (hit > 1 && !PdfPageView.resizable(se)) hit = 1;
+      if (hit > 1 && hit < 6 && !PdfPageView.resizable(se)) hit = 1;
       this._L('onSelectionAdjustStarted'); this.elementDrag = hit; this.elementMoved = false; this.elementStartX = e.x; this.elementStartY = e.y;
-      this.elementOrigin.set(new RectF(se.left, se.top, se.right, se.bottom));
+      this.elementOrigin.set(new RectF(se.left, se.top, se.right, se.bottom)); this.elementRot0 = se.rot || 0;
       return true;
     }
     if (this.elementDrag === 0) return false;
@@ -525,13 +553,24 @@ export class PdfPageView {
       const dx = (e.x - this.elementStartX) / dest.width(), dy = (e.y - this.elementStartY) / dest.height();
       if (!this.elementMoved && Math.hypot(e.x - this.elementStartX, e.y - this.elementStartY) < 8 * density) return true;
       this.elementMoved = true; const el = se, o = this.elementOrigin, w = o.width(), h = o.height();
+      if (this.elementDrag === 6) {
+        const cx = dest.left + (o.left + o.right) / 2 * dest.width(), cy = dest.top + (o.top + o.bottom) / 2 * dest.height();
+        let deg = Math.atan2(e.x - cx, -(e.y - cy)) * 180 / Math.PI; if (deg < 0) deg += 360;
+        const snap = Math.round(deg / 15) * 15; if (Math.abs(snap - deg) < 4) deg = snap % 360;
+        el.rot = Math.fround(deg); this.invalidate(); return true;
+      }
       if (this.elementDrag === 1) {
         const left = Math.max(0, Math.min(1 - w, o.left + dx)), top = Math.max(0, Math.min(1 - h, o.top + dy));
         el.left = left; el.top = top; el.right = left + w; el.bottom = top + h;
       } else {
         const leftCorner = this.elementDrag === 2 || this.elementDrag === 4, topCorner = this.elementDrag === 2 || this.elementDrag === 3;
         const fx = leftCorner ? o.right : o.left, fy = topCorner ? o.bottom : o.top;
-        const nx = Math.max(0, Math.min(1, (e.x - dest.left) / dest.width())), ny = Math.max(0, Math.min(1, (e.y - dest.top) / dest.height()));
+        let px = e.x, py = e.y;
+        if (el.rot && AnnotationPainter.rotates(el)) {
+          const ocx = dest.left + (o.left + o.right) / 2 * dest.width(), ocy = dest.top + (o.top + o.bottom) / 2 * dest.height();
+          [px, py] = PdfPageView.unrotate(px, py, ocx, ocy, el.rot);
+        }
+        const nx = Math.max(0, Math.min(1, (px - dest.left) / dest.width())), ny = Math.max(0, Math.min(1, (py - dest.top) / dest.height()));
         let nw = Math.max(0.04, leftCorner ? fx - nx : nx - fx), nh = Math.max(0.03, topCorner ? fy - ny : ny - fy);
         if (PdfPageView.aspectLocked(el)) {
           const ratio = (w * dest.width()) / (h * dest.height()); nh = nw * dest.width() / (ratio * dest.height());
@@ -544,7 +583,7 @@ export class PdfPageView {
     }
     if (action === UP || action === CANCEL) {
       const moved = this.elementMoved; this.elementDrag = 0; this.elementMoved = false;
-      if (action === CANCEL) { const o = this.elementOrigin; se.left = o.left; se.top = o.top; se.right = o.right; se.bottom = o.bottom; this.invalidate(); }
+      if (action === CANCEL) { const o = this.elementOrigin; se.rot = this.elementRot0; se.left = o.left; se.top = o.top; se.right = o.right; se.bottom = o.bottom; this.invalidate(); }
       else if (moved) this._L('onInkChanged'); else this._L('onElementTapped', se);
       return true;
     }
@@ -590,24 +629,10 @@ export class PdfPageView {
         ctx.fillStyle = argb(m.color);
         ctx.fillRect(dest.left + m.left * dw, dest.top + m.top * dh, (m.right - m.left) * dw, (m.bottom - m.top) * dh);
       }
-      if (this.strokes) {
-        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        for (const s of this.strokes) if (s.page === this.page && s.points.length > 0) {
-          const col = argb(AnnotationPainter.adj(s.color)); const pts = s.points;
-          if (pts.length === 1) {
-            const p = pts[0]; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(dest.left + p.x * dw, dest.top + p.y * dh, this._strokeWidth(s.width, p.pressure, dest) / 2, 0, Math.PI * 2); ctx.fill();
-          } else {
-            ctx.strokeStyle = col;
-            for (let i = 1; i < pts.length; i++) {
-              const a = pts[i - 1], b = pts[i];
-              ctx.lineWidth = this._strokeWidth(s.width, (a.pressure + b.pressure) / 2, dest);
-              ctx.beginPath(); ctx.moveTo(dest.left + a.x * dw, dest.top + a.y * dh); ctx.lineTo(dest.left + b.x * dw, dest.top + b.y * dh); ctx.stroke();
-            }
-          }
-        }
-      }
+      if (this.strokes) for (const s of this.strokes) if (s.page === this.page) AnnotationPainter.stroke(ctx, dest, s);
       this.memoHitBoxes.clear();
       if (this.marks) for (const m of this.marks) if (m.page === this.page && m.visible && (m.noteOnly || (m.note != null && m.note.length > 0))) this._drawMemo(ctx, dest, m);
+      this._drawMemoSelection(ctx);
       this.noteHitBoxes.clear();
       if (this.translations) for (const n of this.translations) if (n.page === this.page && n.visible) this._drawTranslation(ctx, dest, n);
       if (!sup && this.drawing) {
@@ -638,7 +663,7 @@ export class PdfPageView {
     }
   }
 
-  _drawSticky(ctx, dest, nx, ny, text, minimized, accent, paper = 0xFFFFF3A6 | 0, fontSp = 13, boxSize = 1) {
+  _drawSticky(ctx, dest, nx, ny, text, minimized, accent, paper = 0xFFFFF3A6 | 0, fontSp = 13, boxSize = 1, customW = 0, customH = 0) {
     const d = DP;
     const anchorX = dest.left + nx * dest.width(), anchorY = dest.top + ny * dest.height();
     if (minimized) {
@@ -650,7 +675,9 @@ export class PdfPageView {
     }
     const boxW = [150, 220, 300], boxH = [64, 96, 170];
     boxSize = Math.max(0, Math.min(2, boxSize | 0));
-    const w = Math.min(boxW[boxSize] * d, dest.width() * (boxSize === 2 ? 0.7 : 0.46)), h = boxH[boxSize] * d;
+    const w0 = Math.min(boxW[boxSize] * d, dest.width() * (boxSize === 2 ? 0.7 : 0.46)), h0 = boxH[boxSize] * d;
+    let w = w0, h = h0;
+    if (customW > 0 && customH > 0) { w = Math.min(customW * d, dest.width() * 0.92); h = customH * d; }
     let left = Math.min(dest.right - w - 6 * d, anchorX + 8 * d); if (left < dest.left) left = dest.left + 6 * d;
     const top = Math.max(dest.top + 6 * d, Math.min(dest.bottom - h - 6 * d, anchorY));
     const box = new RectF(left, top, left + w, top + h);
@@ -670,7 +697,41 @@ export class PdfPageView {
     }
     return box;
   }
-  _drawMemo(ctx, dest, m) { this.memoHitBoxes.set(m, this._drawSticky(ctx, dest, m.right, m.top, m.note, m.minimized, 0xFFFFB300 | 0, m.paper, m.fontSp, m.boxSize)); }
+  _drawMemo(ctx, dest, m) { this.memoHitBoxes.set(m, this._drawSticky(ctx, dest, m.right, m.top, m.note, m.minimized, 0xFFFFB300 | 0, m.paper, m.fontSp, m.boxSize, m.boxW, m.boxH)); }
+  /** A tapped memo shows a dashed frame with a round handle at its lower-right corner; dragging the handle resizes it. */
+  _drawMemoSelection(ctx) {
+    const m = this.selectedMemo; if (!m) return;
+    const b = this.memoHitBoxes.get(m); if (!b || m.page !== this.page || m.minimized) return;
+    const d = DP;
+    ctx.save();
+    ctx.lineWidth = 2 * d; ctx.strokeStyle = argb(0xFF007AFF); ctx.setLineDash([8 * d, 5 * d]);
+    roundRectPath(ctx, b.left, b.top, b.right, b.bottom, 10 * d, 10 * d); ctx.stroke(); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(b.right, b.bottom, 10 * d, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
+    ctx.fillStyle = argb(0xFF007AFF); ctx.font = `${11 * d}px ${FONT_SANS}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText('↘', b.right, b.bottom + 4 * d);
+    ctx.restore();
+  }
+  _handleMemoGesture(e, dest) {
+    const m = this.selectedMemo; if (!m) return false;
+    const b = this.memoHitBoxes.get(m);
+    if (!b || m.page !== this.page || m.minimized) { this.selectedMemo = null; this.memoDrag = 0; return false; }
+    const action = e.action, density = DP;
+    if (action === DOWN && e.pointerCount === 1 && !this.isStylus(e)) {
+      if (Math.hypot(e.x - b.right, e.y - b.bottom) <= 26 * density) {
+        this.memoDrag = 1; this.memoStartX = e.x; this.memoStartY = e.y; this.memoW0 = b.width() / density; this.memoH0 = b.height() / density;
+        this._L('onSelectionAdjustStarted'); return true;
+      }
+      return false;
+    }
+    if (this.memoDrag === 0) return false;
+    if (action === MOVE) {
+      const w = this.memoW0 + (e.x - this.memoStartX) / density, h = this.memoH0 + (e.y - this.memoStartY) / density;
+      m.boxW = Math.max(90, Math.min(Math.min(560, dest.width() / density * 0.92), w)); m.boxH = Math.max(48, Math.min(700, h));
+      this.invalidate(); return true;
+    }
+    if (action === UP || action === CANCEL) { this.memoDrag = 0; if (action === UP) this._L('onInkChanged'); this.invalidate(); return true; }
+    return true;
+  }
   _drawTranslation(ctx, dest, n) { this.noteHitBoxes.set(n, this._drawSticky(ctx, dest, n.right, n.top, n.translated, n.minimized, 0xFF7C3AED | 0)); }
 
   // ---- lasso -------------------------------------------------------------------------------------------------
@@ -754,7 +815,7 @@ export class PdfPageView {
   // ---- text-selection helpers --------------------------------------------------------------------------------
   textRegionAt(x, y, dest) {
     if (!this.textSelectMode || dest.width() === 0 || !dest.contains(x, y)) return null;
-    const nx = (x - dest.left) / dest.width(), ny = (y - dest.top) / dest.height(), tol = 16 * DP;
+    const nx = (x - dest.left) / dest.width(), ny = (y - dest.top) / dest.height(), tol = (this.directTextSelection ? 10 : 3) * DP;
     let best = null, bestD = Infinity;
     for (const r of this.textRegions) {
       const dx = (nx - Math.max(r.wordBounds.left, Math.min(nx, r.wordBounds.right))) * dest.width();
@@ -835,6 +896,11 @@ export class PdfPageView {
     for (let i = this.strokes.length - 1; i >= 0; i--) {
       const s = this.strokes[i]; if (s.page !== this.page) continue;
       for (const p of s.points) if (Math.hypot(p.x - x, p.y - y) <= threshold) { this.strokes.splice(i, 1); this._L('onInkChanged'); this.invalidate(); return; }
+    }
+    if (this.marks) for (let i = this.marks.length - 1; i >= 0; i--) {
+      const m = this.marks[i]; if (m.page !== this.page || m.noteOnly) continue;
+      const mx = 0.004;
+      if (x >= m.left - mx && x <= m.right + mx && y >= m.top - mx && y <= m.bottom + mx) { this.marks.splice(i, 1); this._L('onInkChanged'); this.invalidate(); return; }
     }
   }
 
@@ -942,6 +1008,7 @@ export class PdfPageView {
     const stylus = this.isStylus(e);
     const am = e.action;
     if (am === UP || am === CANCEL || am === POINTER_DOWN || (am === MOVE && Math.hypot(e.x - this.startX, e.y - this.startY) > this.touchSlop())) this._cancelBlankPress();
+    if (this._handleMemoGesture(e, dest)) return true;
     if (this._handleElementGesture(e, dest)) return true;
     if (am === DOWN) this.scalingOccurred = false;
     if (am === POINTER_DOWN) { this.finishInkStroke(); this.clearLassoSelection(); }
@@ -997,7 +1064,7 @@ export class PdfPageView {
         this.stylusDrawing = true;
         if (erase) this._eraseAt(e, dest);
         else if (dest.contains(e.x, e.y)) {
-          const s = new InkStroke(); s.page = this.page; s.color = this.inkColor; s.width = this.inkWidth; this.activeStroke = s;
+          const s = new InkStroke(); s.page = this.page; s.color = this.inkColor; s.width = this.inkWidth; s.pen = this.inkPen; this.activeStroke = s;
           this._addInkPoint(e, dest); if (this.strokes) this.strokes.push(s);
         }
         this.invalidate(); return true;
@@ -1136,7 +1203,11 @@ export class PdfPageView {
       if (this.scalingOccurred) { this.panning = false; return true; }
       if (Math.hypot(e.x - this.startX, e.y - this.startY) < 20) {
         for (const [n, b] of Array.from(this.noteHitBoxes).reverse()) if (b && b.contains(e.x, e.y)) { this._L('onTranslationTapped', n); return true; }
-        for (const [m, b] of Array.from(this.memoHitBoxes).reverse()) if (b && b.contains(e.x, e.y)) { this._L('onMarkTapped', m); return true; }
+        for (const [m, b] of Array.from(this.memoHitBoxes).reverse()) if (b && b.contains(e.x, e.y)) {
+          if (!m.minimized && m !== this.selectedMemo) { this.selectedMemo = m; this.invalidate(); return true; }
+          this.selectedMemo = null; this._L('onMarkTapped', m); return true;
+        }
+        if (this.selectedMemo) { this.selectedMemo = null; this.invalidate(); }
       }
       if (this.drawing) {
         this.currentX = Math.max(dest.left, Math.min(dest.right, e.x)); this.currentY = Math.max(dest.top, Math.min(dest.bottom, e.y));
@@ -1159,7 +1230,7 @@ export class PdfPageView {
         const nx = (e.x - dest.left) / dest.width(), ny = (e.y - dest.top) / dest.height();
         if (this.annotationStore) for (let i = this.annotationStore.elements.length - 1; i >= 0; i--) {
           const el = this.annotationStore.elements[i];
-          if (el.page === this.page && nx >= el.left && nx <= el.right && ny >= el.top && ny <= el.bottom) {
+          if (el.page === this.page && this.elementContains(el, e.x, e.y, dest)) {
             if (PdfPageView.selectable(el)) { if (el === this._selectedElement) this._L('onElementTapped', el); else { this._selectedElement = el; this.invalidate(); } }
             else this._L('onElementTapped', el);
             return true;
