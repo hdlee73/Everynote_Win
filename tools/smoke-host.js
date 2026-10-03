@@ -25,7 +25,9 @@
     await host.delete(dir); ok('delete', !(await host.exists(dir)));
     // ---- file server + Range
     for (let i = 0; i < 100 && !(window.app && window.app.documentUri); i++) await new Promise(r => setTimeout(r, 200));
-    const url = await host.call('fs.url', { path: (window.app && window.app.documentUri) || info.args[0] });
+    let docPath = window.app && window.app.documentUri;
+    if (!docPath) { const l = await host.list(info.library); docPath = (l.find(e => /\.pdf$/i.test(e.name)) || {}).path; out.info.docdiag = JSON.stringify({ sessions: window.app && window.app.sessions && window.app.sessions.length, lib: l.map(e => e.name) }); }
+    const url = await host.call('fs.url', { path: docPath });
     const r = await fetch(url, { headers: { Range: 'bytes=0-9' } });
     ok('range', r.status === 206 && (await r.text()).startsWith('%PDF-'), r.status);
     const rfull = await fetch(url); const buf = new Uint8Array(await rfull.arrayBuffer());
