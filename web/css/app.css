@@ -1,0 +1,69 @@
+/* PDF Note (Windows) — UI ported from the Android app. 1dp == 1px. */
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:#F2F2F7;color:#1C1C1E;
+  font-family:"Segoe UI","Malgun Gothic","Roboto","Noto Sans KR","Noto Sans CJK KR",sans-serif;font-size:14px;
+  -webkit-user-select:none;user-select:none;touch-action:none}
+input,textarea{font-family:inherit;-webkit-user-select:text;user-select:text}
+button{font-family:inherit}
+.ico{align-items:center;justify-content:center}
+.ico svg{display:block}
+::-webkit-scrollbar{width:0;height:0}
+
+/* ---- toast ---- */
+.toast{position:fixed;left:50%;bottom:84px;transform:translate(-50%,8px);max-width:min(86vw,520px);background:rgba(40,40,40,.92);color:#fff;
+  font-size:14px;line-height:1.3;padding:11px 20px;border-radius:22px;text-align:center;pointer-events:none;opacity:0;transition:opacity .18s,transform .18s;z-index:100000}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* ---- AlertDialog ---- */
+.ad-root{position:fixed;inset:0;z-index:9000}
+.ad-dim{position:absolute;inset:0;background:rgba(0,0,0,0);display:flex;align-items:center;justify-content:center;transition:background .2s}
+.ad-root.in .ad-dim{background:rgba(0,0,0,.36)}
+.ad-root.out .ad-dim{background:rgba(0,0,0,0);transition:background .15s}
+.ad-root.sheet .ad-dim{align-items:flex-end}
+.ad-card{width:min(calc(100vw - 48px),330px);background:#fff;border-radius:18px;overflow:hidden;opacity:0;transform:scale(.9);transition:opacity .18s,transform .18s;box-shadow:0 10px 40px rgba(0,0,0,.25)}
+.ad-root.in .ad-card{opacity:1;transform:none}
+.ad-root.out .ad-card{opacity:0;transform:scale(.95);transition:opacity .12s,transform .12s}
+.ad-body{padding:20px 20px 16px}
+.ad-title{font-size:17px;font-weight:700;color:#1C1C1E;text-align:center}
+.ad-msg{max-height:50vh;overflow:auto}
+.ad-msg-inner{font-size:14px;line-height:1.15;color:#48484A;text-align:center;white-space:pre-wrap;word-break:keep-all;overflow-wrap:anywhere}
+.hair{height:1px;background:#E5E5EA;flex:none}
+.vhair{width:1px;background:#E5E5EA;flex:none}
+.ad-bar{display:flex;flex-direction:column}
+.ad-bar.row{flex-direction:row}
+.ad-btn{height:48px;display:flex;align-items:center;justify-content:center;font-size:17px;color:#007AFF;padding:0 12px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ad-btn.bold{font-weight:700}
+.ad-bar.row .ad-btn{flex:1}
+.ad-btn:hover{background:rgba(0,0,0,.035)}
+.ad-btn:empty{display:none}
+.ad-sheet{width:min(100vw,480px);padding:0 10px 12px;transform:translateY(100%);transition:transform .22s cubic-bezier(.215,.61,.355,1)}
+.ad-root.in .ad-sheet{transform:none}
+.ad-root.out .ad-sheet{transform:translateY(100%);transition:transform .17s cubic-bezier(.55,.055,.675,.19)}
+.ad-list{background:#fff;border-radius:14px;overflow:hidden}
+.ad-sheet-title{font-size:13px;color:#8E8E93;text-align:center;padding:14px 16px 12px}
+.ad-sheet-msg{font-size:13px;color:#8E8E93;text-align:center;padding:0 16px 12px}
+.ad-scroll{max-height:55vh;overflow:auto}
+.ad-cell{height:54px;display:flex;align-items:center;justify-content:center;font-size:18px;color:#007AFF;padding:0 16px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ad-cell:hover{background:rgba(0,0,0,.035)}
+.check-label{display:inline-flex;align-items:center;gap:8px}
+.sheet-btn{height:54px;font-size:18px}
+.ad-cancel{height:54px;font-size:18px;font-weight:700;background:#fff;border-radius:14px;margin-top:8px}
+
+/* ---- AnchoredMenu ---- */
+.amenu-backdrop{position:fixed;inset:0;z-index:9500}
+.amenu{position:fixed;z-index:9501;background:#fff;border-radius:18px;border:1px solid rgba(0,0,0,.08);padding:6px;box-shadow:0 6px 24px rgba(0,0,0,.22);
+  opacity:0;transform:scale(.96);transition:opacity .12s,transform .12s;transform-origin:center bottom}
+.amenu.in{opacity:1;transform:none}
+.amenu-scroll{max-height:60vh;overflow:auto}
+.amenu-row{height:44px;display:flex;align-items:center;padding:0 12px;cursor:pointer;border-radius:10px}
+.amenu-row:hover{background:rgba(0,0,0,.04)}
+.amenu-label{flex:1;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.amenu-div{height:1px;background:#E5E5EA;margin:4px 12px}
+.amenu-sdiv{height:1px;background:#E5E5EA;margin:4px 8px 2px}
+.amenu-shortcuts{display:flex;height:44px}
+.amenu-sc{flex:1;height:44px;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:10px}
+.amenu-sc:hover{background:rgba(0,0,0,.04)}
+
+/* ---- form fields (field_background.xml) ---- */
+.field{background:#F2F2F7;border:2px solid #F2F2F7;border-radius:12px;padding:12px 16px;font-size:16px;color:#1C1C1E;width:100%;outline:none}
+.field:focus{background:#fff;border-color:#007AFF}
