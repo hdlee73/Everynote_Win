@@ -19,7 +19,7 @@ public static class Exporter
         return b;
     }
 
-    static BitmapSource Flatten(BitmapSource page, double baseW, double baseH, int pageIndex, DocAnnotations ann)
+    static BitmapSource Flatten(BitmapSource page, double baseW, double baseH, int pageIndex, DocAnnotations ann, string key)
     {
         double s = page.PixelWidth / baseW;
         int pw = page.PixelWidth, ph = (int)Math.Round(baseH * s);
@@ -38,16 +38,49 @@ public static class Exporter
                 try { InkIo.FromB64(b64).Draw(dc); } catch { }
             }
 
+            // links made from selected text: blue underline
+            var linkPen = new Pen(Brush("#1565C0", 0xFF), 1.2);
+            foreach (var l in ann.Links.Where(x => x.Page == pageIndex))
+                foreach (var r in l.Rects)
+                {
+                    double y = (r.Y + r.H) * baseH - 1;
+                    dc.DrawLine(linkPen, new System.Windows.Point(r.X * baseW, y), new System.Windows.Point((r.X + r.W) * baseW, y));
+                }
+
+            // page objects (text, images, stickers, shapes, tables, links)
+            var objs = ann.Objects.Where(x => x.Page == pageIndex).ToList();
+            if (objs.Count > 0)
+            {
+                var canvas = new System.Windows.Controls.Canvas { Width = baseW, Height = baseH };
+                foreach (var o in objs)
+                {
+                    try
+                    {
+                        var el = ObjectViews.Build(o, baseW, baseH, key, false, null, null);
+                        if (el == null) continue;
+                        System.Windows.Controls.Canvas.SetLeft(el, o.X * baseW);
+                        System.Windows.Controls.Canvas.SetTop(el, o.Y * baseH);
+                        canvas.Children.Add(el);
+                    }
+                    catch { }
+                }
+                canvas.Measure(new Size(baseW, baseH));
+                canvas.Arrange(new Rect(0, 0, baseW, baseH));
+                canvas.UpdateLayout();
+                dc.DrawRectangle(new VisualBrush(canvas), null, new Rect(0, 0, baseW, baseH));
+            }
+
             var typeface = new Typeface(new System.Windows.Media.FontFamily("Malgun Gothic, Segoe UI"),
                 FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
             foreach (var m in ann.Memos.Where(x => x.Page == pageIndex && !x.Minimized && !string.IsNullOrWhiteSpace(x.Text)))
             {
+                double mw = MemoControl.WidthFor(m.Size);
                 var ft = new FormattedText(m.Text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
-                    typeface, 13, Brushes.Black, 1.0)
-                { MaxTextWidth = 176, MaxTextHeight = 400 };
+                    typeface, m.FontSize > 0 ? m.FontSize : 13, Brushes.Black, 1.0)
+                { MaxTextWidth = mw - 14, MaxTextHeight = 600 };
                 double x = m.X * baseW, y = m.Y * baseH;
-                dc.DrawRectangle(Brush("#FFF59D", 0xF0), new Pen(Brush("#C9B400", 0xFF), 1),
-                    new Rect(x, y, 190, ft.Height + 12));
+                dc.DrawRectangle(Brush(string.IsNullOrEmpty(m.Color) ? "#FFF59D" : m.Color, 0xF0),
+                    new Pen(Brush("#C9B400", 0xFF), 1), new Rect(x, y, mw, ft.Height + 12));
                 dc.DrawText(ft, new System.Windows.Point(x + 7, y + 6));
             }
             dc.Pop();
@@ -87,7 +120,7 @@ public static class Exporter
             progress?.Invoke(i + 1);
             var (bw, bh) = src.GetPageSize(i);
             var bmp = await src.RenderAsync(i, pixelWidth);
-            var flat = Flatten(bmp, bw, bh, i, ann);
+            var flat = Flatten(bmp, bw, bh, i, ann, src.Key);
             byte[] jpg;
             using (var ms = new MemoryStream())
             {
@@ -147,6 +180,13 @@ public static class Exporter
         sb.AppendLine("## 메모");
         foreach (var m in a.Memos.OrderBy(x => x.Page).Where(x => !string.IsNullOrWhiteSpace(x.Text)))
             sb.AppendLine($"- **[p.{m.Page + 1}]** {m.Text.Replace("\n", " ")}");
+        var typed = a.Objects.Where(x => x.Type == "text" && !string.IsNullOrWhiteSpace(x.Text)).OrderBy(x => x.Page).ToList();
+        if (typed.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("## 입력한 글");
+            foreach (var t in typed) sb.AppendLine($"- **[p.{t.Page + 1}]** {t.Text.Replace("\n", " ")}");
+        }
         return sb.ToString();
     }
 
@@ -164,6 +204,8 @@ public static class Exporter
             sb.AppendLine($"{h.Page + 1},highlight,{Csv(h.Text)},{Csv(h.Note)}");
         foreach (var m in a.Memos.OrderBy(x => x.Page))
             sb.AppendLine($"{m.Page + 1},memo,{Csv(m.Text)},");
+        foreach (var t in a.Objects.Where(x => x.Type == "text").OrderBy(x => x.Page))
+            sb.AppendLine($"{t.Page + 1},text,{Csv(t.Text)},");
         return sb.ToString();
     }
 

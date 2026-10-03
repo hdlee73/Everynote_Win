@@ -42,10 +42,26 @@
                 <RadioButton x:Name="BtnEraser" Content="지우개" Tag="Eraser" GroupName="tool" Style="{StaticResource ToolBtn}" Checked="Tool_Checked" ToolTip="획 지우개 (펜 뒷면도 지우개로 동작)"/>
                 <RadioButton x:Name="BtnLasso" Content="올가미" Tag="Lasso" GroupName="tool" Style="{StaticResource ToolBtn}" Checked="Tool_Checked" ToolTip="필기 선택 · 이동 · 삭제 (Delete)"/>
                 <RadioButton x:Name="BtnText" Content="글자선택" Tag="TextSelect" GroupName="tool" Style="{StaticResource ToolBtn}" Checked="Tool_Checked" ToolTip="드래그로 문장 선택 → 하이라이트·복사·번역·읽기"/>
+                <RadioButton x:Name="BtnTyping" Content="타이핑" Tag="Typing" GroupName="tool" Style="{StaticResource ToolBtn}" Checked="Tool_Checked" ToolTip="페이지를 눌러 글자 입력 (글꼴·크기·색 지정)"/>
                 <RadioButton x:Name="BtnMemo" Content="메모" Tag="Memo" GroupName="tool" Style="{StaticResource ToolBtn}" Checked="Tool_Checked" ToolTip="누른 위치에 포스트잇 추가"/>
                 <RadioButton x:Name="BtnOutline" Content="개요+" Tag="Outline" GroupName="tool" Style="{StaticResource ToolBtn}" Checked="Tool_Checked" ToolTip="누른 위치에 제목(개요) 추가"/>
                 <RadioButton x:Name="BtnCapture" Content="캡처" Tag="Capture" GroupName="tool" Style="{StaticResource ToolBtn}" Checked="Tool_Checked" ToolTip="영역을 드래그해 이미지 복사·저장"/>
+                <Button x:Name="InsertBtn" Content="삽입 ▾" Style="{StaticResource PlainBtn}" Click="Insert_Click"
+                        ToolTip="사진·스티커·도형·표·링크 삽입 (빈 곳을 길게 눌러도 열립니다)"/>
                 <Rectangle Width="1" Fill="#FFCCCCCC" Margin="6,4"/>
+                <ComboBox x:Name="LassoShapeBox" Width="76" Margin="2" VerticalAlignment="Center" Visibility="Collapsed"
+                          SelectedIndex="0" SelectionChanged="LassoShape_Changed" ToolTip="올가미 모양">
+                    <ComboBoxItem Content="자유 올가미"/>
+                    <ComboBoxItem Content="사각형"/>
+                    <ComboBoxItem Content="원"/>
+                </ComboBox>
+                <StackPanel x:Name="TypingPanel" Orientation="Horizontal" Visibility="Collapsed" VerticalAlignment="Center">
+                    <ComboBox x:Name="TFontBox" Width="72" Margin="2" SelectionChanged="TFormat_Changed" ToolTip="글꼴"/>
+                    <ToggleButton x:Name="TBoldBtn" Content="B" FontWeight="Bold" Width="26" Margin="2" Checked="TFormat_Changed" Unchecked="TFormat_Changed" ToolTip="굵게"/>
+                    <ToggleButton x:Name="TItalicBtn" Content="I" FontStyle="Italic" Width="26" Margin="2" Checked="TFormat_Changed" Unchecked="TFormat_Changed" ToolTip="기울임"/>
+                    <ComboBox x:Name="TSizeBox" Width="54" Margin="2" SelectionChanged="TFormat_Changed" ToolTip="글자 크기 (8–72pt)"/>
+                    <StackPanel x:Name="TColorPanel" Orientation="Horizontal" VerticalAlignment="Center"/>
+                </StackPanel>
                 <StackPanel x:Name="PenColorPanel" Orientation="Horizontal" VerticalAlignment="Center"/>
                 <StackPanel x:Name="HlColorPanel" Orientation="Horizontal" VerticalAlignment="Center" Visibility="Collapsed"/>
                 <Slider x:Name="WidthSlider" Width="80" Minimum="1" Maximum="12" Value="2.5" VerticalAlignment="Center"
@@ -76,10 +92,20 @@
 
             <TabControl x:Name="SideTabs" Grid.Column="0" Padding="0" BorderThickness="0,0,1,0">
                 <TabItem Header="페이지">
-                    <ListBox x:Name="ThumbList" ItemTemplate="{StaticResource ThumbTemplate}"
-                             HorizontalContentAlignment="Center" SelectionChanged="ThumbList_SelectionChanged"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"/>
+                    <DockPanel>
+                        <WrapPanel DockPanel.Dock="Top" Margin="2">
+                            <ToggleButton x:Name="ThumbBmOnly" Content="★ 즐겨찾기만" Margin="2" Padding="6,3"
+                                          Checked="ThumbFilter_Changed" Unchecked="ThumbFilter_Changed"/>
+                            <Button x:Name="AddPageBtn" Content="＋ 페이지" Margin="2" Padding="6,3" Click="AddPage_Click"
+                                    ToolTip="현재 페이지 뒤에 빈 페이지 추가 (노트 전용)"/>
+                            <Button x:Name="DelPageBtn" Content="페이지 삭제" Margin="2" Padding="6,3" Click="DelPage_Click"
+                                    ToolTip="현재 페이지 삭제 (노트 전용)"/>
+                        </WrapPanel>
+                        <ListBox x:Name="ThumbList" ItemTemplate="{StaticResource ThumbTemplate}"
+                                 HorizontalContentAlignment="Center" SelectionChanged="ThumbList_SelectionChanged"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"/>
+                    </DockPanel>
                 </TabItem>
                 <TabItem Header="개요">
                     <DockPanel>
@@ -130,6 +156,8 @@
                 <TabItem Header="검색" x:Name="SearchTab">
                     <DockPanel>
                         <DockPanel DockPanel.Dock="Top" Margin="4">
+                            <Button DockPanel.Dock="Right" Content="▼" Padding="6,3" Margin="2,0,0,0" Click="SearchNext_Click" ToolTip="다음 결과"/>
+                            <Button DockPanel.Dock="Right" Content="▲" Padding="6,3" Margin="4,0,0,0" Click="SearchPrev_Click" ToolTip="이전 결과"/>
                             <Button DockPanel.Dock="Right" Content="검색" Padding="8,3" Margin="4,0,0,0" Click="Search_Click"/>
                             <TextBox x:Name="SearchBox" Padding="3" KeyDown="SearchBox_KeyDown"/>
                         </DockPanel>
@@ -144,6 +172,28 @@
                         </ListBox>
                     </DockPanel>
                 </TabItem>
+                <TabItem Header="녹음">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Top" Margin="6">
+                            <Button x:Name="RecBtn" Content="● 녹음 시작" Padding="8,6" Click="Rec_Click"
+                                    ToolTip="현재 페이지에 연결되는 음성 녹음"/>
+                            <TextBlock x:Name="RecStatus" Margin="0,6,0,0" Foreground="#FF666666" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <WrapPanel DockPanel.Dock="Bottom" Margin="2">
+                            <Button Content="▶ 재생" Margin="2" Padding="8,3" Click="RecPlay_Click"/>
+                            <Button Content="■ 정지" Margin="2" Padding="8,3" Click="RecStop_Click"/>
+                            <Button Content="삭제" Margin="2" Padding="8,3" Click="RecDelete_Click"/>
+                        </WrapPanel>
+                        <ListBox x:Name="RecList" MouseDoubleClick="RecList_DoubleClick"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Display}" TextWrapping="Wrap" Margin="2,4"/>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </TabItem>
             </TabControl>
 
             <GridSplitter x:Name="Splitter" Grid.Column="1" Width="5" HorizontalAlignment="Stretch" Background="#FFD8DADF"/>
@@ -153,21 +203,30 @@
                               PanningMode="Both" CanContentScroll="False" Focusable="False"
                               PreviewMouseWheel="Scroller_PreviewMouseWheel" SizeChanged="Scroller_SizeChanged">
                     <Grid x:Name="Host" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="14"
-                          IsManipulationEnabled="True"
+                          ClipToBounds="True" IsManipulationEnabled="True" RenderTransformOrigin="0.5,0.5"
+                          PreviewMouseLeftButtonDown="Host_PreviewMouseDown" PreviewMouseMove="Host_PreviewMouseMove"
+                          PreviewMouseLeftButtonUp="Host_PreviewMouseUp"
                           ManipulationStarting="Host_ManipulationStarting"
                           ManipulationDelta="Host_ManipulationDelta"
                           ManipulationCompleted="Host_ManipulationCompleted">
                         <Grid.LayoutTransform>
                             <ScaleTransform x:Name="ZoomTf" ScaleX="1" ScaleY="1"/>
                         </Grid.LayoutTransform>
-                        <Border Background="White"/>
-                        <Image x:Name="PageImage" Stretch="Fill" RenderOptions.BitmapScalingMode="Linear" IsHitTestVisible="False"/>
-                        <Canvas x:Name="HlLayer"/>
-                        <InkCanvas x:Name="Ink" Background="Transparent" EditingMode="None" IsHitTestVisible="False"
-                                   PreviewStylusDown="Ink_PreviewStylusDown" PreviewStylusUp="Ink_PreviewStylusUp"/>
-                        <Canvas x:Name="Overlay" Background="Transparent" IsHitTestVisible="False"
-                                MouseLeftButtonDown="Overlay_MouseDown" MouseMove="Overlay_MouseMove" MouseLeftButtonUp="Overlay_MouseUp"/>
-                        <Canvas x:Name="MemoLayer"/>
+                        <Grid.RenderTransform>
+                            <TranslateTransform x:Name="FlipTf" X="0" Y="0"/>
+                        </Grid.RenderTransform>
+                        <Grid x:Name="PageGrid" Width="794" Height="1123" HorizontalAlignment="Left" VerticalAlignment="Top">
+                            <Border Background="White"/>
+                            <Image x:Name="PageImage" Stretch="Fill" RenderOptions.BitmapScalingMode="Linear" IsHitTestVisible="False"/>
+                            <Canvas x:Name="HlLayer"/>
+                            <InkCanvas x:Name="Ink" Background="Transparent" EditingMode="None" IsHitTestVisible="False"
+                                       PreviewStylusDown="Ink_PreviewStylusDown" PreviewStylusUp="Ink_PreviewStylusUp"
+                                       SelectionChanged="Ink_SelectionChanged"/>
+                            <Canvas x:Name="Overlay" Background="Transparent" IsHitTestVisible="False"
+                                    MouseLeftButtonDown="Overlay_MouseDown" MouseMove="Overlay_MouseMove" MouseLeftButtonUp="Overlay_MouseUp"/>
+                            <Canvas x:Name="ObjLayer"/>
+                            <Canvas x:Name="MemoLayer"/>
+                        </Grid>
                     </Grid>
                 </ScrollViewer>
                 <TextBlock x:Name="LoadingText" Text="불러오는 중…" Foreground="White" FontSize="16"

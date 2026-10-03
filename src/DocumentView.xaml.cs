@@ -1,5 +1,6 @@
 using System.IO;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
@@ -7,13 +8,15 @@ using System.Windows.Ink;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Media.Animation;
+using System.Windows.Data;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using Shapes = System.Windows.Shapes;
 
 namespace PdfNote;
 
-public enum ToolMode { Read, Pen, Highlighter, Eraser, Lasso, TextSelect, Memo, Outline, Capture }
+public enum ToolMode { Read, Pen, Highlighter, Eraser, Lasso, TextSelect, Typing, Memo, Outline, Capture }
 
 public partial class DocumentView : UserControl
 {
@@ -79,6 +82,32 @@ public partial class DocumentView : UserControl
     CancellationTokenSource _searchCts;
     bool _hideMemos;
 
+    // ---- view / crop ----
+    readonly Dictionary<int, RectD> _crop = new();
+    RectD _cropCur = new(0, 0, 1, 1);
+    bool _fitMode = true;
+
+    // ---- typing format (remembered for the next text) ----
+    string _tFont = "gothic";
+    bool _tBold, _tItalic;
+    double _tSize = 18;
+    string _tColor = "#111111";
+    ObjectControl _lastText;
+
+    // ---- lasso shape / long-press / thumbs / recordings ----
+    int _lassoShape;
+    readonly DispatcherTimer _lpTimer = new() { Interval = TimeSpan.FromMilliseconds(650) };
+    Point _lpPos, _lpStart;
+    ICollectionView _thumbView;
+    bool _bmOnly;
+    readonly ObservableCollection<RecordingItem> _recs = new();
+    AudioRecorder _recorder;
+    DispatcherTimer _recTimer;
+    DateTime _recStart;
+    string _recId, _recFile;
+    int _recPage;
+    MediaPlayer _player;
+
     public IPageSource Source => _src;
     public string DocTitle => _src?.Title ?? "";
     public int CurrentPage => _page;
@@ -86,13 +115,20 @@ public partial class DocumentView : UserControl
     public DocumentView()
     {
         InitializeComponent();
-        ThumbList.ItemsSource = _thumbs;
+        _thumbView = CollectionViewSource.GetDefaultView(_thumbs);
+        _thumbView.Filter = o => !_bmOnly || _ann.Bookmarks.Contains(((ThumbItem)o).Index);
+        ThumbList.ItemsSource = _thumbView;
+        RecList.ItemsSource = _recs;
         OutlineList.ItemsSource = _outline;
         BookmarkList.ItemsSource = _bookmarks;
         NotesList.ItemsSource = _notes;
         SearchList.ItemsSource = _hits;
 
         BuildColorButtons();
+        BuildTypingPanel();
+        _lpTimer.Tick += (s, e) => { _lpTimer.Stop(); ShowInsertMenu(_lpPos); };
+        _recTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _recTimer.Tick += (s, e) => RecStatus.Text = $"녹음 중…  {DateTime.Now - _recStart:mm\\:ss}";
         Ink.Strokes.StrokesChanged += OnStrokesChanged;
         Ink.SelectionMoved += (s, e) => { _inkDirty = true; };
         Ink.SelectionResized += (s, e) => { _inkDirty = true; };
@@ -118,8 +154,11 @@ public partial class DocumentView : UserControl
         _ann = Store.LoadAnnotations(src.Key);
         LoadingText.Visibility = Visibility.Visible;
 
-        for (int i = 0; i < src.PageCount; i++) _thumbs.Add(new ThumbItem(src, i));
-        PageTotal.Text = " / " + src.PageCount;
+        RebuildThumbs();
+        bool nb = src.IsNotebook;
+        AddPageBtn.IsEnabled = nb;
+        DelPageBtn.IsEnabled = nb;
+        RefreshRecs();
         RefreshBookmarks();
         RefreshNotes();
         RefreshOutline();
@@ -141,6 +180,7 @@ public partial class DocumentView : UserControl
         _cacheOrder.Clear();
         PageImage.Source = null;
         Tts.Stop();
+        try { _player?.Pause(); } catch { }
     }
 
     public async void Resume()
@@ -224,10 +264,12 @@ public partial class DocumentView : UserControl
         if (page < 0) page = 0;
 
         CommitInk();
+        PruneEmptyTexts();
+        int prev = _page;
         _page = page;
         var (w, h) = _src.GetPageSize(page);
         _baseW = w; _baseH = h;
-        Host.Width = w; Host.Height = h;
+        ApplyCrop(_crop.TryGetValue(page, out var cc) ? cc : new RectD(0, 0, 1, 1));
 
         _suppressInk = true;
         try
@@ -246,6 +288,7 @@ public partial class DocumentView : UserControl
         ClearTransient();
         RebuildHighlights();
         RebuildMemos();
+        RebuildObjects();
         UpdateNavUi();
         UpdateUndoUi();
 
@@ -256,8 +299,71 @@ public partial class DocumentView : UserControl
         Scroller.ScrollToTop();
         Scroller.ScrollToLeftEnd();
         if (yNorm.HasValue)
-            Dispatcher.BeginInvoke(() => Scroller.ScrollToVerticalOffset(Math.Max(0, yNorm.Value * _baseH * _zoom - 60)),
-                DispatcherPriority.Loaded);
+            Dispatcher.BeginInvoke(() => Scroller.ScrollToVerticalOffset(
+                Math.Max(0, (yNorm.Value * _baseH - _cropCur.Y * _baseH) * _zoom - 60)), DispatcherPriority.Loaded);
+        if (prev >= 0 && prev != page) PlayFlip(page > prev ? 1 : -1);
+    }
+
+    void PlayFlip(int dir)
+    {
+        if (Store.Settings.PageEffect != "slide") return;
+        var move = new DoubleAnimation(dir * 70, 0, TimeSpan.FromMilliseconds(170))
+        { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } };
+        FlipTf.BeginAnimation(TranslateTransform.XProperty, move);
+        Host.BeginAnimation(OpacityProperty, new DoubleAnimation(0.35, 1, TimeSpan.FromMilliseconds(170)));
+    }
+
+    // ---- crop (trim blank margins) ----
+
+    void ApplyCrop(RectD c)
+    {
+        _cropCur = c;
+        Host.Width = Math.Max(50, c.W * _baseW);
+        Host.Height = Math.Max(50, c.H * _baseH);
+        PageGrid.Width = _baseW;
+        PageGrid.Height = _baseH;
+        PageGrid.Margin = new Thickness(-c.X * _baseW, -c.Y * _baseH, 0, 0);
+    }
+
+    RectD UnionAnnotationBounds(RectD crop, int page)
+    {
+        double x0 = crop.X, y0 = crop.Y, x1 = crop.X + crop.W, y1 = crop.Y + crop.H;
+        void U(double x, double y, double w, double h)
+        {
+            x0 = Math.Min(x0, x); y0 = Math.Min(y0, y); x1 = Math.Max(x1, x + w); y1 = Math.Max(y1, y + h);
+        }
+        foreach (var o in _ann.Objects.Where(o => o.Page == page)) U(o.X, o.Y, o.W, o.H);
+        foreach (var m in _ann.Memos.Where(m => m.Page == page)) U(m.X, m.Y, MemoControl.WidthFor(m.Size) / _baseW, 0.12);
+        foreach (var h in _ann.Highlights.Where(h => h.Page == page)) foreach (var r in h.Rects) U(r.X, r.Y, r.W, r.H);
+        foreach (var l in _ann.Links.Where(l => l.Page == page)) foreach (var r in l.Rects) U(r.X, r.Y, r.W, r.H);
+        if (page == _page && Ink.Strokes.Count > 0)
+        {
+            var b = Ink.Strokes.GetBounds();
+            if (!b.IsEmpty) U(b.X / _baseW, b.Y / _baseH, b.Width / _baseW, b.Height / _baseH);
+        }
+        x0 = Math.Max(0, x0); y0 = Math.Max(0, y0); x1 = Math.Min(1, x1); y1 = Math.Min(1, y1);
+        return new RectD(x0, y0, Math.Max(0.1, x1 - x0), Math.Max(0.1, y1 - y0));
+    }
+
+    async Task EnsureCropAsync(int page, BitmapSource bmp)
+    {
+        if (!Store.Settings.TrimMargins || _src.IsNotebook || _crop.ContainsKey(page)) return;
+        var r = await Task.Run(() => ImageFx.FindContentBounds(bmp));
+        if (page != _page || _crop.ContainsKey(page)) return;
+        r = UnionAnnotationBounds(r, page);
+        _crop[page] = r;
+        ApplyCrop(r);
+        if (_fitMode) FitWidth();
+    }
+
+    /// <summary>Called when view settings (trim margins etc.) change.</summary>
+    public async void ApplyViewSettings()
+    {
+        if (_src == null) return;
+        _crop.Clear();
+        ApplyCrop(new RectD(0, 0, 1, 1));
+        if (_fitMode) FitWidth();
+        if (PageImage.Source is BitmapSource bmp) await EnsureCropAsync(_page, bmp);
     }
 
     public void NextPage() => GoToPage(_page + 1);
@@ -276,8 +382,9 @@ public partial class DocumentView : UserControl
         if (_page >= 0 && _page < _thumbs.Count)
         {
             _navFromList = true;
-            ThumbList.SelectedIndex = _page;
-            ThumbList.ScrollIntoView(_thumbs[_page]);
+            var ti = _thumbs[_page];
+            ThumbList.SelectedItem = _thumbView.Cast<object>().Contains(ti) ? ti : null;
+            if (ThumbList.SelectedItem != null) ThumbList.ScrollIntoView(ti);
             _navFromList = false;
         }
     }
@@ -335,6 +442,7 @@ public partial class DocumentView : UserControl
         if (_cache.TryGetValue((page, px), out var hit))
         {
             PageImage.Source = hit; _lastPx = px;
+            await EnsureCropAsync(page, hit);
             return;
         }
         BitmapSource bmp;
@@ -349,6 +457,7 @@ public partial class DocumentView : UserControl
         CachePut((page, px), bmp);
         PageImage.Source = bmp;
         _lastPx = px;
+        await EnsureCropAsync(page, bmp);
 
         if (!Store.Settings.LowSpec && page + 1 < _src.PageCount && !_cache.ContainsKey((page + 1, px)))
         {
@@ -363,9 +472,10 @@ public partial class DocumentView : UserControl
 
     void ScheduleRender() { _renderTimer.Stop(); _renderTimer.Start(); }
 
-    void ApplyZoom(double z, bool keepCenter = true)
+    void ApplyZoom(double z, bool keepCenter = true, bool fit = false)
     {
         z = Math.Clamp(z, 0.25, 6.0);
+        _fitMode = fit;
         if (Math.Abs(z - _zoom) < 0.0005) return;
         double fx = 0.5, fy = 0.5;
         if (keepCenter && Scroller.ExtentWidth > 0 && Scroller.ExtentHeight > 0)
@@ -390,7 +500,8 @@ public partial class DocumentView : UserControl
         double vw = Scroller.ViewportWidth;
         if (vw <= 0) vw = Scroller.ActualWidth;
         if (vw <= 0) return;
-        ApplyZoom((vw - 32) / _baseW, false);
+        double cw = Host.Width > 0 ? Host.Width : _baseW;
+        ApplyZoom((vw - 32) / cw, false, true);
         Scroller.ScrollToLeftEnd();
     }
 
@@ -400,8 +511,7 @@ public partial class DocumentView : UserControl
 
     void Scroller_SizeChanged(object s, SizeChangedEventArgs e)
     {
-        // keep "fit width" feeling when the window is resized and we were at roughly fit
-        ScheduleRender();
+        if (_fitMode) FitWidth(); else ScheduleRender();
     }
 
     void Scroller_PreviewMouseWheel(object s, MouseWheelEventArgs e)
@@ -437,7 +547,7 @@ public partial class DocumentView : UserControl
     void Host_ManipulationDelta(object s, ManipulationDeltaEventArgs e)
     {
         var d = e.DeltaManipulation;
-        if (Math.Abs(d.Scale.X - 1) > 0.002) ApplyZoom(_zoom * d.Scale.X, false);
+        if (Math.Abs(d.Scale.X - 1) > 0.002) ApplyZoom(_zoom * d.Scale.X, false, false);
         Scroller.ScrollToHorizontalOffset(Scroller.HorizontalOffset - d.Translation.X);
         Scroller.ScrollToVerticalOffset(Scroller.VerticalOffset - d.Translation.Y);
         e.Handled = true;
@@ -501,6 +611,7 @@ public partial class DocumentView : UserControl
         ToolMode.Eraser => BtnEraser,
         ToolMode.Lasso => BtnLasso,
         ToolMode.TextSelect => BtnText,
+        ToolMode.Typing => BtnTyping,
         ToolMode.Memo => BtnMemo,
         ToolMode.Outline => BtnOutline,
         _ => BtnCapture
@@ -525,16 +636,24 @@ public partial class DocumentView : UserControl
         ClearTransient();
         _dragging = false;
         Overlay.ReleaseMouseCapture();
+        _lpTimer.Stop();
+        if (m != ToolMode.Typing) PruneEmptyTexts();
 
         bool inkMode = m is ToolMode.Pen or ToolMode.Highlighter or ToolMode.Eraser or ToolMode.Lasso;
-        bool overlayMode = m is ToolMode.TextSelect or ToolMode.Memo or ToolMode.Outline or ToolMode.Capture;
+        bool lassoShape = m == ToolMode.Lasso && _lassoShape != 0;
+        bool overlayMode = m is ToolMode.TextSelect or ToolMode.Typing or ToolMode.Memo or ToolMode.Outline or ToolMode.Capture;
 
-        Ink.IsHitTestVisible = inkMode;
-        Overlay.IsHitTestVisible = overlayMode;
+        Ink.IsHitTestVisible = inkMode && !lassoShape;
+        Overlay.IsHitTestVisible = overlayMode || lassoShape;
+        ObjLayer.IsHitTestVisible = m is ToolMode.Read or ToolMode.Typing;
         Host.IsManipulationEnabled = m == ToolMode.Read;
+        LassoShapeBox.Visibility = m == ToolMode.Lasso ? Visibility.Visible : Visibility.Collapsed;
+        TypingPanel.Visibility = m == ToolMode.Typing ? Visibility.Visible : Visibility.Collapsed;
         Overlay.Cursor = m switch
         {
             ToolMode.TextSelect => Cursors.IBeam,
+            ToolMode.Typing => Cursors.IBeam,
+            ToolMode.Lasso => Cursors.Cross,
             ToolMode.Capture => Cursors.Cross,
             ToolMode.Memo or ToolMode.Outline => Cursors.Pen,
             _ => Cursors.Arrow
@@ -552,8 +671,9 @@ public partial class DocumentView : UserControl
             ToolMode.Pen => "펜: 필압 필기. 펜 뒷면은 지우개",
             ToolMode.Highlighter => "형광펜: 자유 곡선 형광펜",
             ToolMode.Eraser => "지우개: 지울 획에 닿게 문지르세요",
-            ToolMode.Lasso => "올가미: 필기를 둘러 선택 → 이동/삭제",
+            ToolMode.Lasso => "올가미: 필기를 둘러 선택 → 이동/삭제 (모양은 옆 목록에서 선택)",
             ToolMode.TextSelect => "글자선택: 문장을 드래그하세요",
+            ToolMode.Typing => "타이핑: 글자를 넣을 위치를 누르세요 (서식은 도구 막대에서)",
             ToolMode.Memo => "메모: 포스트잇을 놓을 위치를 누르세요",
             ToolMode.Outline => "개요: 제목을 붙일 위치를 누르세요",
             _ => "캡처: 영역을 드래그하세요"
@@ -593,6 +713,23 @@ public partial class DocumentView : UserControl
         }
         if (_mode is not (ToolMode.Pen or ToolMode.Highlighter or ToolMode.Eraser or ToolMode.Lasso))
             Ink.IsHitTestVisible = false;
+    }
+
+    void LassoShape_Changed(object s, SelectionChangedEventArgs e)
+    {
+        if (!_ready) return;
+        _lassoShape = LassoShapeBox.SelectedIndex;
+        if (_mode == ToolMode.Lasso) { _applied = null; SetMode(ToolMode.Lasso); }
+    }
+
+    void Ink_SelectionChanged(object s, EventArgs e)
+    {
+        if (!_ready || _mode != ToolMode.Lasso || _lassoShape == 0) return;
+        if (Ink.GetSelectedStrokes().Count == 0)
+        {
+            Ink.IsHitTestVisible = false;
+            Overlay.IsHitTestVisible = true;
+        }
     }
 
     void ApplyWidthSliderRange()
@@ -829,6 +966,15 @@ public partial class DocumentView : UserControl
             case ToolMode.TextSelect:
                 _ = BeginSelectAsync(p);
                 break;
+            case ToolMode.Typing:
+                AddTextAt(p);
+                break;
+            case ToolMode.Lasso:
+                ClearTransient();
+                _capStart = p;
+                _dragging = true;
+                Overlay.CaptureMouse();
+                break;
             case ToolMode.Memo:
                 AddMemoAt(p);
                 SetMode(ToolMode.Read);
@@ -885,21 +1031,20 @@ public partial class DocumentView : UserControl
                 if (n != _selB) { _selB = n; DrawSelection(); }
             }
         }
-        else if (_mode == ToolMode.Capture)
+        else if (_mode == ToolMode.Capture || _mode == ToolMode.Lasso)
         {
             foreach (var t in _transient) Overlay.Children.Remove(t);
             _transient.Clear();
             var r = new Rect(_capStart, p);
-            var rect = new Shapes.Rectangle
-            {
-                Width = r.Width, Height = r.Height, Stroke = Brushes.DodgerBlue, StrokeThickness = 1.5,
-                StrokeDashArray = new DoubleCollection { 4, 3 },
-                Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x22, 0x1E, 0x88, 0xE5)),
-                IsHitTestVisible = false
-            };
-            Canvas.SetLeft(rect, r.X); Canvas.SetTop(rect, r.Y);
-            Overlay.Children.Add(rect);
-            _transient.Add(rect);
+            Shapes.Shape shape = _mode == ToolMode.Lasso && _lassoShape == 2 ? new Shapes.Ellipse() : new Shapes.Rectangle();
+            shape.Width = r.Width; shape.Height = r.Height;
+            shape.Stroke = Brushes.DodgerBlue; shape.StrokeThickness = 1.5;
+            shape.StrokeDashArray = new DoubleCollection { 4, 3 };
+            shape.Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x22, 0x1E, 0x88, 0xE5));
+            shape.IsHitTestVisible = false;
+            Canvas.SetLeft(shape, r.X); Canvas.SetTop(shape, r.Y);
+            Overlay.Children.Add(shape);
+            _transient.Add(shape);
         }
     }
 
@@ -920,6 +1065,30 @@ public partial class DocumentView : UserControl
             r.Intersect(new Rect(0, 0, _baseW, _baseH));
             if (!r.IsEmpty && r.Width > 8 && r.Height > 8) ShowCaptureMenu(r);
             else ClearTransient();
+        }
+        else if (_mode == ToolMode.Lasso)
+        {
+            var r = new Rect(_capStart, p);
+            ClearTransient();
+            if (r.Width < 6 || r.Height < 6) return;
+            StrokeCollection sel;
+            if (_lassoShape == 2)
+            {
+                var pts = new List<Point>();
+                for (int i = 0; i < 48; i++)
+                {
+                    double a = i * Math.PI * 2 / 48;
+                    pts.Add(new Point(r.X + r.Width / 2 + r.Width / 2 * Math.Cos(a), r.Y + r.Height / 2 + r.Height / 2 * Math.Sin(a)));
+                }
+                sel = Ink.Strokes.HitTest(pts, 60);
+            }
+            else sel = Ink.Strokes.HitTest(r, 60);
+            if (sel.Count == 0) { SetStatus("선택된 필기가 없습니다."); return; }
+            Overlay.IsHitTestVisible = false;
+            Ink.IsHitTestVisible = true;
+            Ink.EditingMode = InkCanvasEditingMode.Select;
+            Ink.Select(sel);
+            SetStatus("선택됨: 끌어서 이동, 모서리로 크기 조절, Delete로 삭제. 바깥을 누르면 선택 해제");
         }
         e.Handled = true;
     }
@@ -956,6 +1125,20 @@ public partial class DocumentView : UserControl
         }));
         menu.Items.Add(Item("사전 검색", () => { OpenDictionary(text); ClearTransient(); }));
         menu.Items.Add(new Separator());
+        menu.Items.Add(Item("링크 걸기…", () =>
+        {
+            var input = Dialogs.Prompt(Window.GetWindow(this), "링크 걸기", "웹 주소 또는 이동할 페이지 번호");
+            if (!string.IsNullOrWhiteSpace(input))
+            {
+                ObjectControl.ParseTarget(input, out var url, out var tp);
+                if (url.Length > 0 || tp >= 0)
+                {
+                    _ann.Links.Add(new LinkItem { Page = _page, Rects = MergeLines(ws), Url = url, TargetPage = tp });
+                    MarkDirty(); RebuildHighlights();
+                }
+            }
+            ClearTransient();
+        }));
         menu.Items.Add(Item("개요 제목으로 추가", () =>
         {
             var first = ws[0];
@@ -1018,7 +1201,7 @@ public partial class DocumentView : UserControl
         using (var dc = dv.RenderOpen())
         {
             dc.PushTransform(new ScaleTransform(scale, scale));
-            dc.DrawRectangle(new VisualBrush(Host) { Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top },
+            dc.DrawRectangle(new VisualBrush(PageGrid) { Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top },
                 null, new Rect(0, 0, _baseW, _baseH));
             dc.Pop();
         }
@@ -1121,6 +1304,36 @@ public partial class DocumentView : UserControl
                 HlLayer.Children.Add(rect);
             }
         }
+        foreach (var l in _ann.Links.Where(x => x.Page == _page))
+        {
+            foreach (var r in l.Rects)
+            {
+                var hit = new Shapes.Rectangle
+                {
+                    Width = r.W * _baseW, Height = r.H * _baseH, Fill = HlBrush("#1E88E5", 0x1C),
+                    Tag = l, Cursor = Cursors.Hand, ToolTip = l.TargetPage >= 0 ? $"{l.TargetPage + 1}페이지로 이동" : l.Url
+                };
+                Canvas.SetLeft(hit, r.X * _baseW);
+                Canvas.SetTop(hit, r.Y * _baseH);
+                hit.MouseLeftButtonUp += LinkRect_Click;
+                HlLayer.Children.Add(hit);
+                var line = new Shapes.Rectangle
+                {
+                    Width = r.W * _baseW, Height = 1.6, Fill = HlBrush("#1565C0", 0xFF), IsHitTestVisible = false
+                };
+                Canvas.SetLeft(line, r.X * _baseW);
+                Canvas.SetTop(line, (r.Y + r.H) * _baseH - 1);
+                HlLayer.Children.Add(line);
+            }
+            var last = l.Rects.LastOrDefault();
+            if (last != null)
+            {
+                var mark = new TextBlock { Text = "↗", Foreground = HlBrush("#1565C0", 0xFF), FontSize = 11, IsHitTestVisible = false };
+                Canvas.SetLeft(mark, (last.X + last.W) * _baseW + 1);
+                Canvas.SetTop(mark, last.Y * _baseH - 2);
+                HlLayer.Children.Add(mark);
+            }
+        }
         if (_searchRects.TryGetValue(_page, out var sr))
         {
             foreach (var r in sr)
@@ -1135,6 +1348,37 @@ public partial class DocumentView : UserControl
                 HlLayer.Children.Add(rect);
             }
         }
+    }
+
+    void ActivateLink(string url, int page)
+    {
+        if (page >= 0 && page < _src.PageCount) GoToPage(page);
+        else if (!string.IsNullOrEmpty(url)) OpenUrl(url);
+    }
+
+    void LinkRect_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (_mode != ToolMode.Read) return;
+        if (((FrameworkElement)sender).Tag is not LinkItem l) return;
+        var menu = new ContextMenu { Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint };
+        var open = new MenuItem { Header = "링크 열기" };
+        open.Click += (s, a) => ActivateLink(l.Url, l.TargetPage);
+        menu.Items.Add(open);
+        var edit = new MenuItem { Header = "링크 수정…" };
+        edit.Click += (s, a) =>
+        {
+            var input = Dialogs.Prompt(Window.GetWindow(this), "링크 수정", "웹 주소 또는 이동할 페이지 번호",
+                l.TargetPage >= 0 ? (l.TargetPage + 1).ToString() : l.Url);
+            if (string.IsNullOrWhiteSpace(input)) return;
+            ObjectControl.ParseTarget(input, out var url, out var tp);
+            l.Url = url; l.TargetPage = tp; MarkDirty(); RebuildHighlights();
+        };
+        menu.Items.Add(edit);
+        var del = new MenuItem { Header = "링크 삭제" };
+        del.Click += (s, a) => { _ann.Links.Remove(l); MarkDirty(); RebuildHighlights(); };
+        menu.Items.Add(del);
+        menu.IsOpen = true;
+        e.Handled = true;
     }
 
     void Highlight_Click(object sender, MouseButtonEventArgs e)
@@ -1270,6 +1514,7 @@ public partial class DocumentView : UserControl
     {
         _bookmarks.Clear();
         foreach (var p in _ann.Bookmarks.OrderBy(x => x)) _bookmarks.Add(new BookmarkEntry { Page = p });
+        _thumbView?.Refresh();
     }
 
     void Bookmark_Click(object s, RoutedEventArgs e)
@@ -1277,6 +1522,7 @@ public partial class DocumentView : UserControl
         if (_ann.Bookmarks.Contains(_page)) _ann.Bookmarks.Remove(_page); else _ann.Bookmarks.Add(_page);
         MarkDirty();
         RefreshBookmarks();
+        if (_bmOnly) _thumbView.Refresh();
         UpdateNavUi();
     }
 
@@ -1302,6 +1548,8 @@ public partial class DocumentView : UserControl
             all.Add(new NoteEntry { Kind = "하이라이트", Page = h.Page, Text = h.Text, Note = h.Note, Id = h.Id });
         foreach (var m in _ann.Memos)
             all.Add(new NoteEntry { Kind = "메모", Page = m.Page, Text = m.Text, Id = m.Id });
+        foreach (var o in _ann.Objects.Where(o => o.Type == "text" && !string.IsNullOrWhiteSpace(o.Text)))
+            all.Add(new NoteEntry { Kind = "타이핑", Page = o.Page, Text = o.Text, Id = o.Id });
         foreach (var n in all.OrderBy(x => x.Page)) _notes.Add(n);
     }
 
@@ -1394,6 +1642,8 @@ public partial class DocumentView : UserControl
             { _hits.Add(new SearchHit { Page = m.Page, Snippet = "[메모] " + m.Text.Replace("\n", " ") }); found++; }
             foreach (var h in _ann.Highlights.Where(x => x.Note.Contains(q, StringComparison.OrdinalIgnoreCase)))
             { _hits.Add(new SearchHit { Page = h.Page, Snippet = "[하이라이트 메모] " + h.Note.Replace("\n", " ") }); found++; }
+            foreach (var o in _ann.Objects.Where(x => x.Type == "text" && x.Text.Contains(q, StringComparison.OrdinalIgnoreCase)))
+            { _hits.Add(new SearchHit { Page = o.Page, Snippet = "[타이핑] " + o.Text.Replace("\n", " ") }); found++; }
             SearchStatus.Text = found == 0
                 ? "결과가 없습니다. (스캔 페이지는 글자 선택 도구의 OCR로만 인식됩니다)"
                 : $"{found}건 찾음";
@@ -1406,7 +1656,20 @@ public partial class DocumentView : UserControl
     {
         if (SearchList.SelectedItem is not SearchHit h) return;
         if (h.Page != _page) GoToPage(h.Page); else RebuildHighlights();
+        SearchStatus.Text = $"{SearchList.SelectedIndex + 1} / {_hits.Count}";
     }
+
+    void SearchStep(int d)
+    {
+        if (_hits.Count == 0) return;
+        int i = SearchList.SelectedIndex;
+        i = i < 0 ? (d > 0 ? 0 : _hits.Count - 1) : (i + d + _hits.Count) % _hits.Count;
+        SearchList.SelectedIndex = i;
+        SearchList.ScrollIntoView(_hits[i]);
+    }
+
+    void SearchNext_Click(object s, RoutedEventArgs e) => SearchStep(1);
+    void SearchPrev_Click(object s, RoutedEventArgs e) => SearchStep(-1);
 
     // =====================================================================
     //  Export / backup
@@ -1461,8 +1724,16 @@ public partial class DocumentView : UserControl
         CommitInk();
         var dlg = new SaveFileDialog { Filter = "PDF Note 백업|*.pnotebackup.json", FileName = _src.Title + ".pnotebackup.json" };
         if (dlg.ShowDialog() != true) return;
-        File.WriteAllText(dlg.FileName, Store.SerializeAnnotations(_ann));
-        SetStatus("주석 백업을 저장했습니다.");
+        var copy = Store.DeserializeAnnotations(Store.SerializeAnnotations(_ann));
+        copy.Recordings = new List<RecordingItem>();   // audio files are not part of the backup
+        copy.MediaData = new Dictionary<string, string>();
+        foreach (var o in copy.Objects.Where(o => o.Type == "image" && !string.IsNullOrEmpty(o.Media)))
+        {
+            var f = System.IO.Path.Combine(Store.MediaDir(_src.Key), o.Media);
+            if (File.Exists(f)) copy.MediaData[o.Media] = Convert.ToBase64String(File.ReadAllBytes(f));
+        }
+        File.WriteAllText(dlg.FileName, Store.SerializeAnnotations(copy));
+        SetStatus("주석 백업을 저장했습니다. (삽입한 사진 포함, 녹음 제외)");
     }
 
     public void RestoreAnnotations()
@@ -1473,9 +1744,14 @@ public partial class DocumentView : UserControl
         try { restored = Store.DeserializeAnnotations(File.ReadAllText(dlg.FileName)); }
         catch { restored = null; }
         if (restored == null) { MessageBox.Show("백업 파일을 읽을 수 없습니다.", "복원", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
-        int maxPage = Math.Max(restored.Ink.Keys.DefaultIfEmpty(0).Max(),
-            Math.Max(restored.Highlights.Select(x => x.Page).DefaultIfEmpty(0).Max(),
-                     restored.Memos.Select(x => x.Page).DefaultIfEmpty(0).Max()));
+        int maxPage = new[]
+        {
+            restored.Ink.Keys.DefaultIfEmpty(0).Max(),
+            restored.Highlights.Select(x => x.Page).DefaultIfEmpty(0).Max(),
+            restored.Memos.Select(x => x.Page).DefaultIfEmpty(0).Max(),
+            restored.Objects.Select(x => x.Page).DefaultIfEmpty(0).Max(),
+            restored.Links.Select(x => x.Page).DefaultIfEmpty(0).Max()
+        }.Max();
         if (maxPage >= _src.PageCount)
         {
             MessageBox.Show("백업의 페이지 범위가 이 문서보다 큽니다. 다른 문서의 백업일 수 있어 복원하지 않았습니다.",
@@ -1484,11 +1760,20 @@ public partial class DocumentView : UserControl
         }
         if (MessageBox.Show($"'{_src.Title}'의 현재 주석·노트를 백업 내용으로 교체합니다. 계속할까요?", "복원",
                 MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        foreach (var kv in restored.MediaData)
+        {
+            try { File.WriteAllBytes(System.IO.Path.Combine(Store.MediaDir(_src.Key), System.IO.Path.GetFileName(kv.Key)), Convert.FromBase64String(kv.Value)); }
+            catch (Exception ex) { Store.Log("restore media: " + ex.Message); }
+        }
+        restored.MediaData = new Dictionary<string, string>();
+        restored.Recordings = _ann.Recordings;
         _ann = restored;
         _undo.Clear();
+        _crop.Clear();
         _searchRects.Clear();
         MarkDirty();
-        RefreshBookmarks(); RefreshNotes(); RefreshOutline();
+        RefreshBookmarks(); RefreshNotes(); RefreshOutline(); RefreshRecs();
+        _page = -1;
         GoToPage(Math.Clamp(_ann.LastPage, 0, _src.PageCount - 1));
         SetStatus("복원했습니다.");
     }
@@ -1510,6 +1795,10 @@ public partial class DocumentView : UserControl
                 case Key.Y: if (typing) return false; Redo(); return true;
                 case Key.F: FocusSearch(); return true;
                 case Key.G: FocusPageBox(); return true;
+                case Key.V:
+                    if (typing) return false;
+                    if (Clipboard.ContainsImage()) { InsertClipboardImage(null); return true; }
+                    return false;
                 case Key.D0: case Key.NumPad0: FitWidth(); return true;
                 case Key.OemPlus: case Key.Add: ApplyZoom(_zoom * 1.2); return true;
                 case Key.OemMinus: case Key.Subtract: ApplyZoom(_zoom / 1.2); return true;

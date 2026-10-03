@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace PdfNote;
@@ -21,6 +22,20 @@ public class TabVm : INotifyPropertyChanged
 
 public partial class MainWindow : Window
 {
+    [DllImport("kernel32.dll")] static extern uint SetThreadExecutionState(uint flags);
+    const uint ES_CONTINUOUS = 0x80000000, ES_DISPLAY_REQUIRED = 0x00000002, ES_SYSTEM_REQUIRED = 0x00000001;
+
+    static void ApplyKeepAwake()
+    {
+        try
+        {
+            SetThreadExecutionState(Store.Settings.KeepAwake
+                ? ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED
+                : ES_CONTINUOUS);
+        }
+        catch { }
+    }
+
     readonly ObservableCollection<TabVm> _tabs = new();
     readonly HomeView _home = new();
     readonly TabVm _homeTab;
@@ -39,6 +54,7 @@ public partial class MainWindow : Window
         _home.OpenDialogRequested += OpenDialog;
         _home.NewNoteRequested += NewNote;
         Tabs.SelectedIndex = 0;
+        ApplyKeepAwake();
 
         Loaded += async (s, e) =>
         {
@@ -68,11 +84,12 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    void CloseTab(TabVm vm)
+    async void CloseTab(TabVm vm)
     {
         if (vm.IsHome) return;
         if (vm.View is DocumentView dv)
         {
+            try { await dv.StopRecordingAsync(); } catch { }
             dv.SaveNow();
             dv.Suspend();
             dv.Source?.Dispose();
@@ -138,7 +155,7 @@ public partial class MainWindow : Window
         if (meta == null) return;
         try
         {
-            var nb = NotebookSource.Create(Store.LibraryDir, meta);
+            var nb = NotebookSource.Create(_home.CurrentFolder, meta);
             nb.Dispose();
             _ = OpenPathAsync(nb.FilePath);
         }
@@ -158,6 +175,8 @@ public partial class MainWindow : Window
         {
             var ext = System.IO.Path.GetExtension(f).ToLowerInvariant();
             if (ext == ".pdf" || ext == ".pnote") _ = OpenPathAsync(f);
+            else if (CurrentDoc != null && ext is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif" or ".webp" or ".tif" or ".tiff")
+                CurrentDoc.InsertImageFile(f);
         }
     }
 
@@ -230,6 +249,29 @@ public partial class MainWindow : Window
         };
         menu.Items.Add(low);
 
+        void ViewChanged()
+        {
+            Store.SaveSettings();
+            foreach (var t in _tabs) (t.View as DocumentView)?.ApplyViewSettings();
+        }
+        var trim = new MenuItem { Header = "여백 자동 자르기 (PDF)", IsCheckable = true, IsChecked = Store.Settings.TrimMargins };
+        trim.Click += (a, b) => { Store.Settings.TrimMargins = trim.IsChecked; ViewChanged(); };
+        menu.Items.Add(trim);
+
+        var fx = new MenuItem { Header = "페이지 넘김 효과" };
+        foreach (var (key, name) in new[] { ("slide", "슬라이드"), ("none", "없음") })
+        {
+            var k = key;
+            var mi = new MenuItem { Header = name, IsCheckable = true, IsChecked = Store.Settings.PageEffect == k };
+            mi.Click += (a, b) => { Store.Settings.PageEffect = k; Store.SaveSettings(); };
+            fx.Items.Add(mi);
+        }
+        menu.Items.Add(fx);
+
+        var awake = new MenuItem { Header = "화면 켜 둠", IsCheckable = true, IsChecked = Store.Settings.KeepAwake };
+        awake.Click += (a, b) => { Store.Settings.KeepAwake = awake.IsChecked; Store.SaveSettings(); ApplyKeepAwake(); };
+        menu.Items.Add(awake);
+
         var lang = new MenuItem { Header = "번역 언어" };
         foreach (var (code, name) in new[] { ("ko", "한국어"), ("en", "English"), ("ja", "日本語"), ("zh-CN", "中文(简体)") })
         {
@@ -256,7 +298,7 @@ public partial class MainWindow : Window
         Add(menu, "전체 화면 (F11)", ToggleFullscreen);
         Add(menu, "문서함 폴더 열기", () => Process.Start(new ProcessStartInfo(Store.LibraryDir) { UseShellExecute = true }));
         Add(menu, "정보", () => MessageBox.Show(this,
-            "PDF Note for Windows 1.0.0\n\nAndroid용 PDF Note의 Windows 버전입니다.\n" +
+            "PDF Note for Windows 1.0.0\n\nAndroid용 PDF Note(v1.26.0 기능 기준)의 Windows 버전입니다.\n" +
             "PDF·주석은 모두 이 PC에서만 처리·저장됩니다.\n\n주석 저장 위치:\n" + Store.Root,
             "PDF Note", MessageBoxButton.OK, MessageBoxImage.Information));
 
@@ -267,8 +309,19 @@ public partial class MainWindow : Window
 
     // ------------------------------------------------------------------ closing
 
-    void Window_Closing(object s, CancelEventArgs e)
+    bool _closingRec;
+
+    async void Window_Closing(object s, CancelEventArgs e)
     {
+        if (!_closingRec && _tabs.Any(t => t.View is DocumentView d && d.IsRecording))
+        {
+            e.Cancel = true;
+            _closingRec = true;
+            foreach (var t in _tabs.ToList())
+                if (t.View is DocumentView d) { try { await d.StopRecordingAsync(); } catch { } }
+            Close();
+            return;
+        }
         foreach (var t in _tabs)
             if (t.View is DocumentView dv) dv.SaveNow();
         Store.SaveSettings();

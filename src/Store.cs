@@ -16,6 +16,9 @@ public static class Store
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "PDFNote"));
     static string AnnoDir => EnsureDir(Path.Combine(Root, "annotations"));
     public static string ThumbDir => EnsureDir(Path.Combine(Root, "thumbs"));
+    public static string MediaDir(string key) => EnsureDir(Path.Combine(Root, "media", key));
+    public static string AudioDir(string key) => EnsureDir(Path.Combine(Root, "audio", key));
+    public static string TrashDir => EnsureDir(Path.Combine(LibraryDir, ".휴지통"));
     public static string LibraryDir => EnsureDir(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "PDF Note"));
 
@@ -108,6 +111,24 @@ public static class Store
         r.RemoveAll(x => string.Equals(x.Path, path, StringComparison.OrdinalIgnoreCase));
         r.Insert(0, new RecentItem { Path = path, Title = title, IsNotebook = isNotebook, LastOpened = DateTime.Now });
         if (r.Count > 30) r.RemoveRange(30, r.Count - 30);
+        SaveSettings();
+    }
+
+    public static bool IsFavorite(string path) =>
+        Settings.Favorites.Any(f => string.Equals(f, path, StringComparison.OrdinalIgnoreCase));
+
+    public static void ToggleFavorite(string path)
+    {
+        if (IsFavorite(path)) Settings.Favorites.RemoveAll(f => string.Equals(f, path, StringComparison.OrdinalIgnoreCase));
+        else Settings.Favorites.Add(path);
+        SaveSettings();
+    }
+
+    public static void RenameInLists(string oldPath, string newPath)
+    {
+        foreach (var r in Settings.Recents.Where(r => string.Equals(r.Path, oldPath, StringComparison.OrdinalIgnoreCase))) r.Path = newPath;
+        for (int i = 0; i < Settings.Favorites.Count; i++)
+            if (string.Equals(Settings.Favorites[i], oldPath, StringComparison.OrdinalIgnoreCase)) Settings.Favorites[i] = newPath;
         SaveSettings();
     }
 

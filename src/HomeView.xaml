@@ -6,63 +6,65 @@
         <Grid Margin="28,22">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
             <StackPanel>
                 <TextBlock Text="PDF Note" FontSize="28" FontWeight="Bold" Foreground="#FF263238"/>
                 <TextBlock Text="PDF 읽기 · 펜 필기 · 하이라이트 · 메모 — 필기 노트북용 가벼운 노트 앱"
                            Foreground="#FF607D8B" Margin="0,2,0,12"/>
-                <StackPanel Orientation="Horizontal">
-                    <Button Content="PDF 열기" Padding="16,7" Margin="0,0,8,0" Click="Open_Click"/>
-                    <Button Content="새 노트" Padding="16,7" Margin="0,0,8,0" Click="New_Click"/>
-                    <Button Content="문서함 폴더 열기" Padding="16,7" Click="Library_Click"/>
-                </StackPanel>
+                <WrapPanel>
+                    <Button Content="PDF 열기" Padding="16,7" Margin="0,0,8,4" Click="Open_Click"/>
+                    <Button Content="새 노트" Padding="16,7" Margin="0,0,8,4" Click="New_Click"/>
+                    <Button Content="새 폴더" Padding="16,7" Margin="0,0,8,4" Click="NewFolder_Click"/>
+                    <Button Content="문서함 폴더 열기" Padding="16,7" Margin="0,0,8,4" Click="Library_Click"/>
+                </WrapPanel>
             </StackPanel>
-            <Grid Grid.Row="1" Margin="0,18,0,0">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="18"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-                <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="최근 문서" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <TextBlock x:Name="RecentEmpty" DockPanel.Dock="Top" Text="아직 연 문서가 없습니다. PDF를 끌어다 놓아도 열립니다."
-                               Foreground="#FF90A4AE" Margin="0,4"/>
-                    <ListBox x:Name="RecentList" MouseDoubleClick="List_DoubleClick" KeyDown="List_KeyDown"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Margin="4,5">
-                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
-                                    <TextBlock Text="{Binding Sub}" Foreground="#FF78909C" FontSize="11" TextTrimming="CharacterEllipsis"/>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                        <ListBox.ContextMenu>
-                            <ContextMenu>
-                                <MenuItem Header="목록에서 제거" Click="RemoveRecent_Click"/>
-                                <MenuItem Header="탐색기에서 보기" Click="Reveal_Click"/>
-                            </ContextMenu>
-                        </ListBox.ContextMenu>
-                    </ListBox>
+
+            <DockPanel Grid.Row="1" Margin="0,10,0,6">
+                <TextBox x:Name="SearchBox" DockPanel.Dock="Right" Width="200" Padding="4" TextChanged="Search_Changed"
+                         ToolTip="이름으로 검색 (전체 탭에서는 모든 폴더 검색)"/>
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="TabAll" Content="전체" Tag="all" GroupName="homeTab" IsChecked="True" Margin="0,0,14,0" Checked="Tab_Checked"/>
+                    <RadioButton Content="★ 즐겨찾기" Tag="fav" GroupName="homeTab" Margin="0,0,14,0" Checked="Tab_Checked"/>
+                    <RadioButton Content="최근" Tag="recent" GroupName="homeTab" Margin="0,0,14,0" Checked="Tab_Checked"/>
+                    <RadioButton Content="🗑 휴지통" Tag="trash" GroupName="homeTab" Margin="0,0,14,0" Checked="Tab_Checked"/>
+                </StackPanel>
+            </DockPanel>
+
+            <DockPanel Grid.Row="2">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                    <Button x:Name="UpBtn" DockPanel.Dock="Left" Content="⬆ 상위 폴더" Padding="8,2" Margin="0,0,8,0" Click="Up_Click" Visibility="Collapsed"/>
+                    <Button x:Name="EmptyTrashBtn" DockPanel.Dock="Right" Content="휴지통 비우기" Padding="8,2" Click="EmptyTrash_Click" Visibility="Collapsed"/>
+                    <TextBlock x:Name="PathText" Foreground="#FF78909C" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 </DockPanel>
-                <DockPanel Grid.Column="2">
-                    <TextBlock DockPanel.Dock="Top" Text="문서함 (Documents\PDF Note)" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <TextBlock x:Name="LibEmpty" DockPanel.Dock="Top" Text="새 노트를 만들면 이곳에 저장됩니다. PDF를 이 폴더에 넣어도 표시됩니다."
-                               Foreground="#FF90A4AE" Margin="0,4" TextWrapping="Wrap"/>
-                    <ListBox x:Name="LibList" MouseDoubleClick="List_DoubleClick" KeyDown="List_KeyDown"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Margin="4,5">
-                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
-                                    <TextBlock Text="{Binding Sub}" Foreground="#FF78909C" FontSize="11" TextTrimming="CharacterEllipsis"/>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </DockPanel>
-            </Grid>
+                <TextBlock x:Name="EmptyText" DockPanel.Dock="Top" Foreground="#FF90A4AE" Margin="0,4" TextWrapping="Wrap"/>
+                <ListBox x:Name="DocList" MouseDoubleClick="List_DoubleClick" KeyDown="List_KeyDown"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         VirtualizingPanel.IsVirtualizing="True">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="4,5">
+                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding Sub}" Foreground="#FF78909C" FontSize="11" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                    <ListBox.ContextMenu>
+                        <ContextMenu Opened="Ctx_Opened">
+                            <MenuItem x:Name="MiOpen" Header="열기" Click="Ctx_Open"/>
+                            <MenuItem x:Name="MiFav" Header="즐겨찾기 토글" Click="Ctx_Fav"/>
+                            <MenuItem x:Name="MiRename" Header="이름 바꾸기…" Click="Ctx_Rename"/>
+                            <MenuItem x:Name="MiMove" Header="폴더로 이동"/>
+                            <MenuItem x:Name="MiTrash" Header="휴지통으로" Click="Ctx_Trash"/>
+                            <MenuItem x:Name="MiRestore" Header="복원" Click="Ctx_Restore"/>
+                            <MenuItem x:Name="MiDelete" Header="영구 삭제" Click="Ctx_Delete"/>
+                            <MenuItem x:Name="MiRemoveRecent" Header="최근 목록에서 제거" Click="Ctx_RemoveRecent"/>
+                            <MenuItem x:Name="MiReveal" Header="탐색기에서 보기" Click="Ctx_Reveal"/>
+                        </ContextMenu>
+                    </ListBox.ContextMenu>
+                </ListBox>
+            </DockPanel>
         </Grid>
     </Grid>
 </UserControl>
