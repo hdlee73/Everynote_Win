@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>library test</title>
+<link rel="stylesheet" href="/web/css/app.css"><link rel="stylesheet" href="/web/css/library.css">
+<script>for (const C of [Map, WeakMap]) { C.prototype.getOrInsertComputed ||= function (k, f) { if (!this.has(k)) this.set(k, f(k)); return this.get(k); }; C.prototype.getOrInsert ||= function (k, v) { if (!this.has(k)) this.set(k, v); return this.get(k); }; }</script>
+</head><body><div id="app" style="padding:20px">library test harness (background page)</div>
+<script type="module">
+import { host } from '/web/js/host.js';
+import { LibraryRepository, NotebookFiles, Paper } from '/web/js/library.js';
+import { LibraryDialog, PaperChoiceView, FolderIconDrawable, FolderShapeDrawable } from '/web/js/library-dialog.js';
+const T = window.T = { host, LibraryRepository, NotebookFiles, Paper, LibraryDialog, PaperChoiceView, FolderIconDrawable, FolderShapeDrawable, log: [] };
+const bytes = async u => new Uint8Array(await (await fetch(u)).arrayBuffer());
+T.setup = async function (opts = {}) {
+  const ko = await bytes('/dev/samples/sample-ko.pdf'), en = await bytes('/dev/samples/sample.pdf');
+  const F = host._fake; F.init();
+  for (const k of [...F.files.keys()]) if (k.startsWith(F.lib) && k !== F.lib || k.startsWith(F.data + '\\')) F.files.delete(k);
+  localStorage.clear();
+  const L = F.lib, now = Date.now(), day = 86400000;
+  const put = (rel, b, ageMs) => { const p = L + '\\' + rel; F.put(p, b); F.files.get(p).mtime = now - ageMs; return p; };
+  put('한국어 샘플.pdf', ko, 3600e3 * 2); put('Sample.pdf', en, 5 * day); put('Lecture Notes 10.pdf', ko, 40 * day); put('Lecture Notes 2.pdf', en, 400 * day);
+  put('Annual Report 2025 with a really long name that must wrap onto two lines and then ellipsize.pdf', ko, 9 * day);
+  put('수학\\미적분.pdf', ko, 2 * day); put('수학\\선형대수.pdf', en, 3 * day); put('수학\\대수\\군론.pdf', ko, 12 * day);
+  put('English\\Grammar.pdf', en, 20 * day); put('English\\Reading.pdf', ko, 21 * day); F.mkdirs(L + '\\Archive');
+  F.put(L + '\\readme.txt', new Uint8Array([1])); F.put(L + '\\.hidden.pdf', en);
+  const lib = T.library = new LibraryRepository(); await lib.ready;
+  await lib.createNote(L, '새 노트', new Paper(1, NotebookFiles.COLORS[1]));
+  await lib.createNote(L, '모눈 노트', new Paper(2, NotebookFiles.COLORS[2]));
+  lib.folderColor(L + '\\English', LibraryRepository.FOLDER_COLORS[1]);
+  lib.folderColor(L + '\\Archive', LibraryRepository.FOLDER_COLORS[4]);
+  lib.folderColor(L + '\\수학', LibraryRepository.FOLDER_COLORS[2]);
+  lib.favorite(L + '\\Sample.pdf', true); lib.favorite(L + '\\수학\\미적분.pdf', true);
+  lib.opened(L + '\\Lecture Notes 2.pdf');
+  T.root = L; T.log.length = 0;
+  const actions = {
+    open: f => T.log.push('open ' + f), importFiles: f => T.log.push('import ' + f),
+    newNote: (f, refresh) => { T.log.push('newNote ' + f); },
+    changed: (a, b, m) => T.log.push(`changed ${a} -> ${b} ${m}`), selectedFolder: f => T.log.push('folder ' + f), removed: fs => T.log.push('removed ' + fs.join(',')),
+  };
+  const dlg = T.dlg = new LibraryDialog({}, lib, L, actions);
+  dlg.show();
+  return L;
+};
+window.__ready = true;
+</script></body></html>

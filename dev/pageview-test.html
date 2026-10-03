@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>PdfPageView test</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/css/pageview.css">
+<style>html,body{margin:0;height:100%;background:#333}#root{display:flex;width:100vw;height:100vh}</style>
+</head><body><div id="root"></div>
+<script type="module">
+import { PdfDoc } from '/js/pdfdoc.js';
+import { PdfPageView } from '/js/pageview.js';
+import { AnnotationStore, Mark, InkStroke } from '/js/store.js';
+
+const log = [];
+const L = n => (...a) => { log.push({ n, a }); };
+const store = new AnnotationStore();
+const listener = {};
+for (const n of ['onHighlightCreated','onMarkTapped','onMemoPointRequested','onZoomGestureStarted','onPageSwipe','onOutlinePointRequested','onInkChanged','onTextSelectionFinished','onTranslationTapped','onSelectionAdjustStarted','onLassoSelectionFinished','onElementTapped','onBlankLongPress']) listener[n] = L(n);
+const view = new PdfPageView(listener);
+document.getElementById('root').appendChild(view.el);
+view.setAnnotationStore(store);
+const bytes = new Uint8Array(await (await fetch('/dev/samples/sample-ko.pdf')).arrayBuffer());
+const doc = await PdfDoc.open(bytes);
+async function show(i) {
+  const bmp = await doc.renderPage(i, 2);
+  view.showPage(bmp, i, store.marks, store.strokes, store.translations);
+  const regions = await doc.textRegions(i);
+  view.setTextRegions(regions, false);
+  view.flush();
+  return regions.length;
+}
+window.T = { view, store, log, doc, show, Mark, InkStroke };
+await show(0);
+window.READY = true;
+</script></body></html>

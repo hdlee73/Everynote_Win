@@ -1,0 +1,21 @@
+/* PdfPageView root element (js/pageview.js). Layout is also set inline so the view works without this sheet. */
+.pdf-page-view {
+  flex: 1 1 0;
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+.pdf-page-view > canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}

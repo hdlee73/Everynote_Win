@@ -1,0 +1,77 @@
+<!doctype html><meta charset="utf-8"><title>painter test</title>
+<style>body{margin:0;background:#789;font:12px sans-serif;color:#fff}.row{display:flex;gap:12px;padding:10px;align-items:flex-start}canvas{background:#fff}</style>
+<body><div class="row" id="out"></div>
+<script type="module">
+import { AnnotationStore, Mark, InkStroke, InkPoint, TranslationNote, PageElement } from '../web/js/store.js';
+import { AnnotationPainter } from '../web/js/painter.js';
+import { Shapes, Table } from '../web/js/shapes.js';
+import { RectF } from '../web/js/util.js';
+
+const W = 640, H = 905;                                   // A4-ish page in CSS px
+function paper(dark) {
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+  g.fillStyle = dark ? '#000' : '#fff'; g.fillRect(0, 0, W, H);
+  g.fillStyle = dark ? '#ddd' : '#222'; g.font = '15px "Noto Sans KR",sans-serif';
+  for (let y = 40; y < H - 20; y += 22) g.fillText('The quick brown fox jumps over the lazy dog. 가나다라마바사 아자차카타파하 ' + (y / 22 | 0), 30, y);
+  return c;
+}
+async function pngAsset(color, w, h) {            // an image asset stored through the (fake) host
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
+  const gr = g.createLinearGradient(0, 0, w, h); gr.addColorStop(0, color); gr.addColorStop(1, '#fff'); g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  g.strokeStyle = '#000'; g.lineWidth = 6; g.strokeRect(3, 3, w - 6, h - 6); g.fillStyle = '#000'; g.font = 'bold 40px sans-serif'; g.fillText(w + 'x' + h, 14, h / 2);
+  const name = AnnotationStore.newAssetName('png');
+  await AnnotationStore.saveAsset(name, await new Promise(r => c.toBlob(r, 'image/png')));
+  return name;
+}
+const E = (o) => Object.assign(new PageElement(), o);
+const store = new AnnotationStore();
+const img = await pngAsset('#e66', 300, 150), thumb = await pngAsset('#38c', 320, 180);
+// marks: highlight, highlight + note, note-only, minimized note, hidden note
+const hl = (l, t, r, b, color, note = '', extra = {}) => { const m = new Mark(); Object.assign(m, { page: 0, left: l, top: t, right: r, bottom: b, color, note }, extra); store.marks.push(m); };
+hl(.05, .03, .55, .05, 0x66FFEB3B | 0); hl(.05, .07, .4, .09, 0x6600C853 | 0, '하이라이트 + 메모\n두 번째 줄 wrapped note text that is long enough');
+hl(.05, .11, .3, .13, 0x66FF5252 | 0, '접힘', { minimized: true }); hl(.05, .15, .06, .16, 0, '메모만 있는 상자', { noteOnly: true });
+hl(.05, .19, .4, .21, 0x662979FF | 0, '숨김', { visible: false });
+// translation
+const tr = new TranslationNote(); Object.assign(tr, { page: 0, left: .05, top: .24, right: .45, bottom: .26, source: 'Hello', translated: '안녕하세요 번역 결과가 여기에 표시됩니다 long long text' }); store.translations.push(tr);
+const tr2 = new TranslationNote(); Object.assign(tr2, { page: 0, left: .05, top: .30, right: .2, bottom: .32, source: 'x', translated: 'x', minimized: true }); store.translations.push(tr2);
+// strokes with pressure
+const st = new InkStroke(); st.page = 0; st.color = 0xFF1565C0 | 0; st.width = .004;
+for (let i = 0; i <= 60; i++) { const t = i / 60; st.points.push(new InkPoint(.55 + .35 * t, .05 + .04 * Math.sin(t * 9), .1 + .9 * Math.sin(t * Math.PI))); }
+store.strokes.push(st);
+const st2 = new InkStroke(); st2.page = 0; st2.color = 0x80D81B60 | 0; st2.width = .008; st2.points.push(new InkPoint(.6, .12, .5), new InkPoint(.9, .14, .5), new InkPoint(.7, .17, 1)); store.strokes.push(st2);
+const st3 = new InkStroke(); st3.page = 0; st3.color = 0xFF1C1C1E | 0; st3.width = .004; st3.points.push(new InkPoint(.7, .2, .65)); store.strokes.push(st3);
+// elements
+const add = (o) => store.elements.push(E(Object.assign({ page: 0 }, o)));
+add({ kind: 'text', text: '일반 텍스트 상자\nSecond line 두 번째 줄, wrapping happens at characters not words.', left: .05, top: .36, right: .5, bottom: .43 });
+add({ kind: 'text', text: 'Serif bold italic 명조', font: 'serif', bold: true, italic: true, textSize: .035, color: 0xFFDC2626 | 0, left: .52, top: .36, right: .95, bottom: .41 });
+add({ kind: 'text', text: 'mono: const x = 42;', font: 'mono', left: .52, top: .42, right: .95, bottom: .45 });
+add({ kind: 'text', text: 'hand 손글씨 Handwriting', font: 'hand', textSize: .04, left: .52, top: .45, right: .95, bottom: .5 });
+add({ kind: 'image', asset: img, left: .05, top: .46, right: .35, bottom: .56 });
+add({ kind: 'sticker', text: '⭐', left: .38, top: .47, right: .48, bottom: .53 });
+add({ kind: 'sticker', text: '😀', left: .38, top: .54, right: .48, bottom: .6 });
+add({ kind: 'video', text: AnnotationStore.newAssetName('mp4'), asset: thumb, left: .05, top: .58, right: .38, bottom: .68 });
+add({ kind: 'video', text: AnnotationStore.newAssetName('mp4'), asset: '', left: .4, top: .58, right: .55, bottom: .64 });
+add({ kind: 'youtube', text: 'dQw4w9WgXcQ', asset: thumb, left: .58, top: .58, right: .95, bottom: .7 });
+for (const [i, k] of Shapes.KINDS.entries()) add({ kind: 'shape', text: Shapes.shapeSpec(k, 0xFF007AFF | 0, k === 'line' || k === 'arrow' ? 0 : 0x55FFB300, 3), left: .05 + (i % 5) * .185, top: .72 + Math.floor(i / 5) * .06, right: .05 + (i % 5) * .185 + .16, bottom: .72 + Math.floor(i / 5) * .06 + .05 });
+const t = Table.create(3, 3, 0xFF3A3A3C | 0, 0xFFE5F0FF | 0, 0x00FFFFFF); t.cells[0] = '이름'; t.cells[1] = 'Name'; t.cells[2] = 'a very long header cell that is ellipsized'; t.cells[4] = '값'; t.cells[8] = 'end';
+add({ kind: 'table', text: t.serialize(), left: .05, top: .85, right: .5, bottom: .93 });
+add({ kind: 'hyperlink', text: 'https://example.com', color: 1, left: .55, top: .83, right: .95, bottom: .85 });
+add({ kind: 'hyperlink', text: 'https://example.com', color: 1, left: .55, top: .85, right: .8, bottom: .87 });
+add({ kind: 'hyperlink', text: 'page:3', color: 2, left: .55, top: .89, right: .7, bottom: .91 });
+add({ kind: 'audio', text: '0:12', asset: AnnotationStore.newAssetName('m4a'), left: .52, top: .93, right: .95, bottom: .97 });
+add({ kind: 'link', text: '노트 링크 label', left: .05, top: .945, right: .45, bottom: .975 });
+
+await AnnotationPainter.preload(store);
+const out = document.getElementById('out');
+function render(label, dark, method) {
+  const c = paper(dark), g = c.getContext('2d'); AnnotationPainter.dark = dark;
+  const d = new RectF(0, 0, W, H);
+  if (method === 'all') AnnotationPainter.all(g, d, store, 0); else { AnnotationPainter.strokes(g, d, store, 0); AnnotationPainter.elements(null, g, d, store, 0); }
+  AnnotationPainter.dark = false;
+  const wrap = document.createElement('div'); wrap.id = label; wrap.append(Object.assign(document.createElement('div'), { textContent: label }), c); out.append(wrap);
+}
+render('all-light', false, 'all'); render('all-dark', true, 'all');
+// fitHeight sanity next to the page
+const fh = AnnotationPainter.fitHeight('일반 텍스트 상자\nSecond line 두 번째 줄', .45, .027, H / W, AnnotationPainter.typeface('sans', false, false));
+window.__done = { fh, w: W, h: H };
+</script>

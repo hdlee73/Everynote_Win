@@ -1,0 +1,14 @@
+// usage: node dev/painter-test.mjs -> dev/out/painter-*.png (look at them!)
+import { chromium } from '/tmp/npmtest/node_modules/playwright/index.mjs';
+import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const srv = http.createServer((q, r) => { const f = path.join(root, decodeURIComponent(q.url.split('?')[0])); if (!fs.existsSync(f) || fs.statSync(f).isDirectory()) { r.writeHead(404); return r.end(); }
+  r.writeHead(200, { 'content-type': f.endsWith('.js') ? 'text/javascript' : 'text/html; charset=utf-8' }); fs.createReadStream(f).pipe(r); }).listen(8137);
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+const pg = await b.newPage({ viewport: { width: 1360, height: 960 }, deviceScaleFactor: 1 });
+pg.on('console', m => console.log('console', m.text())); pg.on('pageerror', e => console.log('ERR', e.message));
+await pg.goto('http://localhost:8137/dev/painter-test.html'); await pg.waitForFunction('window.__done', null, { timeout: 15000 });
+console.log(JSON.stringify(await pg.evaluate('window.__done')));
+fs.mkdirSync(path.join(root, 'dev/out'), { recursive: true });
+for (const id of ['all-light', 'all-dark']) await (await pg.$('#' + id)).screenshot({ path: path.join(root, `dev/out/painter-${id}.png`) });
+await b.close(); srv.close();

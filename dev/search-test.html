@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><title>search test</title>
+<script>
+// old Chromium used by the test box lacks these (pdf.js 5 needs them for render())
+for (const C of [Map, WeakMap]) { C.prototype.getOrInsertComputed ||= function (k, f) { if (!this.has(k)) this.set(k, f(k)); return this.get(k); }; C.prototype.getOrInsert ||= function (k, v) { if (!this.has(k)) this.set(k, v); return this.get(k); }; }
+</script>
+<script type="module">
+import { PdfDoc, ocrHook } from '/js/pdfdoc.js';
+import { host } from '/js/host.js';
+import * as S from '/js/search.js';
+window.T = { PdfDoc, ocrHook, host, S };
+window.ready = true;
+</script>

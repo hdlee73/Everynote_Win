@@ -1,0 +1,139 @@
+/* Library (문서함) — LibraryDialog / FolderTreeView / PaperChoiceView. Sizes in dp == px, values from spec/library.md. */
+.lib-root{position:fixed;inset:0;z-index:5000;background:#fff;display:flex;overflow:hidden;color:#1C1C1E;
+  font-family:"Segoe UI","Malgun Gothic","Roboto","Noto Sans KR","Noto Sans CJK KR",sans-serif}
+.lib-root *{box-sizing:border-box}
+.lib-ib{width:48px;height:52px;flex:none;display:flex;align-items:center;justify-content:center;color:#1C1C1E;cursor:pointer;background:transparent;border:0;padding:0}
+.lib-ib.sq{width:52px}
+.lib-ib.on{background:#E5F0FF;border-radius:26px}
+
+/* rail */
+.lib-rail{width:68px;flex:none;padding:12px 6px;display:flex;flex-direction:column;align-items:center;background:#fff}
+.lib-rail .lib-ib{width:52px}
+.lib-rail .gap{height:18px;width:1px;flex:none}
+.lib-rail .lib-ib.rb{margin-bottom:14px}
+.lib-rail .lib-ib.fo{margin-top:14px}
+.lib-dots{height:2px;flex:none;background:repeating-linear-gradient(90deg,#AEAEB2 0 2px,transparent 2px 7px)}
+.lib-rail .lib-dots{width:44px}
+.lib-menu-btn{display:none}
+@media (max-width:599px){.lib-rail{display:none}.lib-menu-btn{display:flex}}
+
+/* page */
+.lib-page{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
+.lib-top{height:56px;flex:none;display:flex;align-items:center;padding:4px 6px 0}
+.lib-top .sp{flex:1}
+.lib-searchrow{display:none;padding:0 16px 6px;flex:none}
+.lib-searchrow.on{display:block}
+.lib-search{width:100%;height:46px;font-size:15px;color:#1C1C1E;background:#F2F2F7;border:2px solid #F2F2F7;border-radius:12px;padding:0 16px;outline:none}
+.lib-search:focus{background:#fff;border-color:#007AFF}
+.lib-search::placeholder{color:rgba(0,0,0,.38)}
+.lib-heading{flex:none;display:flex;flex-direction:column;align-items:center;padding:2px 16px 8px}
+.lib-up{display:none;align-items:center;justify-content:center;height:32px;padding:0 14px;border-radius:16px;background:#E5F0FF;color:#007AFF;font-size:13px;cursor:pointer;white-space:pre;max-width:100%}
+.lib-up.on{display:inline-flex}
+.lib-up .nm{overflow:hidden;text-overflow:ellipsis}
+.lib-title{width:100%;height:54px;padding-top:6px;font-size:30px;font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;justify-content:center}
+.lib-title span{overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.lib-sub{height:26px;font-size:15px;color:#8E8E93;text-align:center;line-height:26px}
+.lib-shelf{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;position:relative}
+.lib-grid{display:grid;padding:6px 14px 96px;align-items:start}
+.lib-cell{margin:4px 7px 12px;min-width:0}
+.lib-empty{height:140px;display:flex;align-items:center;justify-content:center;font-size:16px;color:#8E8E93;grid-column:1/-1}
+
+/* cards */
+.lib-card{display:flex;flex-direction:column;align-items:center;cursor:pointer;min-width:0}
+.lib-frame{position:relative;width:100%}
+.lib-cover{position:absolute;inset:0;background:#fff;border:1px solid rgba(43,47,74,.102);border-radius:20px;overflow:hidden}
+.lib-cover.sm{border-radius:12px}
+.lib-cover img,.lib-cover svg.ph{position:absolute;inset:0;width:100%;height:100%;display:block}
+.lib-cover img{object-fit:cover}
+.lib-cover svg.ph{color:#1C1C1E}
+.lib-fshape{position:absolute;left:0;right:0;bottom:0;display:block}
+.lib-fcount{position:absolute;left:14px;font-size:16px;color:#59607E;line-height:1.2}
+.lib-fav{position:absolute;top:8px;right:8px;width:26px;height:26px;padding:4px;border-radius:13px;background:rgba(255,255,255,.902);color:#FFB020}
+.lib-name{width:100%;padding:8px 2px 0;font-size:15px;font-weight:700;text-align:center;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;line-height:1.25}
+.lib-date{height:22px;width:100%;font-size:12px;color:#8E8E93;text-align:center;line-height:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lib-check{position:absolute;top:4px;left:4px;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.lib-check i{width:18px;height:18px;border:2px solid #757575;border-radius:2px;display:flex;align-items:center;justify-content:center;color:#fff}
+.lib-check.on i{background:#007AFF;border-color:#007AFF}
+.lib-check i svg{display:none}
+.lib-check.on i svg{display:block}
+.lib-check.row{position:static;width:40px;height:48px;flex:none}
+
+/* list rows */
+.lib-row{display:flex;align-items:center;padding:8px 10px;background:#fff;border-radius:14px;cursor:pointer}
+.lib-row .img{position:relative;width:56px;height:56px;flex:none}
+.lib-row .img>svg.fs{display:block;width:56px;height:56px}
+.lib-row .txt{flex:1;min-width:0;padding:0 4px 0 14px}
+.lib-row .txt .nm{font-size:15px;font-weight:700;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;line-height:1.25}
+.lib-row .txt .meta{font-size:12px;color:#8E8E93;line-height:1.3}
+.lib-row .star{width:22px;height:22px;flex:none;color:#FFB020}
+
+/* selection bar */
+.lib-selbar{display:none;flex:none;background:#fff;border-radius:22px 22px 0 0;box-shadow:0 -3px 10px rgba(0,0,0,.16);position:relative;z-index:2;flex-direction:column}
+.lib-selbar.on{display:flex}
+.lib-selcount{height:34px;font-size:14px;font-weight:700;text-align:center;line-height:34px}
+.lib-selcmds{height:54px;display:flex;align-items:center;padding:0 8px 6px;overflow-x:auto;overflow-y:hidden}
+.lib-cmd{flex:none;height:44px;padding:0 14px;margin:0 4px;border-radius:18px;background:#F2F2F7;font-size:14px;font-weight:700;color:#1C1C1E;display:flex;align-items:center;cursor:pointer;white-space:nowrap}
+.lib-cmd.red{color:#FF3B30}
+
+/* compose FAB */
+.lib-fab{position:absolute;right:22px;bottom:24px;width:56px;height:56px;border-radius:28px;background:#fff;color:#E5484D;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 3px 6px rgba(0,0,0,.18),0 1px 3px rgba(0,0,0,.12);cursor:pointer;z-index:3}
+
+/* drawer */
+.lib-drawer{position:absolute;inset:0;z-index:10;display:none}
+.lib-drawer.on{display:block}
+.lib-scrim{position:absolute;inset:0;background:rgba(0,0,0,.251);opacity:0}
+.lib-panel{position:absolute;left:0;top:0;bottom:0;background:#fff;border-radius:0 28px 28px 0;box-shadow:0 6px 24px rgba(0,0,0,.3);padding:14px 10px 12px 6px;display:flex;flex-direction:column}
+.lib-ptop{height:48px;flex:none;display:flex;align-items:center}
+.lib-ptop .lib-ib{width:56px;height:48px}
+.lib-drow{height:52px;flex:none;display:flex;align-items:center;padding:0 16px 0 14px;border-radius:26px}
+.lib-drow.click{cursor:pointer}
+.lib-drow.on{background:#E5F0FF}
+.lib-drow .ico{width:28px;height:28px}
+.lib-drow .nm{flex:1;padding-left:18px;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lib-drow .ct{font-size:16px;color:#8E8E93}
+.lib-panel .lib-dots{margin:8px 10px;flex:none}
+.lib-panel .tree{flex:1;min-height:0}
+.lib-manage{flex:none;height:48px;margin:8px 24px 0;border-radius:24px;background:#F2F2F7;font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer}
+
+/* folder tree */
+.lib-tree{overflow-y:auto;background:#F3F6FA}
+.lib-tree.transparent{background:transparent}
+.lib-tree .rows{padding:10px 8px}
+.lib-trow{display:flex;align-items:center;height:46px;padding-right:3px;border-radius:10px}
+.lib-trow.sel{background:#E3EDFB}
+.lib-trow .arrow{width:28px;height:46px;flex:none;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#8E8E93}
+.lib-trow .fname{flex:1;min-width:0;height:46px;display:flex;align-items:center;gap:8px;font-size:14px;color:#334155;cursor:pointer}
+.lib-trow.sel .fname{color:#007AFF}
+.lib-trow .fname .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lib-trow .fname svg{flex:none;display:block}
+
+/* picker (copy/move) */
+.lib-picker-add{height:44px;font-size:15px;color:#007AFF;display:flex;align-items:center;justify-content:center;cursor:pointer}
+
+/* inputs inside dialogs */
+.lib-inwrap .lib-in{width:100%;font-size:16px;color:#1C1C1E;background:#F2F2F7;border:2px solid #F2F2F7;border-radius:12px;padding:12px 16px;outline:none;height:48px}
+.lib-inwrap .lib-in:focus{background:#fff;border-color:#007AFF}
+.lib-inwrap .lib-in.bad{border-color:#FF3B30}
+.lib-inwrap .lib-err{display:none;color:#FF3B30;font-size:12px;padding:4px 4px 0;text-align:left}
+.lib-inwrap .lib-err.on{display:block}
+.lib-notename .lib-in{height:56px;padding:12px 18px;border-radius:0;background:transparent;border:0;border-bottom:2px solid #D1D1D6}
+.lib-notename .lib-in:focus{background:transparent;border-bottom-color:#007AFF}
+
+/* progress dialog */
+.lib-prog{position:fixed;inset:0;z-index:9100;background:rgba(0,0,0,.32);display:flex;align-items:center;justify-content:center}
+.lib-prog .card{margin:4px;background:#fff;border-radius:20px;padding:20px 24px;display:flex;align-items:center;gap:20px;min-width:260px;max-width:calc(100vw - 48px)}
+.lib-prog .msg{font-size:16px;color:#1C1C1E}
+.lib-spin{width:36px;height:36px;border-radius:50%;border:4px solid #E5E5EA;border-top-color:#007AFF;animation:libspin .9s linear infinite;flex:none}
+@keyframes libspin{to{transform:rotate(360deg)}}
+
+/* PaperChoiceView */
+.lib-paper{padding:8px 18px;display:flex;flex-direction:column}
+.lib-paper select{height:48px;width:100%;font-size:16px;color:#1C1C1E;border:0;border-bottom:2px solid #8E8E93;background:transparent;padding:0 28px 0 0;
+  appearance:none;-webkit-appearance:none;outline:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M0 0l6 8 6-8z' fill='%238E8E93'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 4px center}
+.lib-paper select:focus{border-bottom-color:#007AFF}
+.lib-paper canvas{width:100%;height:158px;display:block}
+.lib-chips{height:58px;display:flex;align-items:center;overflow-x:auto;overflow-y:hidden}
+.lib-chip{width:40px;height:40px;flex:none;border-radius:20px;margin:0 6px 0 3px;border:1px solid #CBD5E1;display:flex;align-items:center;justify-content:center;color:#007AFF;cursor:pointer}
+.lib-chip.on{border:2px solid #007AFF}

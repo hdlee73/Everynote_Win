@@ -2,82 +2,138 @@ name: Build & Release
 
 on:
   push:
-    branches: [main]
+    branches: [main, host-dev]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      test_libreoffice:
+        description: 'Install LibreOffice on the runner and smoke-test docx -> PDF conversion'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
+  # Offline HWP/HWPX -> PDF engine (rhwptopdf WASM), same pinned source and patch as the Android app.
+  hwp-engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: sanguneo/rhwptopdf
+          ref: adbc4bf0f5c6e041ed65b0dbc8aa6b810990a48b
+          path: .hwp-engine-source
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .hwp-engine-source
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: 'v0.13.1'
+      - name: Korean TTC regression font
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - name: Test and build offline HWP engine
+        env:
+          PDFNOTE_TEST_FONT: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+        run: |
+          set -o pipefail
+          python3 tools/prepare_hwp_engine.py --out web/hwp 2>&1 | tee engine.log || {
+            grep -E "error(\[|:)|panicked|FAILED|failed" engine.log | head -8 | while read -r l; do echo "::error title=hwp-engine::${l:0:400}"; done
+            exit 1; }
+          ls -l web/hwp
+          echo "::notice title=hwp-engine::built $(stat -c %s web/hwp/rhwptopdf.umd.js) + $(stat -c %s web/hwp/rhwptopdf.umd_bg.wasm) bytes"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hwp-engine
+          path: |
+            web/hwp/rhwptopdf.umd.js
+            web/hwp/rhwptopdf.umd_bg.wasm
+          if-no-files-found: error
+
   build:
+    needs: hwp-engine
+    if: ${{ !cancelled() }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Fetch HWP engine
+        id: engine
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: hwp-engine
+          path: web/hwp
+      - name: Check HWP engine
+        shell: pwsh
+        run: |
+          if ((Test-Path web/hwp/rhwptopdf.umd.js) -and (Test-Path web/hwp/rhwptopdf.umd_bg.wasm)) {
+            Write-Host "::notice title=hwp-engine::embedded $([int]((Get-Item web/hwp/rhwptopdf.umd_bg.wasm).Length/1KB)) KB wasm"
+          } elseif ("${{ github.ref }}" -like "refs/tags/*") {
+            Write-Host "::error title=hwp-engine::engine missing on a release build"; exit 1
+          } else {
+            Write-Host "::warning title=hwp-engine::engine missing: HWP conversion unavailable in this build"
+          }
 
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
-      - name: Restore
-        run: dotnet restore src/PDFNote.csproj
-
-      - name: Publish win-x64 (self-contained, single file)
-        run: >
-          dotnet publish src/PDFNote.csproj -c Release -r win-x64 --self-contained true
-          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:EnableCompressionInSingleFile=true -p:PublishReadyToRun=true
-          -o out/x64
-
-      - name: Publish win-arm64 (self-contained, single file)
-        run: >
-          dotnet publish src/PDFNote.csproj -c Release -r win-arm64 --self-contained true
-          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:EnableCompressionInSingleFile=true -p:PublishReadyToRun=true
-          -o out/arm64
-
-      - name: Publish win-x64 (framework-dependent, small)
-        run: >
-          dotnet publish src/PDFNote.csproj -c Release -r win-x64 --self-contained false
-          -p:PublishSingleFile=true -o out/fd
-
-      - name: Smoke test (launch app, open sample PDF, screenshot)
-        continue-on-error: true
+      - name: Version
+        id: ver
         shell: pwsh
         run: |
-          python tools/make_sample_pdf.py "$PWD\sample.pdf"
-          $p = Start-Process -FilePath "$PWD\out\x64\PDFNote.exe" -ArgumentList "`"$PWD\sample.pdf`"" -PassThru
-          Start-Sleep -Seconds 30
-          $p.Refresh()
-          $failed = $false
-          if ($p.HasExited) {
-            Write-Host "::error title=smoke::APP EXITED with code $($p.ExitCode)"
-            $failed = $true
-          } else {
-            Write-Host "::notice title=smoke::APP RUNNING title='$($p.MainWindowTitle)' ws=$([int]($p.WorkingSet64/1MB))MB private=$([int]($p.PrivateMemorySize64/1MB))MB threads=$($p.Threads.Count) responding=$($p.Responding)"
+          $v = '2.0.0'
+          if ("${{ github.ref }}" -like "refs/tags/v*") { $v = "${{ github.ref_name }}".TrimStart('v') }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Restore
+        shell: pwsh
+        run: |
+          dotnet restore host/PDFNote.csproj -r win-x64 2>&1 | Tee-Object -FilePath restore.log
+          if ($LASTEXITCODE -ne 0) {
+            (Get-Content restore.log | Where-Object { $_ -match 'error' } | Select-Object -Unique -First 8) | ForEach-Object { Write-Host "::error title=restore::$($_.Trim() -replace '%','%25')" }
+            exit 1
           }
-          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
-          $g = [System.Drawing.Graphics]::FromImage($bmp)
-          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-          New-Item -ItemType Directory -Force -Path smoke | Out-Null
-          $bmp.Save("$PWD\smoke\screenshot.png")
-          # crude visual check: fraction of non-uniform pixels in the screenshot (blank screen => ~0)
-          $small = New-Object System.Drawing.Bitmap $bmp, 64, 36
-          $set = New-Object System.Collections.Generic.HashSet[int]
-          for ($x=0;$x -lt 64;$x++){ for($y=0;$y -lt 36;$y++){ [void]$set.Add($small.GetPixel($x,$y).ToArgb()) } }
-          Write-Host "::notice title=smoke-screen::distinct colors in 64x36 thumbnail: $($set.Count) screen=$($b.Width)x$($b.Height)"
-          $log = Join-Path $env:APPDATA "PDFNote\\log.txt"
-          if (Test-Path $log) {
-            $txt = (Get-Content $log -Raw)
-            if ($txt.Length -gt 3000) { $txt = $txt.Substring(0,3000) }
-            $enc = $txt -replace '%','%25' -replace "`r",'%0D' -replace "`n",'%0A'
-            Write-Host "::error title=smoke-applog::$enc"
-          } else { Write-Host "::notice title=smoke-applog::no app log (no handled/unhandled errors)" }
-          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
-          if ($failed) { exit 1 }
+
+      - name: Publish win-x64 (self-contained, single file)
+        shell: pwsh
+        run: |
+          dotnet publish host/PDFNote.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishReadyToRun=true -p:Version=${{ steps.ver.outputs.version }} -o out/x64 2>&1 | Tee-Object -FilePath build-x64.log
+          if ($LASTEXITCODE -ne 0) {
+            (Get-Content build-x64.log | Where-Object { $_ -match ': error ' } | ForEach-Object { $_.Trim() -replace '^.*?host[\\/]','' } | Select-Object -Unique -First 10) | ForEach-Object { Write-Host "::error title=build-x64::$($_ -replace '%','%25')" }
+            exit 1
+          }
+          Write-Host "::notice title=build-x64::exe $([int]((Get-Item out/x64/PDFNote.exe).Length/1MB)) MB"
+          (Get-Content build-x64.log | Where-Object { $_ -match ': warning ' } | ForEach-Object { $_.Trim() -replace '^.*?host[\\/]','' } | Select-Object -Unique -First 5) | ForEach-Object { Write-Host "::warning title=build-warn::$($_ -replace '%','%25')" }
+
+      - name: Publish win-arm64 (self-contained, single file)
+        shell: pwsh
+        run: |
+          dotnet publish host/PDFNote.csproj -c Release -r win-arm64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishReadyToRun=true -p:Version=${{ steps.ver.outputs.version }} -o out/arm64 2>&1 | Tee-Object -FilePath build-arm64.log
+          if ($LASTEXITCODE -ne 0) {
+            (Get-Content build-arm64.log | Where-Object { $_ -match ': error ' } | ForEach-Object { $_.Trim() -replace '^.*?host[\\/]','' } | Select-Object -Unique -First 10) | ForEach-Object { Write-Host "::error title=build-arm64::$($_ -replace '%','%25')" }
+            exit 1
+          }
+
+      - name: Prepare LibreOffice + docx (optional)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.test_libreoffice }}
+        shell: pwsh
+        run: |
+          choco install libreoffice-fresh -y --no-progress | Select-Object -Last 3
+          $docx = Join-Path ([IO.Path]::GetTempPath()) 'smoke.docx'
+          python tools/make_sample_docx.py $docx
+          "SMOKE_DOCX=$docx" >> $env:GITHUB_ENV
+
+      - name: Smoke test (launch, open sample PDF, host protocol checks, screenshot)
+        shell: pwsh
+        run: |
+          ./tools/smoke.ps1 -Exe "$PWD\out\x64\PDFNote.exe" -Pdf "$PWD\dev\samples\sample-ko.pdf" -Out smoke -Docx "$env:SMOKE_DOCX" -Hwpx "$PWD\tools\sample.hwpx"
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -94,7 +150,6 @@ jobs:
           if (-not ("${{ github.ref }}" -like "refs/tags/*")) { $v = "dev" }
           Copy-Item out/x64/PDFNote.exe "dist/PDFNote-$v-win-x64.exe"
           Copy-Item out/arm64/PDFNote.exe "dist/PDFNote-$v-win-arm64.exe"
-          Copy-Item out/fd/PDFNote.exe "dist/PDFNote-$v-win-x64-lite(needs-.NET8-Desktop-Runtime).exe"
           Get-ChildItem dist | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v4
@@ -111,12 +166,12 @@ jobs:
           $tag = "${{ github.ref_name }}"
           $notes = "docs/release-notes/$tag.md"
           $files = Get-ChildItem dist | ForEach-Object { $_.FullName }
-          gh release view $tag 2>$null
+          gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag @files --clobber
-            if (Test-Path $notes) { gh release edit $tag --title "PDF Note for Windows $tag" --notes-file $notes }
+            if (Test-Path $notes) { gh release edit $tag --notes-file $notes --title "PDF Note for Windows $tag" }
           } elseif (Test-Path $notes) {
-            gh release create $tag @files --title "PDF Note for Windows $tag" --notes-file $notes
+            gh release create $tag @files --title "PDF Note for Windows $tag" --notes-file $notes --target $env:GITHUB_SHA
           } else {
-            gh release create $tag @files --title "PDF Note for Windows $tag" --generate-notes
+            gh release create $tag @files --title "PDF Note for Windows $tag" --generate-notes --target $env:GITHUB_SHA
           }
