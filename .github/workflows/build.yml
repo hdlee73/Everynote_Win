@@ -1,0 +1,74 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore src/PDFNote.csproj
+
+      - name: Publish win-x64 (self-contained, single file)
+        run: >
+          dotnet publish src/PDFNote.csproj -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:PublishReadyToRun=true
+          -o out/x64
+
+      - name: Publish win-arm64 (self-contained, single file)
+        run: >
+          dotnet publish src/PDFNote.csproj -c Release -r win-arm64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -p:PublishReadyToRun=true
+          -o out/arm64
+
+      - name: Publish win-x64 (framework-dependent, small)
+        run: >
+          dotnet publish src/PDFNote.csproj -c Release -r win-x64 --self-contained false
+          -p:PublishSingleFile=true -o out/fd
+
+      - name: Collect release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $v = "${{ github.ref_name }}"
+          if (-not ("${{ github.ref }}" -like "refs/tags/*")) { $v = "dev" }
+          Copy-Item out/x64/PDFNote.exe "dist/PDFNote-$v-win-x64.exe"
+          Copy-Item out/arm64/PDFNote.exe "dist/PDFNote-$v-win-arm64.exe"
+          Copy-Item out/fd/PDFNote.exe "dist/PDFNote-$v-win-x64-lite(needs-.NET8-Desktop-Runtime).exe"
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PDFNote-windows
+          path: dist/*
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $notes = "docs/release-notes/$tag.md"
+          $files = Get-ChildItem dist | ForEach-Object { $_.FullName }
+          if (Test-Path $notes) {
+            gh release create $tag @files --title "PDF Note for Windows $tag" --notes-file $notes
+          } else {
+            gh release create $tag @files --title "PDF Note for Windows $tag" --generate-notes
+          }
