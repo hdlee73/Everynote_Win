@@ -89,7 +89,7 @@ jobs:
         shell: pwsh
         run: |
           $v = '2.0.0'
-          if ("${{ github.ref }}" -like "refs/tags/v*") { $v = "${{ github.ref_name }}".TrimStart('v') }
+          if ("${{ github.ref }}" -like "refs/tags/v*") { $v = "${{ github.ref_name }}" -replace '^v\.?','' }
           "version=$v" >> $env:GITHUB_OUTPUT
 
       - name: Restore
@@ -164,7 +164,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ github.ref_name }}"
-          $notes = "docs/release-notes/$tag.md"
+          $norm = 'v' + ($tag -replace '^v\.?','')
+          $notes = "docs/release-notes/$norm.md"
           $files = Get-ChildItem dist | ForEach-Object { $_.FullName }
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
