@@ -1,0 +1,15 @@
+import {chromium} from '/tmp/npmtest/node_modules/playwright/index.mjs';
+import {serve} from './server.mjs'; import fs from 'fs';
+const s=await serve(8140);
+const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
+const pg=await b.newPage({viewport:{width:1280,height:800}});
+const errs=[]; pg.on('pageerror',e=>errs.push('PE '+e.message)); pg.on('console',m=>{if(m.type()==='error')errs.push('CE '+m.text())});
+await pg.addInitScript(()=>{Map.prototype.getOrInsertComputed??=function(k,f){if(!this.has(k))this.set(k,f(k));return this.get(k)}});
+await pg.goto('http://localhost:8140/index.html'); await pg.waitForTimeout(1500);
+await pg.screenshot({path:'dev/out/e2e-home.png'});
+const bytes=[...fs.readFileSync('dev/samples/sample-ko.pdf')];
+const r=await pg.evaluate(async b=>{const {host}=await import('./js/host.js');host._fake.put('C:\\Docs\\sample-ko.pdf',new Uint8Array(b));try{await app.openPdf('C:\\Docs\\sample-ko.pdf');return 'ok'}catch(e){return 'ERR '+e.stack}},bytes);
+console.log(r); await pg.waitForTimeout(2000);
+await pg.screenshot({path:'dev/out/e2e-open.png'});
+console.log(await pg.evaluate(()=>({page:app.currentPage,title:app.documentTitle})));
+console.log(errs.join('\n')); await b.close(); s.close();
