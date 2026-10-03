@@ -24,6 +24,7 @@
     const ls = await host.list(dir + '\\sub'); ok('list', ls.length === 2 && ls.every(e => !e.isDir && e.size === big.length && e.mtime > 1e12), JSON.stringify(ls));
     await host.delete(dir); ok('delete', !(await host.exists(dir)));
     // ---- file server + Range
+    for (let i = 0; i < 100 && !(window.app && window.app.documentUri); i++) await new Promise(r => setTimeout(r, 200));
     const url = await host.call('fs.url', { path: (window.app && window.app.documentUri) || info.args[0] });
     const r = await fetch(url, { headers: { Range: 'bytes=0-9' } });
     ok('range', r.status === 206 && (await r.text()).startsWith('%PDF-'), r.status);
