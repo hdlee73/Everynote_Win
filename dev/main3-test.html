@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>main3 test</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/css/app.css"><link rel="stylesheet" href="/css/pageview.css"><link rel="stylesheet" href="/css/main1.css"><link rel="stylesheet" href="/css/main2.css"><link rel="stylesheet" href="/css/main3.css">
+<style>#root{display:flex;flex-direction:column;width:100vw;height:100vh}#hdr{height:52px;background:#F9F9F9;flex:none}#row{flex:1;display:flex;min-height:0}#vp{position:relative;flex:1;display:flex;min-width:0}#papers{display:flex;flex:1}</style>
+</head><body><div id="root"><div id="hdr"></div><div id="row"></div></div>
+<script type="module">
+import { MainActivity } from '/js/app.js';
+import { PdfDoc } from '/js/pdfdoc.js';
+import { PdfPageView } from '/js/pageview.js';
+import { AnnotationStore } from '/js/store.js';
+import { host } from '/js/host.js';
+
+const app = window.app = new MainActivity();
+const calls = window.calls = [];
+const stub = (n, f) => { if (!MainActivity.prototype[n]) MainActivity.prototype[n] = f || function (...a) { calls.push([n, ...a]); }; };
+['onSelectionAdjustStarted','syncOtherTools','placeElement','toggleOutlineMode','showPageMenu','showOutlineItem','chooseAddedPage','confirmDeletePage','choosePageToInsert',
+ 'toggleSidebar','goToPage','toggleTwoPage','toggleFullscreen','choosePageSwipeDirection','choosePageAnimation','startTextSelection',
+ 'pickImage','showStickerPicker','pickVideo','startHyperlink','pasteImage','askYoutube','toggleMemoMode','showStudy','recognizePageText',
+ 'exportPdf','exportStudy','exportAnnotations','importSidecar','saveToLibrary','saveSessionState','applyKeepAwake','updateThumbnailSelection'].forEach(n => stub(n));
+MainActivity.prototype.updateToolStates = function () { this.updateLassoBar(); };
+MainActivity.prototype.setInkMode = function (m) { calls.push(['setInkMode', m]); this.inkMode = m; if (m === 0) this.pageView.setLassoMode(false); this.updateLassoBar(); };
+MainActivity.prototype.setWriteMode = function (m) { calls.push(['setWriteMode', m]); };
+
+const listener = {};
+for (const n of ['onHighlightCreated','onMarkTapped','onMemoPointRequested','onZoomGestureStarted','onPageSwipe','onOutlinePointRequested','onInkChanged','onTextSelectionFinished','onTranslationTapped','onSelectionAdjustStarted','onLassoSelectionFinished','onElementTapped','onBlankLongPress']) listener[n] = () => {};
+app.firstPageView = app.pageView = new PdfPageView(listener); app.secondPageView = new PdfPageView(listener); app.secondPageView.el.style.display = 'none';
+const row = document.getElementById('row'); app.viewerRow = row;
+app.buildSearchPanel(); app.buildSidePanel(); row.append(app.sidePanel);
+const vp = document.getElementById('papers') || document.createElement('div'); vp.id = 'vp'; row.append(vp); app.viewportLayer = vp;
+const papers = document.createElement('div'); papers.id = 'papers'; papers.append(app.firstPageView.el, app.secondPageView.el); vp.append(papers);
+app.buildLassoBar(); vp.append(app.lassoBar);
+
+const bytes = new Uint8Array(await (await fetch('/dev/samples/sample-ko.pdf')).arrayBuffer());
+const path = 'C:\\Users\\dev\\Documents\\PDF Note\\sample-ko.pdf';
+host._fake.put(path, bytes);
+app.renderer = await PdfDoc.open(bytes);
+app.store = await new AnnotationStore().open(path);
+const session = { uri: path, title: 'sample-ko.pdf', renderer: app.renderer, store: app.store };
+app.sessions.push(session); app.activeSession = session; app.documentUri = path;
+app.showPage = async function (i) {
+  app.currentPage = i; const c = await app.renderer.renderPage(i, 2);
+  app.pageView.showPage(c, i, app.store.marks, app.store.strokes, app.store.translations); app.pageView.setDirectTextSelection(true); app.pageView.setAnnotationStore(app.store); app.pageView.flush();
+};
+await app.showPage(0);
+window.READY = true;
+</script></body></html>

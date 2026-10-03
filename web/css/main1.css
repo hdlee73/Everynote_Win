@@ -1,0 +1,90 @@
+/* MainActivity (part 1): shared layout base, header, tab strip, bottom bars, fullscreen dock, page arrows, selection popup. 1dp == 1px. */
+#app{position:fixed;inset:0;overflow:hidden}
+.m-root{position:relative;width:100%;height:100%;background:#F2F2F7;overflow:hidden}
+.m-content{display:flex;flex-direction:column;width:100%;height:100%;min-height:0}
+.m-content > .m-header,.m-content > .m-tabstrip,.m-content > .m-bottom{flex:none}
+
+/* ---- header (52) ---- */
+.m-header{height:52px;display:flex;align-items:center;padding:0 4px;background:#F9F9F9;position:relative;z-index:3}
+.m-libbtn{width:42px;height:42px;margin:0 2px 0 8px;padding:5px;border:0;border-radius:16px;background:#fff;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer}
+.m-libbtn svg{display:block}
+.m-title{height:36px;line-height:36px;margin:0 6px;padding:0 14px;border-radius:18px;background:#fff;color:#1C1C1E;font-size:15px;font-weight:700;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw;direction:ltr;text-align:left;cursor:pointer;flex:0 1 auto;min-width:0}
+.m-spacer{flex:1 1 0;min-width:0;height:1px}
+.m-ib{width:44px;height:52px;padding:0;margin:0;border:0;background:transparent;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;border-radius:12px}
+.m-ib:hover{background:rgba(0,0,0,.045)}
+.m-ib:focus{outline:none}
+.m-ib:focus-visible,.m-tb:focus-visible,.m-dockbtn:focus-visible{outline:2px solid rgba(0,122,255,.55);outline-offset:-2px}
+
+/* ---- tab strip (40) ---- */
+.m-tabstrip{height:40px;background:#F7F7F7;overflow-x:auto;overflow-y:hidden;touch-action:pan-x;position:relative;z-index:3}
+.m-tabrow{position:relative;display:flex;align-items:center;height:100%;width:max-content;min-width:100%;padding:4px 6px}
+.m-tab{display:flex;align-items:center;flex:none;height:30px;margin:0 3px;padding:0 0 0 8px;border-radius:14px;border:1px solid #E5E5EA;background:#F2F2F7;cursor:pointer}
+.m-tab.active{background:#fff;border-color:#C7C7CC;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.m-tab .m-tabname{display:block;width:96px;height:30px;line-height:30px;padding-left:6px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  direction:ltr;text-align:left;color:#8E8E93;font-weight:400}
+.m-tab.active .m-tabname{color:#1C1C1E;font-weight:700}
+.m-tab .m-tabclose{width:26px;height:30px;line-height:30px;text-align:center;font-size:19px;color:#AEAEB2;cursor:pointer;flex:none}
+.m-tab .m-tabclose:hover{color:#FF3B30}
+.m-tabadd{width:30px;height:30px;line-height:30px;margin:0 8px 0 4px;text-align:center;font-size:22px;color:#007AFF;background:#E5E5EA;border-radius:14px;flex:none;cursor:pointer}
+.m-tabadd:hover{background:#DCDCE2}
+
+/* ---- split / viewer ---- */
+.m-split{flex:1 1 0;min-height:0;min-width:0;display:flex;flex-direction:row;position:relative}
+.m-pdfarea{flex:1 1 0;min-width:0;min-height:0;position:relative}
+.m-viewer{position:absolute;inset:0;display:flex;flex-direction:row}
+.m-viewport{position:relative;flex:1 1 0;min-width:0;height:100%;overflow:hidden}
+.m-papers{position:absolute;inset:0;display:flex;flex-direction:row}
+.m-arrow{position:absolute;top:50%;width:52px;height:52px;margin-top:-26px;padding:0;border:0;border-radius:26px;background:rgba(247,245,255,.902);opacity:.38;
+  box-shadow:0 2px 6px rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:4;transition:opacity .15s}
+.m-arrow:hover{opacity:.8}
+.m-arrow.prev{left:8px}
+.m-arrow.next{right:8px}
+.m-curl{position:absolute;pointer-events:none;z-index:2}
+.m-lassowrap{position:absolute;left:0;right:0;top:8px;display:flex;justify-content:center;pointer-events:none;z-index:5}
+.m-lassowrap > *{pointer-events:auto}
+
+/* ---- bottom bar (54) ---- */
+.m-bottom{height:54px;background:#fff;border-radius:22px 22px 0 0;box-shadow:0 -2px 12px rgba(0,0,0,.15);padding:0 6px;position:relative;z-index:3}
+.m-bar{display:flex;align-items:center;height:100%;width:100%}
+.m-tb{flex:1 1 0;min-width:0;height:44px;margin:0 2px;padding:0;border:0;border-radius:22px;background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.m-tb:hover{background:rgba(0,0,0,.045)}
+.m-tb:focus{outline:none}
+.m-pagelabel{flex:none;width:86px;height:32px;line-height:32px;margin-right:5px;border-radius:10px;background:#F2F2F7;color:#8E8E93;font-size:11px;text-align:center;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.m-pagelabel:hover{background:#E9E9EF}
+
+/* ---- fullscreen dock ---- */
+.m-dockwrap{position:absolute;left:0;right:0;bottom:14px;display:flex;justify-content:center;pointer-events:none;z-index:60;padding:0 8px}
+.m-dock{display:none;height:44px;padding:0 6px;border-radius:24px;background:rgba(255,255,255,.96);box-shadow:0 3px 12px rgba(0,0,0,.28);align-items:center;pointer-events:auto;will-change:transform,opacity}
+.m-dockbtn{width:44px;height:44px;padding:0;border:0;background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:22px;flex:none}
+.m-dockbtn:hover{background:rgba(0,0,0,.05)}
+.m-dockhandle{position:absolute;left:50%;bottom:40px;width:44px;height:5px;margin-left:-22px;border-radius:3px;background:rgba(0,0,0,.4);display:none;z-index:60}
+
+/* ---- tool paint helpers: pen menu pieces ---- */
+.m-seg{display:flex;padding:4px 4px 6px}
+.m-seg .chip{flex:1 1 0;min-width:0;height:36px;line-height:36px;margin:0 3px;border-radius:18px;background:#F2F2F7;color:#1C1C1E;font-size:13px;text-align:center;white-space:nowrap;cursor:pointer}
+.m-seg .chip.on{background:#007AFF;color:#fff;font-weight:700}
+.m-sw{display:flex;align-items:center;padding:2px 4px 6px}
+.m-sw .dot{position:relative;flex:none;margin:0 3px;padding:5px;border-radius:50%;border:1px solid #D5DCE6;cursor:pointer;display:flex;align-items:center;justify-content:center;overflow:visible}
+.m-sw .dot.on{border:3px solid #1C1C1E}
+.m-sw .dot .ico{position:absolute;left:50%;top:50%;margin:-12px 0 0 -12px}
+.m-menubox{display:flex;flex-direction:column}
+
+/* ---- text selection popup (227 high) ---- */
+.m-selpop{position:fixed;z-index:8000;height:227px;padding:7px;background:#fff;border-radius:20px;box-shadow:0 6px 24px rgba(0,0,0,.22),0 0 0 1px rgba(0,0,0,.05);box-sizing:border-box}
+.m-selrow{display:flex;height:71px}
+.m-tile{flex:1 1 0;min-width:0;height:65px;margin:3px;border-radius:16px;background:#F4F7FB;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer}
+.m-tile:hover{background:#EBF0F8}
+.m-tile .chip{width:32px;height:32px;border-radius:12px;background:rgba(37,99,235,.12);display:flex;align-items:center;justify-content:center}
+.m-tile .lbl{margin-top:3px;height:22px;line-height:22px;width:100%;font-size:12px;color:#1C1C1E;text-align:center;white-space:nowrap;overflow:hidden}
+.m-selempty{flex:1 1 0;height:71px}
+
+/* ---- translation / outline dialog fields ---- */
+.m-fieldwrap{padding:0}
+.m-transpanel{display:flex;flex-direction:column;padding:4px 22px 0}
+.m-original{font-size:14px;line-height:1.25;color:#8E8E93;white-space:pre-wrap;word-break:break-word;max-height:30vh;overflow:auto;text-align:left;user-select:text;-webkit-user-select:text}
+.m-result{display:block;width:100%;margin-top:6px;padding:16px;border:0;border-radius:16px;background:#FFF7D6;color:#1C1C1E;font-size:16px;line-height:20px;resize:none;outline:none;min-height:92px;max-height:172px;overflow:auto;text-align:left}
+.m-edittext{display:block;width:100%;resize:none;min-height:92px;max-height:172px;line-height:20px;overflow:auto}
+.m-statusview{font-size:16px;padding:20px 24px;text-align:center;color:#1C1C1E}
+.m-dim-btn{opacity:.4;pointer-events:none}

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>main2 test</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/css/app.css"><link rel="stylesheet" href="/css/pageview.css"><link rel="stylesheet" href="/css/main2.css"><link rel="stylesheet" href="/css/library.css">
+<style>html,body{margin:0;height:100%}#app{position:fixed;inset:0;display:flex;flex-direction:column;background:#F2F2F7}
+#hdr{height:52px;background:#F9F9F9;flex:none}#split{flex:1 1 0;min-height:0;display:flex}#pdfarea{display:flex;position:relative;min-width:0;min-height:0;flex:1 1 0}
+#viewerRow{display:flex;flex:1;min-width:0}#viewport{position:relative;flex:1;display:flex;min-width:0;background:#DDD}#papers{display:flex;flex:1;min-width:0}</style>
+</head><body><div id="app"><div id="hdr"><span id="title"></span></div><div id="split"><div id="pdfarea"><div id="viewerRow"><div id="viewport"><div id="papers"></div></div></div></div></div></div>
+<script type="module">
+import { PdfDoc } from '/js/pdfdoc.js';
+import { PdfPageView } from '/js/pageview.js';
+import { AnnotationStore, Mark, OutlineItem, TranslationNote, StudyEntry } from '/js/store.js';
+import { LibraryRepository, NotebookFiles, Paper } from '/js/library.js';
+import { host } from '/js/host.js';
+import { prefs } from '/js/prefs.js';
+import { initMain2, installMain2, exportStudyBytes, exportAnnotatedPdf } from '/js/app-main2.js';
+
+const calls = [];
+const C = n => (...a) => { calls.push([n, ...a]); };
+class App {
+  constructor() {
+    this.recentPrefs = prefs; this.sessions = []; this.activeSession = null; this.renderer = null; this.documentUri = null; this.documentTitle = 'PDF'; this.currentPage = 0; this.store = null;
+    this.twoPage = false; this.selectedColor = 0x66FFDE59; this.highlightMode = this.memoMode = this.outlineMode = false; this.swipeEnabled = true; this.verticalPageSwipe = false; this.inkMode = 0;
+    this.appending = new Set(); this.sidebarVisible = false; this.panelTab = 1; this.studyVisible = false; this.basketOnly = false;
+    this.searchHits = []; this.searchCurrent = -1; this.searchSession = 0; this.searchDone = 0; this.searchTotal = 0; this.searching = false; this.searchTruncated = false; this.searchPrecise = false; this.searchOwner = null;
+    this.showAllThumbnails = false; this.placementKind = ''; this.placementAsset = ''; this.thumbnailGeneration = 0; this.libraryFolder = null; this.libraryDialog = null;
+    this.studySplit = document.getElementById('split'); this.pdfArea = document.getElementById('pdfarea'); this.viewerRow = document.getElementById('viewerRow'); this.titleView = document.getElementById('title');
+    initMain2(this);
+    this.pageView = this.firstPageView = new PdfPageView(this); document.getElementById('papers').append(this.firstPageView.el);
+  }
+  async open(path, title) {
+    const bytes = await host.readBytes(path); const doc = await PdfDoc.open(bytes);
+    const store = new AnnotationStore(); await store.open(path);
+    const s = { uri: path, title: title || path.split('\\').pop(), renderer: doc, store, page: 0, officePreview: null, redoStrokes: [], textRegions: new Map() };
+    this.sessions.push(s); await this.switchDocument(s); return s;
+  }
+  async switchDocument(s) {
+    this.activeSession = s; this.renderer = s.renderer; this.store = s.store; this.documentUri = s.uri; this.documentTitle = s.title;
+    this.firstPageView.setAnnotationStore(s.store); await this.showPage(Math.min(s.page, s.renderer.pageCount - 1));
+  }
+  async showPage(p) {
+    if (!this.renderer) return;
+    p = Math.max(0, Math.min(this.renderer.pageCount - 1, p)); this.currentPage = p; this.activeSession.page = p;
+    const bmp = await this.renderer.renderPage(p, 1.6);
+    this.firstPageView.showPage(bmp, p, this.store.marks, this.store.strokes, this.store.translations); this.firstPageView.setDirectTextSelection(true);
+    this.refreshStudyPanel(); if (this.updateThumbnailSelection) this.updateThumbnailSelection();
+  }
+  async openPdf(f, textOnly, page, activate) { calls.push(['openPdf', f, page]); const s = await this.open(f); if (page) await this.showPage(page); }
+}
+for (const n of ['stopInk', 'updateToolStates', 'commitInlineText', 'beginInlineText', 'setInkMode', 'startTextSelection', 'choosePdf', 'closeDocument', 'toggleOutlineMode', 'importPdfToLibrary', 'updateTabs', 'saveSessionState', 'copySelectedText', 'showAudioPlayer', 'onSelectionAdjustStarted', 'editTranslation', 'syncOtherTools']) App.prototype[n] = C(n);
+App.prototype.elementAt = () => null;
+App.prototype.newTextBox = (page, x, y) => { const e = new (window.T.PageElement)(); e.page = page; return e; };
+installMain2(App);
+const app = window.app = new App();
+window.T = { app, calls, host, AnnotationStore, Mark, OutlineItem, TranslationNote, StudyEntry, PdfDoc, LibraryRepository, NotebookFiles, Paper, exportStudyBytes, exportAnnotatedPdf, prefs };
+import('/js/store.js').then(m => { window.T.PageElement = m.PageElement; });
+const lib = new LibraryRepository(); await lib.ready; app.library = lib;
+const bytes = new Uint8Array(await (await fetch('/dev/samples/sample-ko.pdf')).arrayBuffer());
+const path = lib.root + '\\sample-ko.pdf';
+host._fake.put(path, bytes);
+window.T.path = path; window.T.bytes = bytes;
+window.READY = true;
+</script></body></html>
