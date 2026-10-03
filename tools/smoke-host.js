@@ -64,6 +64,18 @@
         await host.delete(res.pdf);
       } catch (e) { ok('office-docx', false, e.message); }
     }
+    // ---- HWP conversion (rhwptopdf in a worker) on the generated sample
+    if (window.__SMOKE_HWPX__) {
+      try {
+        const { convertHwp } = await import('/js/office.js'); const msgs = []; const t0 = performance.now();
+        const bytes = await host.readBytes(window.__SMOKE_HWPX__);
+        const pdf = await convertHwp(bytes, t => msgs.push(t));
+        out.info.hwp = msgs.join(' > ') + ' -> ' + pdf.length + ' bytes in ' + Math.round(performance.now() - t0) + ' ms';
+        ok('hwp', pdf.length > 500 && String.fromCharCode(...pdf.subarray(0, 5)) === '%PDF-');
+        try { const { PdfDoc } = await import('/js/pdfdoc.js'); const d = await PdfDoc.open(pdf); const tx = await d.pageText(0);
+          out.info.hwpText = d.pageCount + ' page(s): ' + String(tx).replace(/\s+/g, ' ').slice(0, 80); } catch (e) { out.info.hwpText = 'pdfdoc: ' + (e.message || e); }
+      } catch (e) { ok('hwp', false, e.message); }
+    }
     out.info.title = document.title; out.info.text = (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 160);
     out.info.hasApp = String(!!window.app);
   } catch (e) { out.checks.exception = false; out.info.exception = String((e && e.stack) || e).slice(0, 600); }

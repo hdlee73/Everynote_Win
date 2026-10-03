@@ -4,7 +4,8 @@ param(
   [Parameter(Mandatory)][string]$Exe,
   [Parameter(Mandatory)][string]$Pdf,
   [string]$Out = 'smoke',
-  [string]$Docx = ''
+  [string]$Docx = '',
+  [string]$Hwpx = ''
 )
 $ErrorActionPreference = 'Continue'
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
@@ -17,6 +18,8 @@ $env:PDFNOTE_DATA = $data
 $env:PDFNOTE_LIBRARY = Join-Path $data 'library'
 $env:PDFNOTE_DEBUG_PORT = '9333'
 $pdfFull = (Resolve-Path $Pdf).Path
+$hwpxLib = ''
+if ($Hwpx) { New-Item -ItemType Directory -Force -Path $env:PDFNOTE_LIBRARY | Out-Null; $hwpxLib = Join-Path $env:PDFNOTE_LIBRARY 'sample.hwpx'; Copy-Item $Hwpx $hwpxLib }
 
 $p = Start-Process -FilePath $Exe -ArgumentList "`"$pdfFull`"" -PassThru
 $page = $null
@@ -64,6 +67,7 @@ if ($page) {
   Start-Sleep -Seconds 6   # let the UI settle
   $js = Get-Content -Raw (Join-Path $PSScriptRoot 'smoke-host.js')
   if ($Docx) { $js = "window.__SMOKE_DOCX__ = " + ($Docx | ConvertTo-Json) + ";`n" + $js }
+  if ($hwpxLib) { $js = "window.__SMOKE_HWPX__ = " + ($hwpxLib | ConvertTo-Json) + ";`n" + $js }
   $res = Cdp $page.webSocketDebuggerUrl $js
   if (-not $res) { Write-Host "::error title=smoke-host::no answer from page (timeout)"; $fail = $true }
   elseif ($res.result.exceptionDetails) { Write-Host "::error title=smoke-host::$(Esc ($res.result.exceptionDetails | ConvertTo-Json -Depth 5 -Compress))"; $fail = $true }
@@ -73,7 +77,7 @@ if ($page) {
     foreach ($k in $o.checks.PSObject.Properties) { if ($k.Value -eq $true) { $good += $k.Name } elseif ($k.Value -eq 'skip') { $good += "$($k.Name)(skipped)" } else { $bad += "$($k.Name)=$($o.info.$($k.Name))" } }
     Write-Host "::notice title=smoke-host-ok::$(Esc ($good -join ', '))"
     if ($bad.Count) { Write-Host "::error title=smoke-host-FAILED::$(Esc ($bad -join ' ; '))"; $fail = $true }
-    foreach ($k in 'app','engines','ocr','office','title','text','hasApp','exception') { if ($o.info.$k) { Write-Host "::notice title=smoke-info-$k::$(Esc ([string]$o.info.$k))" } }
+    foreach ($k in 'app','engines','ocr','office','hwp','hwpText','title','text','hasApp','exception') { if ($o.info.$k) { Write-Host "::notice title=smoke-info-$k::$(Esc ([string]$o.info.$k))" } }
   }
 }
 

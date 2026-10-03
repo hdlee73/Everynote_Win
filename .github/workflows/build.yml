@@ -133,7 +133,7 @@ jobs:
       - name: Smoke test (launch, open sample PDF, host protocol checks, screenshot)
         shell: pwsh
         run: |
-          ./tools/smoke.ps1 -Exe "$PWD\out\x64\PDFNote.exe" -Pdf "$PWD\dev\samples\sample-ko.pdf" -Out smoke -Docx "$env:SMOKE_DOCX"
+          ./tools/smoke.ps1 -Exe "$PWD\out\x64\PDFNote.exe" -Pdf "$PWD\dev\samples\sample-ko.pdf" -Out smoke -Docx "$env:SMOKE_DOCX" -Hwpx "$PWD\tools\sample.hwpx"
 
       - uses: actions/upload-artifact@v4
         if: always()
