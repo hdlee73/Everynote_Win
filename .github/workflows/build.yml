@@ -42,6 +42,34 @@ jobs:
           dotnet publish src/PDFNote.csproj -c Release -r win-x64 --self-contained false
           -p:PublishSingleFile=true -o out/fd
 
+      - name: Smoke test (launch app, open sample PDF, screenshot)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          python tools/make_sample_pdf.py "$PWD\sample.pdf"
+          $p = Start-Process -FilePath "$PWD\out\x64\PDFNote.exe" -ArgumentList "`"$PWD\sample.pdf`"" -PassThru
+          Start-Sleep -Seconds 30
+          $p.Refresh()
+          if ($p.HasExited) { Write-Host "APP EXITED with code $($p.ExitCode)"; $failed = $true } else { Write-Host "APP RUNNING: title='$($p.MainWindowTitle)' ws=$([int]($p.WorkingSet64/1MB))MB" }
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          New-Item -ItemType Directory -Force -Path smoke | Out-Null
+          $bmp.Save("$PWD\smoke\screenshot.png")
+          $log = Join-Path $env:APPDATA "PDFNote\log.txt"
+          if (Test-Path $log) { Copy-Item $log smoke\log.txt; Write-Host "---- app log ----"; Get-Content $log } else { Write-Host "no app log (good)" }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          if ($failed) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test
+          path: smoke/*
+          if-no-files-found: ignore
+
       - name: Collect release files
         shell: pwsh
         run: |
