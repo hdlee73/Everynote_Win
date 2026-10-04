@@ -86,17 +86,19 @@ Tests: `node dev/pageview-test.mjs` (screenshots `dev/out/12-*` backdrop, `13..1
 * `snapshot()` (curl textures, export of the view) now paints the backdrop colour around the sheet instead of the paper colour, so the curl matches what is on screen. Pass `view.snapshot(dark, scale)` as before.
 * `applyBackground()` now only sets `data-dark-page` + refreshes the theme (the page itself is never filled with the detected paper colour any more).
 
-### Element selection: 8 handles, delete, rotation
-* Selected image / sticker / video / youtube / shape / table / **text box** (text is now selectable: `PdfPageView.selectable(e)` includes `'text'`; `resizable(e)` = everything except audio/hyperlink) show: 4 corner handles (circles), 4 edge handles (squares; hidden on sides shorter than 44 px), the rotation knob (image/sticker/shape/table, unchanged) and a red ✕ delete button 28 px above the top-right corner (below the bottom-right corner when there is no room above).
-* Works with **mouse, pen and finger** (hit radius mouse 14 / pen 18 / touch 24 px; edge handles 75 %). With a writing tool active (ink/highlight/lasso/outline/memo) a mouse or pen only grabs handles, never the element body, so writing over a selected element keeps working.
-* Corner of a locked-aspect kind (image, sticker, video, youtube) keeps the aspect ratio. Edge handles of locked kinds scale uniformly (opposite edge fixed, other axis grows symmetrically) because their box would otherwise just letterbox; all other kinds resize freely on the edge axis. Minimum size 0.04 x 0.03 of the page. Rotated elements resize in their own frame.
-* A resize/move/rotate fires `onInkChanged()` on release (cancel restores). A tap on the **body of an already selected** element fires `onElementTapped(e)` (first tap selects, also for text boxes — *change from v2 where a tap on text fired `onElementTapped` immediately*). Taps on handles no longer fire `onElementTapped`.
-* `listener.onElementDeleted(e)`: the ✕ button (also `view.deleteSelectedElement()` for a Delete-key binding) **removes the element from `annotationStore.elements` itself**, clears the selection and then calls `onElementDeleted(e)`; the host should persist (`store.save()`) and clean up assets (e.g. video file). If the listener has no `onElementDeleted`, `onInkChanged()` is called instead.
-* `listener.onElementSelected(e|null)` (optional): fires whenever the selection changes (taps, delete, `selectElement`, page change) — use it to show the text-format toolbar.
+### Element selection: handles, delete, rotation, stretch (Android v1.29.0)
+* Selected image / sticker / video / youtube / shape / table / **text box** (`PdfPageView.selectable(e)`; `resizable(e)` = everything except audio/hyperlink) show: 4 corner handles (circles), the rotation knob (image/sticker/shape/table), and a red ✕ delete button at **(right + 14 dp, top - 28 dp)** (the top-right; below the bottom-right corner when there is no room above).
+* **Edge-middle bar handles**: image / sticker / video / youtube *always* show four rounded bars (left/right 8x18, top/bottom 18x8). Dragging one moves only that side (other three sides fixed, min 0.04 x 0.03 of the page), sets `e.stretch = true` (cancel restores it) and so resizes width and height independently; the picture then fills the box (`AnnotationPainter` uses the whole box when `stretch`). Corner handles of these kinds keep the *current* box ratio. Shape/table/text boxes keep the Windows square edge handles (hidden on sides shorter than 44 px) and resize freely.
+* Works with **mouse, pen and finger** (hit radius mouse 14 / pen 18 / touch 24 px; edge handles 75 %). With a writing tool active a mouse or pen only grabs handles, never the element body.
+* A resize/move/rotate fires `onInkChanged()` on release (cancel restores). A tap on the **body of an already selected** element fires `onElementTapped(e)`.
+* `listener.onElementDeleted(e)`: the ✕ button (also `view.deleteSelectedElement()`) **removes the element from `annotationStore.elements` itself**, clears the selection and then calls `onElementDeleted(e)`; if the listener has none, `onInkChanged()` is called.
+* `listener.onElementSelected(e|null)` (optional): fires whenever the selection changes.
 
-### Text formatting (requirement 7) — checkable lists
-`PageElement` text boxes carry `align`, `underline`, `list`, `checked[]` (see api-store.md). The view paints them through `AnnotationPainter` (same layout the inline editor must use, spec in api-store.md → "Text layout").
-* **Check boxes are clickable**: a tap (no movement) on a check box of a `list === 'check'` text box toggles `checked[line]` (hit area box + up to 10 px), repaints and fires `listener.onCheckToggled(e, lineIndex, checked)` then `listener.onInkChanged()` (persist). It does not select the element. Works for mouse, pen (not in a writing tool) and finger.
+### Post-it selection (memos and translation notes)
+First tap on an expanded memo (`Mark`) or `TranslationNote` selects it (`view.selSticky`; `view.selectedMemo` is an alias) instead of opening it: rotated dashed frame, 4 corner handles (resize `boxW/boxH` in dp, min 90 x 48, max 560/700; the opposite corner stays - the anchor `(right, top)` moves), a stem + blue ↻ knob 28 dp above the top centre (rotation `rot`, snaps within 4° to 0/90/180/270), a red × at (right + 14, top - 28) (deletes from `marks` / `translations`, fires `onInkChanged`), and a body drag moves the anchor. A second tap on the body calls `onMarkTapped` / `onTranslationTapped` (open the editor). Tapping elsewhere deselects; selecting an element clears the post-it selection. Hit tests run in the post-it's rotated frame; translation notes are checked before memos. Minimized post-its cannot be selected. `_drawSticky(..., rot)` draws the rotated body; `memoHitBoxes` / `noteHitBoxes` stay unrotated.
+
+### Check markers
+Lists are plain text (api-store.md). A tap (no movement) on the leading `☐`/`☑` of a line of a text box flips it (`e.toggleCheck(line)`), repaints, fires `listener.onCheckToggled(e, lineIndex, checked)` then `onInkChanged()`; it does not select the element.
 
 ### Mouse page turning (requirement 2)
 * Wheel (no Ctrl) at zoom 1: `listener.onPageSwipe(+1)` (down/right) or `-1` (up/left) once per ≥ 40 px of wheel travel, debounced (450 ms lock + inertia swallowing, accumulator resets after 250 ms idle). Zoomed in: the wheel pans. `view.setWheelPageTurn(false)` disables it. Ignored while a pointer is down.
@@ -105,3 +107,9 @@ Tests: `node dev/pageview-test.mjs` (screenshots `dev/out/12-*` backdrop, `13..1
 
 ### Other
 `PdfPageView.ZOOM_MIN/ZOOM_MAX`, `pagePadding`, `mouseReadDrag`, `wheelPageTurn` public fields; listener additions `onZoomChanged`, `onElementDeleted`, `onElementSelected`, `onCheckToggled` (all optional).
+
+## Page curl (curl.js, Android v1.29.0)
+`PageCurlView.setup()` resets the latch; `setTouch(fraction)` latches the grabbed corner (top / bottom) at the first call after `setup()`. Afterwards only the finger height changes the fold angle: `rise = max(0, cornerY - touch*h)` (limited to `2.6 * max(dx, .1*w)`), `dy = max(dy*.3, rise*(1 - .45*t))`.
+
+## Anchored menu (ui/menu.js)
+`AnchoredMenu.show(anchor, above, rows, shortcuts, onDismiss, avoid)`: `avoid` = `{left, top, right, bottom}` viewport rectangle the card must not cover. Placement order: below it, above it, right of it, left of it (sides are clamped vertically); when nothing fits the card docks at the screen edge covering the least of the rectangle. `AnchoredMenu.placeAvoiding(avoid, w, h, screenW, screenH)` is the pure function. The text-selection menu passes the selected text's rectangle and shows the insert items behind a `삽입` submenu row (`app.showMenuAt(view, x, y, rows, onDismiss, avoid)`).

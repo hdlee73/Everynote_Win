@@ -1,4 +1,4 @@
-// Playwright harness for v3 additions in app-main2.js / print.js / sync-ui.js (splitters, print, offline dialog).  usage: node dev/main2-test2.mjs
+// Playwright harness for v3 additions in app-main2.js / print.js / offline.js (splitters, print, offline dialog).  usage: node dev/main2-test2.mjs
 import { chromium } from '/tmp/npmtest/node_modules/playwright/index.mjs';
 import { PDFDocument } from '/tmp/npmtest/node_modules/pdf-lib/cjs/index.js';
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
@@ -103,7 +103,7 @@ await ev(() => { T.app.studyVisible = false; T.app.layoutStudyPanel(); });
 // ---------------------------------------------------------------- offline dialog
 await ev(() => T.app.showAboutOffline()); await shot('06-offline');
 const txt = await page.locator('[data-tag=about_offline]').innerText();
-for (const t of ['번역 (구글 번역 열기)', '사전 웹 검색', '구글 드라이브 동기화', 'YouTube · 온라인 이미지', 'WebView2 런타임 최초 설치', 'PDF 열기', '필기', '검색', 'HWP 변환', 'Office 변환', 'OCR', '내보내기', '인쇄', '문서함'])
+for (const t of ['번역 (구글 번역 열기)', '사전 웹 검색', 'YouTube · 온라인 이미지', 'WebView2 런타임 최초 설치', 'PDF 열기', '필기', '검색', 'HWP 변환', 'Office 변환', 'OCR', '내보내기', '인쇄', '문서함'])
   check('offline dialog lists ' + t, txt.includes(t));
 await page.click('.ad-btn >> text=닫기'); await page.waitForTimeout(300);
 

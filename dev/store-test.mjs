@@ -217,6 +217,7 @@ test('exportJson matches org.json toString(2) byte for byte', () => {
       "boxSize": 1,
       "boxW": 0,
       "boxH": 0,
+      "rot": 0,
       "page": 2,
       "left": 0.10000000149011612,
       "top": 0.25,
@@ -265,7 +266,7 @@ test('sidecar toJson is compact with the Android key order', () => {
   const s = new AnnotationStore(); s.bookmarks.add(3);
   assert.equal(s.toJson(), '{"elements":[],"studyEntries":[],"marks":[],"bookmarks":[3],"outlines":[],"strokes":[],"translations":[]}');
   assert.deepEqual(Object.keys(JSON.parse(s.toJson())), ['elements', 'studyEntries', 'marks', 'bookmarks', 'outlines', 'strokes', 'translations']);
-  const e = el({ text: '/' }); assert.equal(stringify(e.toJson()), '{"rot":0,"page":0,"kind":"text","text":"\\/","asset":"","left":0.10000000149011612,"top":0.10000000149011612,"right":0.800000011920929,"bottom":0.30000001192092896,"textSize":0.027000000700354576,"color":-14935010,"font":"sans","bold":false,"italic":false}');
+  const e = el({ text: '/' }); assert.equal(stringify(e.toJson()), '{"rot":0,"page":0,"kind":"text","text":"\\/","asset":"","left":0.10000000149011612,"top":0.10000000149011612,"right":0.800000011920929,"bottom":0.30000001192092896,"textSize":0.027000000700354576,"color":-14935010,"font":"sans","bold":false,"italic":false,"align":0,"underline":false,"strike":false,"stretch":false}');
 });
 test('number formatting follows org.json / Double.toString', () => {
   assert.equal(stringify([0, 1, -1, 1.5, 1e-3, 9.99e-4, 1e7, 12345678.5, 2147483647, -0.0, 0.0022000000812113286]), '[0,1,-1,1.5,0.001,9.99E-4,10000000,1.23456785E7,2147483647,-0,0.0022000000812113286]');
@@ -373,59 +374,77 @@ test('v1.27: element rot, stroke pen, memo boxW/boxH round-trip with Android key
   assert.equal(InkStroke.fromJson(st.toJson()).pen, 3);
   assert.equal(InkStroke.fromJson({ pen: 9 }).pen, 4); assert.equal(InkStroke.fromJson({ pen: -2 }).pen, 0); assert.equal(InkStroke.fromJson({}).pen, 0);
   const m = new Mark(); m.boxW = 180.5; m.boxH = 90;
-  assert.equal(stringify(m.toJson()).startsWith('{"paper":-3162,"fontSp":13,"boxSize":1,"boxW":180.5,"boxH":90,"page":0'), true);
+  assert.equal(stringify(m.toJson()).startsWith('{"paper":-3162,"fontSp":13,"boxSize":1,"boxW":180.5,"boxH":90,"rot":0,"page":0'), true);
   const back = Mark.fromJson(m.toJson()); assert.equal(back.boxW, 180.5); assert.equal(back.boxH, 90);
   const big = Mark.fromJson({ boxW: 5000, boxH: 5000 }); assert.equal(big.boxW, 800); assert.equal(big.boxH, 1200);
   const neg = Mark.fromJson({ boxW: -4, boxH: -4 }); assert.equal(neg.boxW, 0); assert.equal(neg.boxH, 0);
   assert.equal(Mark.fromJson({}).boxW, 0);
-  // an Android v1.27 sidecar round-trips byte for byte
-  const a = '{"elements":[{"rot":90,"page":0,"kind":"sticker","text":"\u2b50","asset":"","left":0.1,"top":0.1,"right":0.3,"bottom":0.2,"textSize":0.027,"color":-14935010,"font":"sans","bold":false,"italic":false}],"studyEntries":[],"marks":[{"paper":-3162,"fontSp":13,"boxSize":1,"boxW":200,"boxH":120,"page":0,"left":0.1,"top":0.1,"right":0.5,"bottom":0.2,"color":1,"note":"n","noteOnly":true,"visible":true,"minimized":false}],"bookmarks":[],"outlines":[],"strokes":[{"page":0,"color":-16777216,"width":0.004,"pen":2,"points":[{"x":0.1,"y":0.2,"p":0.5}]}],"translations":[]}';
+  // an Android v1.29 sidecar round-trips byte for byte
+  const a = '{"elements":[{"rot":90,"page":0,"kind":"sticker","text":"\u2b50","asset":"","left":0.1,"top":0.1,"right":0.3,"bottom":0.2,"textSize":0.027,"color":-14935010,"font":"sans","bold":false,"italic":false,"align":0,"underline":false,"strike":false,"stretch":false}],"studyEntries":[],"marks":[{"paper":-3162,"fontSp":13,"boxSize":1,"boxW":200,"boxH":120,"rot":0,"page":0,"left":0.1,"top":0.1,"right":0.5,"bottom":0.2,"color":1,"note":"n","noteOnly":true,"visible":true,"minimized":false}],"bookmarks":[],"outlines":[],"strokes":[{"page":0,"color":-16777216,"width":0.004,"pen":2,"points":[{"x":0.1,"y":0.2,"p":0.5}]}],"translations":[]}';
   const s = AnnotationStore.fromJson(a, { strict: true });
   assert.equal(s.elements[0].rot, 90); assert.equal(s.marks[0].boxW, 200); assert.equal(s.strokes[0].pen, 2);
   assert.equal(AnnotationStore.fromJson(s.toJson()).toJson(), s.toJson());
 });
-test('v3: text formatting fields (align, underline, list, checked) are additive and round-trip', () => {
-  const e = el({ text: 'a\nb\nc', align: 'center', underline: true, list: 'check', checked: [true, false, true, false, false] });
+test('v1.29: text formatting keys are the Android ones (align int, underline, strike, stretch), always written', () => {
+  const e = el({ text: 'a', align: 1, underline: true, strike: true, stretch: true });
   const j = stringify(e.toJson());
-  assert.ok(j.endsWith('"italic":false,"align":"center","underline":true,"list":"check","checked":[true,false,true]}'), j);   // trailing false trimmed
-  const r = rt(e);
-  assert.equal(r.align, 'center'); assert.equal(r.underline, true); assert.equal(r.list, 'check'); assert.deepEqual(r.checked, [true, false, true]);
-  assert.equal(r.isChecked(0), true); assert.equal(r.isChecked(1), false); assert.equal(r.isChecked(9), false);
-  assert.equal(r.toggleChecked(4), true); assert.deepEqual(r.checked, [true, false, true, false, true]);
-  // defaults are not written: v2 elements stay byte identical
-  assert.ok(!/align|underline|list|checked/.test(stringify(el({ text: 'x' }).toJson())));
-  assert.ok(!/checked/.test(stringify(el({ text: 'x', list: 'bullet', checked: [false, false] }).toJson())));
-  // old data / junk
+  assert.ok(j.endsWith('"italic":false,"align":1,"underline":true,"strike":true,"stretch":true}'), j);
+  const r = rt(e); assert.equal(r.align, 1); assert.equal(r.underline, true); assert.equal(r.strike, true); assert.equal(r.stretch, true);
   const old = PageElement.fromJson({ page: 0, kind: 'text', text: 'x', left: .1, top: .1, right: .5, bottom: .2 });
-  assert.equal(old.align, 'left'); assert.equal(old.underline, false); assert.equal(old.list, 'none'); assert.deepEqual(old.checked, []);
-  const junk = PageElement.fromJson({ page: 0, kind: 'text', text: 'x', left: .1, top: .1, right: .5, bottom: .2, align: 'justify', list: 'roman', checked: [true, 'true', 1, null], underline: 'true' });
-  assert.equal(junk.align, 'left'); assert.equal(junk.list, 'none'); assert.deepEqual(junk.checked, [true, true, false, false]); assert.equal(junk.underline, true);
-  assert.deepEqual(PageElement.fromJson({ page: 0, kind: 'text', text: 'x', left: .1, top: .1, right: .5, bottom: .2, checked: 'yes' }).checked, []);
+  assert.equal(old.align, 0); assert.equal(old.underline, false); assert.equal(old.strike, false); assert.equal(old.stretch, false);
+  assert.equal(PageElement.fromJson({ page: 0, kind: 'text', text: 'x', left: .1, top: .1, right: .5, bottom: .2, align: 7 }).align, 2);   // clamp 0..2
+  assert.equal(PageElement.fromJson({ page: 0, kind: 'text', text: 'x', left: .1, top: .1, right: .5, bottom: .2, align: -3 }).align, 0);
+  assert.equal(Object.keys(JSON.parse(j)).join(), 'rot,page,kind,text,asset,left,top,right,bottom,textSize,color,font,bold,italic,align,underline,strike,stretch');
 });
-test('v3: store sidecar keeps text formatting', async () => {
+test('v1.29: Windows v3.0 keys still load (align names, list + checked -> plain-text markers)', () => {
+  const base = { page: 0, kind: 'text', left: .1, top: .1, right: .5, bottom: .2 };
+  assert.equal(PageElement.fromJson({ ...base, text: 'x', align: 'center' }).align, 1);
+  assert.equal(PageElement.fromJson({ ...base, text: 'x', align: 'right' }).align, 2);
+  assert.equal(PageElement.fromJson({ ...base, text: 'x', align: 'justify' }).align, 0);
+  assert.equal(PageElement.fromJson({ ...base, text: 'a\nb', list: 'bullet' }).text, '\u2022 a\n\u2022 b');
+  assert.equal(PageElement.fromJson({ ...base, text: 'a\nb\nc', list: 'number' }).text, '1. a\n2. b\n3. c');
+  assert.equal(PageElement.fromJson({ ...base, text: 'a\nb\nc', list: 'check', checked: [true, false, 'true'] }).text, '\u2611 a\n\u2610 b\n\u2611 c');
+  assert.equal(PageElement.fromJson({ ...base, text: 'a', list: 'roman' }).text, 'a');
+  const back = rt(PageElement.fromJson({ ...base, text: 'a', list: 'bullet', checked: [true] }));
+  assert.ok(!/"list"|"checked"/.test(stringify(back.toJson())));
+});
+test('v1.29: plain-text list markers (kind, length, next, toggleCheck)', () => {
+  assert.deepEqual(['\u2022 a', '12. a', '\u2610 a', '\u2611 a', '1.a', 'x'].map(PageElement.markerKind), [1, 2, 3, 3, 0, 0]);
+  assert.deepEqual(['\u2022 a', '12. a', '\u2610 a', 'x'].map(PageElement.markerLength), [2, 4, 2, 0]);
+  assert.equal(PageElement.markerFor(2, 5), '5. '); assert.equal(PageElement.markerFor(3, 1), '\u2610 '); assert.equal(PageElement.markerFor(0, 1), '');
+  const e = el({ text: '\u2610 a\n\u2611 b' });
+  assert.equal(e.toggleCheck(0), true); assert.equal(e.text, '\u2611 a\n\u2611 b');
+  assert.equal(e.toggleCheck(1), false); assert.equal(e.text, '\u2611 a\n\u2610 b'); assert.equal(e.toggleCheck(9), false);
+});
+test('v1.29: Mark.rot and TranslationNote boxW/boxH/rot keys and order', () => {
+  const m = new Mark(); m.rot = 30; assert.ok(stringify(m.toJson()).includes('"boxH":0,"rot":30,"page":0'));
+  assert.equal(Mark.fromJson(m.toJson()).rot, 30); assert.equal(Mark.fromJson({}).rot, 0);
+  const n = new TranslationNote(); n.page = 1; n.boxW = 200; n.boxH = 80; n.rot = 90; n.source = 's'; n.translated = 't';
+  assert.equal(stringify(n.toJson()), '{"boxW":200,"boxH":80,"rot":90,"page":1,"left":0,"top":0,"right":0,"bottom":0,"source":"s","translated":"t","visible":true,"minimized":false}');
+  const back = TranslationNote.fromJson(n.toJson()); assert.equal(back.boxW, 200); assert.equal(back.boxH, 80); assert.equal(back.rot, 90);
+  const old = TranslationNote.fromJson({ page: 0, source: 'a', translated: 'b' }); assert.equal(old.boxW, 0); assert.equal(old.rot, 0);
+});
+test('v1.29: store sidecar keeps text formatting and stretch; migrates v3 lists', async () => {
   const uri = U(); const store = await new AnnotationStore().open(uri);
-  store.elements.push(el({ text: 'one\ntwo', list: 'number', align: 'right', underline: true }), el({ text: 'x\ny', list: 'check', checked: [false, true] }));
+  store.elements.push(el({ text: '1. one\n2. two', align: 2, underline: true, strike: true }), el({ kind: 'image', asset: AnnotationStore.newAssetName('png'), stretch: true }));
   await store.save(); await store.flush();
   const back = await AnnotationStore.load(uri);
-  assert.deepEqual(back.elements.map(e => [e.list, e.align, e.underline, e.checked.join()]), [['number', 'right', true, ''], ['check', 'left', false, 'false,true']]);
-  // the Android export (import/export json) carries them too
+  assert.deepEqual(back.elements.map(e => [e.align, e.underline, e.strike, e.stretch]), [[2, true, true, false], [0, false, false, true]]);
   const copy = new AnnotationStore(); await copy.importJson(store.exportJson(uri, 't'), 1);
-  assert.equal(copy.elements[1].checked[1], true);
+  assert.equal(copy.elements[1].stretch, true); assert.equal(copy.elements[0].strike, true);
 });
-test('v3: painter.layoutText (shared by painter, fitHeight, editor)', () => {
+test('v1.29: painter.layoutText (shared by painter, fitHeight, editor; markers are plain text)', () => {
   const m = s => s.length * 10;                       // 10 px per character
   const plain = AnnotationPainter.layoutText(m, 'abc\n\nde', 200, 20);
   assert.deepEqual(plain.lines.map(l => [l.para, l.x, l.y]), [[0, 0, 20], [1, 0, 47], [2, 0, 74]]);   // empty paragraph keeps a line
-  const wrap = AnnotationPainter.layoutText(m, 'a'.repeat(25), 100, 20, { list: 'bullet' });         // marker 32 -> text width 68 -> 6 chars per line
-  assert.equal(wrap.markerW, 32); assert.deepEqual(wrap.lines.map(l => [l.text.length, l.first, l.x]), [[6, true, 32], [6, false, 32], [6, false, 32], [6, false, 32], [1, false, 32]]);
-  const right = AnnotationPainter.layoutText(m, 'abc  ', 200, 20, { align: 'right' });
+  const wrap = AnnotationPainter.layoutText(m, 'a'.repeat(25), 100, 20);
+  assert.deepEqual(wrap.lines.map(l => [l.text.length, l.first, l.x]), [[10, true, 0], [10, false, 0], [5, false, 0]]);
+  const right = AnnotationPainter.layoutText(m, 'abc  ', 200, 20, { align: 2 });
   assert.equal(right.lines[0].x + right.lines[0].w, 200);                                            // trailing blanks ignored
-  assert.equal(AnnotationPainter.layoutText(m, 'x', 200, 20, { align: 'center' }).lines[0].x, 95);
-  assert.equal(AnnotationPainter.layoutText(m, new Array(11).fill('x').join('\n'), 200, 20, { list: 'number' }).markerW, 42);
-  // fitHeight: a list column narrows the text area -> never fewer lines than the plain box
-  const t = 'x'.repeat(60);
-  assert.ok(AnnotationPainter.fitHeight(t, .3, .03, 1.4, Typeface.DEFAULT, 'bullet') >= AnnotationPainter.fitHeight(t, .3, .03, 1.4));
-  assert.equal(AnnotationPainter.fitHeight('a', .5, .03, 1.4, Typeface.DEFAULT, 'none'), AnnotationPainter.fitHeight('a', .5, .03, 1.4));
+  assert.equal(AnnotationPainter.layoutText(m, 'x', 200, 20, { align: 1 }).lines[0].x, 95);
+  assert.equal(AnnotationPainter.layoutText(m, 'x', 200, 20, { align: 'center' }).lines[0].x, 95);  // v3 names still accepted
+  assert.deepEqual([0, 1, 2, 'left', 'center', 'right', 'x', 9].map(AnnotationPainter.alignIndex), [0, 1, 2, 0, 1, 2, 0, 0]);
+  assert.deepEqual(AnnotationPainter.textOpts(el({ align: 1, underline: true, strike: true })), { align: 1, underline: true, strike: true });
 });
 test('painter.adj lightens dark colours only on dark pages', () => {
   AnnotationPainter.dark = false; assert.equal(AnnotationPainter.adj(0xFF1C1C1E | 0), 0xFF1C1C1E | 0);

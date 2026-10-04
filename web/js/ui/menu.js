@@ -17,8 +17,24 @@ export class Shortcut { constructor(description, iconName, active, action) { thi
 let current = null;
 export function dismissMenu() { if (current) { current.close(); current = null; } }
 
-/** @param anchor HTMLElement  @param above true = above the anchor (toolbar menus), false = below, right aligned */
-export function show(anchor, above, rows, shortcuts, onDismiss) {
+/** Android v1.29.0 AnchoredMenu avoid: where the card goes so it does not cover `avoid` ({left,top,right,bottom} in viewport px):
+ *  below the rect, above it, right of it, left of it - whichever fits; else docked at the screen edge that hides the least of it. Returns [x, y]. */
+export function placeAvoiding(avoid, w, h, screenW, screenH, margin = 8, gap = 6, topLimit = 24) {
+  const cx = (avoid.left + avoid.right) / 2, cy = (avoid.top + avoid.bottom) / 2;
+  const tries = [[cx - w / 2, avoid.bottom + gap], [cx - w / 2, avoid.top - h - gap], [avoid.right + gap, cy - h / 2], [avoid.left - w - gap, cy - h / 2]];
+  for (let i = 0; i < tries.length; i++) {
+    const tx = Math.max(margin, Math.min(screenW - w - margin, tries[i][0])); let ty = tries[i][1];
+    if (ty < topLimit || ty + h > screenH - margin) { if (i >= 2) ty = Math.max(topLimit, Math.min(screenH - h - margin, ty)); else continue; }
+    if (tx + w + gap / 2 <= avoid.left || tx >= avoid.right + gap / 2 || ty + h + gap / 2 <= avoid.top || ty >= avoid.bottom + gap / 2) return [tx, ty];
+  }
+  const topY = topLimit, bottomY = screenH - h - margin;
+  const cover = y => Math.max(0, Math.min(y + h, avoid.bottom) - Math.max(y, avoid.top));
+  return [Math.max(margin, Math.min(screenW - w - margin, cx - w / 2)), cover(topY) <= cover(bottomY) ? topY : bottomY];
+}
+
+/** @param anchor HTMLElement  @param above true = above the anchor (toolbar menus), false = below, right aligned
+ *  @param avoid optional {left,top,right,bottom} viewport rectangle the card must not cover (the selected text) */
+export function show(anchor, above, rows, shortcuts, onDismiss, avoid) {
   dismissMenu();
   const screenW = window.innerWidth, screenH = window.innerHeight;
   const card = h('div', { class: 'amenu', dataset: { tag: 'anchored_menu' } });
@@ -67,9 +83,10 @@ export function show(anchor, above, rows, shortcuts, onDismiss) {
   x = Math.max(margin, Math.min(screenW - w - margin, x));
   let y = above ? r.top - hgt - gap : r.bottom + gap;
   y = Math.max(margin, Math.min(screenH - hgt - margin, y));
+  if (avoid) [x, y] = placeAvoiding(avoid, w, hgt, screenW, screenH, margin, gap);
   card.style.left = x + 'px'; card.style.top = y + 'px'; card.style.visibility = 'visible';
   card.classList.add('in');
   current = { card, close };
   return { close };
 }
-export const AnchoredMenu = { show, Row, Shortcut, dismiss: dismissMenu };
+export const AnchoredMenu = { show, Row, Shortcut, dismiss: dismissMenu, placeAvoiding };

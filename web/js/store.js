@@ -121,10 +121,12 @@ export class Mark {
     this.paper = 0xFFFFF3A6 | 0; this.fontSp = 13; this.boxSize = 1;
     /** Own box size in dp (0 = use boxSize); set by dragging the corner handle of a selected memo. */
     this.boxW = 0; this.boxH = 0;
+    /** Clockwise rotation in degrees (v1.29.0). */
+    this.rot = 0;
   }
   toJson() {
     return {
-      paper: i32(this.paper), fontSp: i32(this.fontSp), boxSize: i32(this.boxSize), boxW: f(this.boxW), boxH: f(this.boxH),
+      paper: i32(this.paper), fontSp: i32(this.fontSp), boxSize: i32(this.boxSize), boxW: f(this.boxW), boxH: f(this.boxH), rot: f(this.rot),
       page: i32(this.page), left: f(this.left), top: f(this.top), right: f(this.right), bottom: f(this.bottom),
       color: i32(this.color), note: this.note == null ? '' : this.note,
       noteOnly: !!this.noteOnly, visible: !!this.visible, minimized: !!this.minimized,
@@ -140,6 +142,7 @@ export class Mark {
     m.fontSp = Math.max(9, Math.min(28, optInt(o, 'fontSp', 13)));
     m.boxSize = Math.max(0, Math.min(2, optInt(o, 'boxSize', 1)));
     m.boxW = f(Math.max(0, Math.min(800, optFloat(o, 'boxW', 0)))); m.boxH = f(Math.max(0, Math.min(1200, optFloat(o, 'boxH', 0))));
+    m.rot = optFloat(o, 'rot', 0);
     return m;
   }
 }
@@ -174,9 +177,9 @@ export class InkStroke {
 }
 
 export class TranslationNote {
-  constructor() { this.page = 0; this.left = 0; this.top = 0; this.right = 0; this.bottom = 0; this.source = null; this.translated = null; this.visible = true; this.minimized = false; }
+  constructor() { this.page = 0; this.left = 0; this.top = 0; this.right = 0; this.bottom = 0; this.source = null; this.translated = null; this.visible = true; this.minimized = false; this.boxW = 0; this.boxH = 0; this.rot = 0; }
   toJson() {
-    return { page: i32(this.page), left: f(this.left), top: f(this.top), right: f(this.right), bottom: f(this.bottom),
+    return { boxW: f(this.boxW), boxH: f(this.boxH), rot: f(this.rot), page: i32(this.page), left: f(this.left), top: f(this.top), right: f(this.right), bottom: f(this.bottom),
       source: this.source, translated: this.translated, visible: !!this.visible, minimized: !!this.minimized };
   }
   static fromJson(o) {
@@ -184,6 +187,7 @@ export class TranslationNote {
     n.page = optInt(o, 'page'); n.left = optFloat(o, 'left'); n.top = optFloat(o, 'top'); n.right = optFloat(o, 'right'); n.bottom = optFloat(o, 'bottom');
     n.source = optString(o, 'source', ''); n.translated = optString(o, 'translated', '');
     n.visible = optBoolean(o, 'visible', true); n.minimized = optBoolean(o, 'minimized', false);
+    n.boxW = optFloat(o, 'boxW', 0); n.boxH = optFloat(o, 'boxH', 0); n.rot = optFloat(o, 'rot', 0);
     return n;
   }
 }
@@ -213,8 +217,8 @@ export class PageElement {
   static DEFAULT_TEXT_COLOR = 0xFF1C1C1E | 0;
   /** sans=고딕, serif=명조, mono=고정폭, hand=손글씨체 */
   static FONTS = ['sans', 'serif', 'mono', 'hand'];
-  static ALIGNS = ['left', 'center', 'right'];
-  static LISTS = ['none', 'bullet', 'number', 'check'];
+  /** Markers of list lines are plain text (Android v1.29.0): '• ', '1. ', '☐ ' / '☑ '. */
+  static BULLET = '• '; static CHECK = '☐ '; static CHECKED = '☑ ';
   constructor() {
     this.page = 0; this.kind = 'text'; this.text = ''; this.asset = '';
     this.left = f(.1); this.top = f(.1); this.right = f(.8); this.bottom = f(.3);
@@ -223,29 +227,18 @@ export class PageElement {
     this.font = 'sans'; this.bold = false; this.italic = false;
     /** Clockwise rotation in degrees around the box centre (pictures, stickers, shapes and tables). */
     this.rot = 0;
-    /** v3 text formatting (typing boxes only; additive, Android ignores the keys): 'left'|'center'|'right', underline, list kind, per-line check state. */
-    this.align = 'left'; this.underline = false; this.list = 'none';
-    /** checked[i] = state of the i-th '\n'-separated line when list === 'check'. */
-    this.checked = [];
+    /** Typing boxes: paragraph alignment (0 left, 1 centre, 2 right), underline and strike-through (Android v1.29.0 keys). */
+    this.align = 0; this.underline = false; this.strike = false;
+    /** Pictures: stretched to fill the box (width and height independent) instead of keeping the original ratio. */
+    this.stretch = false;
   }
-  isChecked(i) { return !!(this.checked && this.checked[i]); }
-  setChecked(i, v) { if (!Array.isArray(this.checked)) this.checked = []; while (this.checked.length <= i) this.checked.push(false); this.checked[i] = !!v; }
-  toggleChecked(i) { this.setChecked(i, !this.isChecked(i)); return this.isChecked(i); }
   toJson() {
-    const o = { rot: f(this.rot), page: i32(this.page), kind: this.kind, text: this.text, asset: this.asset,
+    return { rot: f(this.rot), page: i32(this.page), kind: this.kind, text: this.text, asset: this.asset,
       left: f(this.left), top: f(this.top), right: f(this.right), bottom: f(this.bottom),
-      textSize: f(this.textSize), color: i32(this.color), font: this.font, bold: !!this.bold, italic: !!this.italic };
-    // v3 keys are written only when they differ from the defaults so v2 data round-trips byte for byte
-    if (this.align && this.align !== 'left' && PageElement.ALIGNS.includes(this.align)) o.align = this.align;
-    if (this.underline) o.underline = true;
-    if (this.list && this.list !== 'none' && PageElement.LISTS.includes(this.list)) o.list = this.list;
-    if (Array.isArray(this.checked) && this.checked.some(Boolean)) {
-      let n = this.checked.length; while (n > 0 && !this.checked[n - 1]) n--;
-      o.checked = this.checked.slice(0, n).map(Boolean);
-    }
-    return o;
+      textSize: f(this.textSize), color: i32(this.color), font: this.font, bold: !!this.bold, italic: !!this.italic,
+      align: i32(this.align), underline: !!this.underline, strike: !!this.strike, stretch: !!this.stretch };
   }
-  /** Same checks as Java (throws JSONException '잘못된 노트 요소'). */
+  /** Same checks as Java (throws JSONException '잘못된 노트 요소'). Also reads the Windows v3.0 keys (align as 'left'|'center'|'right', list, checked[]). */
   static fromJson(o) {
     const e = new PageElement();
     e.page = getInt(o, 'page');
@@ -257,15 +250,42 @@ export class PageElement {
     e.font = optString(o, 'font', 'sans');
     if (!PageElement.FONTS.includes(e.font)) e.font = 'sans';
     e.bold = optBoolean(o, 'bold', false); e.italic = optBoolean(o, 'italic', false);
-    e.align = optString(o, 'align', 'left'); if (!PageElement.ALIGNS.includes(e.align)) e.align = 'left';
+    const legacy = has(o, 'align') && typeof o.align === 'string' ? ['left', 'center', 'right'].indexOf(o.align.toLowerCase()) : -1;
+    e.align = Math.max(0, Math.min(2, legacy >= 0 ? legacy : optInt(o, 'align', 0)));
     e.underline = optBoolean(o, 'underline', false);
-    e.list = optString(o, 'list', 'none'); if (!PageElement.LISTS.includes(e.list)) e.list = 'none';
-    const ck = optArray(o, 'checked');
-    e.checked = ck ? ck.slice(0, 5000).map(v => v === true || v === 'true') : [];
+    e.strike = optBoolean(o, 'strike', false);
+    e.stretch = optBoolean(o, 'stretch', false);
+    if (e.kind === 'text') PageElement.migrateLegacyList(e, o);
     if (!PageElement.valid(e)) throw new JSONException('잘못된 노트 요소');
     if (!Number.isFinite(e.textSize) || e.textSize < f(.004) || e.textSize > f(.3)) e.textSize = PageElement.DEFAULT_TEXT_SIZE;
     return e;
   }
+  /** Windows v3.0 stored `list` ('bullet'|'number'|'check') + `checked[]` beside the text; turn that into plain-text markers. */
+  static migrateLegacyList(e, o) {
+    const kind = optString(o, 'list', 'none');
+    if (kind !== 'bullet' && kind !== 'number' && kind !== 'check') return;
+    const ck = optArray(o, 'checked') || [];
+    e.text = String(e.text).split('\n').map((line, i) => {
+      if (PageElement.markerKind(line)) return line;
+      return (kind === 'bullet' ? PageElement.BULLET : kind === 'number' ? (i + 1) + '. ' : (ck[i] === true || ck[i] === 'true') ? PageElement.CHECKED : PageElement.CHECK) + line;
+    }).join('\n');
+  }
+  /** Marker kind at the start of a line: 0 none, 1 bullet, 2 number, 3 checklist. */
+  static markerKind(line) {
+    if (line.startsWith(PageElement.BULLET)) return 1; if (/^\d+\. /.test(line)) return 2;
+    if (line.startsWith(PageElement.CHECK) || line.startsWith(PageElement.CHECKED)) return 3; return 0;
+  }
+  static markerLength(line) {
+    switch (PageElement.markerKind(line)) { case 1: return PageElement.BULLET.length; case 2: return /^\d+\. /.exec(line)[0].length; case 3: return PageElement.CHECK.length; default: return 0; }
+  }
+  /** Flips the leading ☐/☑ of the i-th '\n' line of a typing box; returns the new checked state (false when that line has no check marker). */
+  toggleCheck(i) {
+    const lines = String(this.text).split('\n'), l = lines[i]; if (l == null) return false;
+    if (l.startsWith(PageElement.CHECK)) { lines[i] = PageElement.CHECKED + l.slice(2); this.text = lines.join('\n'); return true; }
+    if (l.startsWith(PageElement.CHECKED)) { lines[i] = PageElement.CHECK + l.slice(2); this.text = lines.join('\n'); }
+    return false;
+  }
+  static markerFor(kind, number) { return kind === 1 ? PageElement.BULLET : kind === 2 ? number + '. ' : kind === 3 ? PageElement.CHECK : ''; }
   /** Java's validation block of PageElement.fromJson. */
   static valid(e) {
     if (e.page < 0 || !Number.isFinite(e.left) || !Number.isFinite(e.top) || !Number.isFinite(e.right) || !Number.isFinite(e.bottom)) return false;

@@ -17,7 +17,7 @@ import { LibraryDialog, PaperChoiceView, ProgressDialog, rebindButton, inputFiel
 import * as Search from './search.js';
 import { ColorPicker } from './ui/colorpicker.js';
 import { printDocument } from './print.js';
-import { showSyncSettings, showAboutOffline, initSyncAuto } from './sync-ui.js';
+import { showAboutOffline } from './offline.js';
 
 // ------------------------------------------------------------------------------------------------------------------ constants
 export const NAVY = '#1C1C1E', ACCENT = '#007AFF', ACTIVE_BG = '#E5F0FF', ACTIVE_FG = '#007AFF', GRAY = '#8E8E93', RED = '#FF3B30';
@@ -1938,9 +1938,8 @@ F.updateThumbnailSelection = function () {
   if (this.sidebarVisible && selected) this.thumbnailPanel.scrollTo({ top: Math.max(0, selected.offsetTop - 16), behavior: 'smooth' });
 };
 
-// ---- v3: print / Google Drive sync / offline notes (implemented in print.js, sync-ui.js) ---------------------------------------------------------
+// ---- v3: print / offline notes (implemented in print.js, offline.js) ---------------------------------------------------------
 M.printDocument = function () { return printDocument(this); };
-M.showSyncSettings = function () { return showSyncSettings(this); };
 M.showAboutOffline = function () { return showAboutOffline(this); };
 
 // ====================================================================================================================
@@ -1956,7 +1955,6 @@ export function initMain2(app) {
   app.outlineList = null; app.recordingList = null; app.sideTabs = []; app._thumbAspectCache = null;
   app.showAllThumbnails = app.recentPrefs.getBoolean('thumb_all', false);
   document.addEventListener('paste', e => app.onPasteEvent(e));
-  initSyncAuto(app);
   window.addEventListener('resize', () => {
     if (app.studySplit) { const wide = window.innerWidth >= 600; app.studySplit.style.flexDirection = wide ? 'row' : 'column'; if (app.applyStudySize) app.applyStudySize(); }
     if (app.sidePanel && app.sidebarVisible && !app.sideSplitter?.classList.contains('drag')) app.sidePanel.style.width = app.sidePanelWidth() + 'px';

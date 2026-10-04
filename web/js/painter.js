@@ -145,36 +145,35 @@ export class AnnotationPainter {
 
   // ------------------------------------------------------------------------------------------ text
   /**
-   * Text layout shared by the page painter, fitHeight(), the check-box hit test and the inline editor (v3).
-   * measure(s) -> width px of s in the box's font. opts: {align:'left'|'center'|'right', list:'none'|'bullet'|'number'|'check'}.
-   * Returns {markerW, textW, pitch, lines:[{para, first, text, x, y}], height}; x = offset of the line's left edge from the box
-   * left, y = baseline offset from the box top. Wrapping is character based (breakText), pitch size*1.35, first baseline at size.
-   * List kinds reserve a marker column of 1.6*size (2.1*size for number lists of 10+ lines) on the left; the marker sits on the
-   * first line of each '\n'-separated line ("paragraph"); wrapped continuation lines are indented by the column.
-   * Alignment applies to the text area (box minus marker column); trailing blanks are ignored when centring/right-aligning.
+   * Text layout shared by the page painter, fitHeight(), the check-box hit test and the inline editor.
+   * measure(s) -> width px of s in the box's font. opts: {align: 0 left | 1 centre | 2 right (or 'left'|'center'|'right')}.
+   * Returns {lines:[{para, first, text, x, y, w}], pitch, height}; x = offset of the line's left edge from the box left,
+   * y = baseline offset from the box top. Wrapping is character based (breakText), pitch size*1.35, first baseline at size.
+   * List markers ('• ', '1. ', '☐ ') are ordinary text (Android v1.29.0). Trailing blanks are ignored when centring/right-aligning.
    */
   static layoutText(measure, text, widthPx, size, opts = {}) {
-    const list = opts.list || 'none', align = opts.align || 'left';
+    const align = AnnotationPainter.alignIndex(opts.align);
     const paragraphs = String(text ?? '').split('\n');
-    const markerW = list === 'none' ? 0 : (list === 'number' && paragraphs.length >= 10 ? 2.1 : 1.6) * size;
-    const textW = Math.max(size, widthPx - markerW), pitch = size * 1.35;
+    const textW = Math.max(size, widthPx), pitch = size * 1.35;
     const lines = []; let y = size;
     paragraphs.forEach((para, pi) => {
       let remaining = para, first = true;
-      if (remaining === '') { lines.push({ para: pi, first: true, text: '', x: markerW, y, w: 0 }); y += pitch; return; }
+      if (remaining === '') { lines.push({ para: pi, first: true, text: '', x: 0, y, w: 0 }); y += pitch; return; }
       while (remaining.length) {
         const n = breakCount(measure, remaining, textW), seg = remaining.substring(0, n);
-        const w = measure(seg.replace(/[ \t]+$/, ''));
-        let x = markerW;
-        if (align === 'center') x = markerW + (textW - w) / 2; else if (align === 'right') x = markerW + textW - w;
-        lines.push({ para: pi, first, text: seg, x: Math.max(markerW > 0 ? markerW : -Infinity, x), y, w });
+        const w = measure(seg.replace(/\s+$/, '')), full = measure(seg);
+        let x = 0;
+        if (align === 1) x = (textW - w) / 2; else if (align === 2) x = textW - w;
+        lines.push({ para: pi, first, text: seg, x, y, w: align ? w : full });
         y += pitch; remaining = remaining.substring(n); first = false;
       }
     });
-    return { markerW, textW, pitch, lines, height: lines.length ? y - pitch + size * .35 : 0 };
+    return { pitch, lines, height: lines.length ? y - pitch + size * .35 : 0 };
   }
+  /** 0 left, 1 centre, 2 right from a number or a legacy name. */
+  static alignIndex(a) { return a === 1 || a === 'center' ? 1 : a === 2 || a === 'right' ? 2 : 0; }
 
-  /** The text(c, text, box, size, color, face) of Java plus the v3 formatting: opts {align, underline, list, checked[]}. */
+  /** text(c, text, box, size, color, face, align, underline, strike) of Java. opts: {align, underline, strike}. */
   static textBlock(c, text, box, size, color, face = Typeface.DEFAULT, opts = {}) {
     box = RectF.from(box);
     c.save();
@@ -182,73 +181,51 @@ export class AnnotationPainter {
       c.beginPath(); c.rect(box.left, box.top, box.width(), box.height()); c.clip();
       c.font = face.css(size); c.fillStyle = argb(color); c.textAlign = 'left'; c.textBaseline = 'alphabetic';
       const L = AnnotationPainter.layoutText(s => c.measureText(s).width, text, box.width(), size, opts);
-      const list = opts.list || 'none', checked = opts.checked || [];
-      const css = argb(color), lum = .299 * ((color >>> 16) & 255) + .587 * ((color >>> 8) & 255) + .114 * (color & 255);
-      let num = 0;
+      const lw = Math.max(1, size * .065);
       for (const ln of L.lines) {
-        const done = list === 'check' && !!checked[ln.para];
+        if (ln.text === '') continue;
         const x = box.left + ln.x, y = box.top + ln.y;
-        c.globalAlpha = done ? .5 : 1;
-        if (ln.text !== '') c.fillText(ln.text, x, y);
-        if (opts.underline && ln.w > 0) {
-          c.fillRect(x, y + size * .12, ln.w, Math.max(1, size * .065));
-        }
-        if (ln.first && list !== 'none') {
-          const mr = box.left + L.markerW - size * .35;       // right edge of the marker
-          c.globalAlpha = 1;
-          if (list === 'bullet') { c.beginPath(); c.arc(mr - size * .1, y - size * .33, size * .13, 0, Math.PI * 2); c.fill(); }
-          else if (list === 'number') { c.textAlign = 'right'; c.fillText((ln.para + 1) + '.', mr, y); c.textAlign = 'left'; }
-          else AnnotationPainter._checkBox(c, mr, y, size, css, done, lum > 150 ? '#1C1C1E' : '#fff');
-        }
+        c.fillText(ln.text, x, y);
+        if (opts.underline && ln.w > 0) c.fillRect(x, y + size * .12, ln.w, lw);
+        if (opts.strike && ln.w > 0) c.fillRect(x, y - size * .3, ln.w, lw);
       }
     } finally { c.restore(); }
   }
-  /** Check box of a check-list line: right edge mr, text baseline y. Geometry = checkBoxRect(). */
-  static _checkBox(c, mr, y, size, css, done, mark = '#fff') {
-    const r = AnnotationPainter.checkBoxRect(mr, y, size), rad = size * .14;
-    c.save();
-    c.lineWidth = Math.max(1, size * .08); c.strokeStyle = css; c.fillStyle = css;
-    AnnotationPainter._roundRect(c, new RectF(r.left, r.top, r.right, r.bottom), rad, rad);
-    if (done) { c.fill(); c.strokeStyle = mark; c.lineWidth = Math.max(1.2, size * .1); c.lineCap = 'round'; c.lineJoin = 'round';
-      c.beginPath(); c.moveTo(r.left + r.width() * .22, r.top + r.height() * .52); c.lineTo(r.left + r.width() * .43, r.top + r.height() * .72); c.lineTo(r.left + r.width() * .78, r.top + r.height() * .28); c.stroke(); }
-    else c.stroke();
-    c.restore();
+
+  /** text(c, text, box, size, color[, face[, align, underline, strike]]) - wrapped, clipped text. First baseline at box.top+size, pitch size*1.35. */
+  static text(c, text, box, size, color, face = Typeface.DEFAULT, align = 0, underline = false, strike = false) {
+    AnnotationPainter.textBlock(c, text, box, size, color, face, { align, underline, strike });
   }
-  /** Square of 0.8*size whose right edge is mr and whose bottom is 0.03*size under the baseline y. */
-  static checkBoxRect(mr, y, size) { const s = size * .8; return new RectF(mr - s, y + size * .03 - s, mr, y + size * .03); }
 
-  /** text(c, text, box, size, color[, face]) - wrapped, clipped text. First baseline at box.top+size, pitch size*1.35. */
-  static text(c, text, box, size, color, face = Typeface.DEFAULT) { AnnotationPainter.textBlock(c, text, box, size, color, face); }
+  /** The text-formatting options of a typing box ({align, underline, strike}). */
+  static textOpts(e) { return { align: AnnotationPainter.alignIndex(e.align), underline: !!e.underline, strike: !!e.strike }; }
 
-  /** The text-formatting options of a typing box ({align, underline, list, checked}). */
-  static textOpts(e) { return { align: e.align || 'left', underline: !!e.underline, list: e.list || 'none', checked: e.checked || [] }; }
-
-  /** Page-px rectangles of the check boxes of a check-list typing box ([{index, rect}]; index = '\n' line). d = page rect px. */
+  /** Page-px rectangles of the '☐'/'☑' markers that start a line of a typing box ([{index, rect}]; index = '\n' line). Tapping one toggles it (Windows extra). d = page rect px. */
   static checkBoxes(d0, e) {
-    if (e.kind !== 'text' || e.list !== 'check') return [];
+    if (e.kind !== 'text' || !/(^|\n)[☐☑] /.test(e.text || '')) return [];
     const d = RectF.from(d0), b = AnnotationPainter.box(d, e), size = Math.max(9, d.width() * e.textSize);
     const face = AnnotationPainter.typeface(e.font, e.bold, e.italic), ctx = getMeasureCtx();
     let measure; if (ctx) { ctx.font = face.css(size); measure = s => ctx.measureText(s).width; } else measure = s => fallbackMeasure(s, size);
     const L = AnnotationPainter.layoutText(measure, e.text, b.width(), size, AnnotationPainter.textOpts(e)), out = [];
-    for (const ln of L.lines) if (ln.first && ln.y - size < b.height()) {
-      const r = AnnotationPainter.checkBoxRect(b.left + L.markerW - size * .35, b.top + ln.y, size);
-      out.push({ index: ln.para, rect: r });
+    for (const ln of L.lines) if (ln.first && /^[☐☑] /.test(ln.text) && ln.y - size < b.height()) {
+      const x = b.left + ln.x, y = b.top + ln.y;
+      out.push({ index: ln.para, rect: new RectF(x, y - size, x + measure(ln.text.slice(0, 2)), y + size * .3) });
     }
     return out;
   }
 
   /**
    * Height (fraction of the page height) a typing box needs so none of its text is clipped. Same wrapping as text().
-   * pageAspect = page height / page width. list = 'none'|'bullet'|'number'|'check' (marker column narrows the text area).
+   * pageAspect = page height / page width.
    */
-  static fitHeight(text, widthFraction, sizeFraction, pageAspect, face = Typeface.DEFAULT, list = 'none') {
+  static fitHeight(text, widthFraction, sizeFraction, pageAspect, face = Typeface.DEFAULT) {
     const pageWidth = 1000;
     const size = Math.max(1, sizeFraction * pageWidth);
     const ctx = getMeasureCtx();
     let measure;
     if (ctx) { ctx.font = face.css(size); measure = s => ctx.measureText(s).width; } else measure = s => fallbackMeasure(s, size);
     const boxWidth = Math.max(size, widthFraction * pageWidth);
-    const lines = AnnotationPainter.layoutText(measure, text, boxWidth, size, { list }).lines.length;
+    const lines = AnnotationPainter.layoutText(measure, text, boxWidth, size).lines.length;
     const heightPx = size * (1.35 * Math.max(1, lines) + .15);
     return heightPx / (pageWidth * Math.max(.1, pageAspect));
   }
@@ -332,7 +309,7 @@ export class AnnotationPainter {
       const image = AnnotationPainter.image(e.asset);
       if (image) {
         const scale = Math.min(b.width() / image.width, b.height() / image.height);
-        const fw = image.width * scale, fh = image.height * scale;
+        const fw = e.stretch ? b.width() : image.width * scale, fh = e.stretch ? b.height() : image.height * scale;
         c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
         c.drawImage(image, b.centerX() - fw / 2, b.centerY() - fh / 2, fw, fh);
       }

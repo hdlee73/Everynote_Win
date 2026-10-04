@@ -114,8 +114,7 @@ const methods = {
     sections.push(section('읽기 편의', [tile('화면 켜 둠', 'ic_clock', () => {
       prefs.putBoolean('keep_awake', !awake); this.applyKeepAwake(); this.toast(!awake ? '읽는 동안 화면이 꺼지지 않습니다' : '화면 자동 꺼짐을 따릅니다');
     }, { selected: awake })]));
-    sections.push(section('동기화·인쇄', [
-      tile('구글 드라이브 동기화', 'ic_cloud_sync', () => this.callUi2('showSyncSettings')),
+    sections.push(section('인쇄', [
       tile('인쇄', 'ic_print', () => this.callUi2('printDocument'))]));
     sections.push(section('도움말', [tile('사용법', 'ic_outline', () => this.showHelp()),
       tile('오프라인 사용 안내', 'ic_wifi_off', () => this.callUi2('showAboutOffline'))]));
@@ -202,7 +201,7 @@ const methods = {
   /** Resizes the box height so the whole text is visible with the element's own width, size and typeface. */
   fitTextElement(e) {
     const view = this.viewForPage(e.page); const aspect = view ? view.pageAspect() : 1.414;
-    let height = AnnotationPainter.fitHeight(e.text, e.right - e.left, e.textSize, aspect, AnnotationPainter.typeface(e.font, e.bold, e.italic), e.list || 'none');
+    let height = AnnotationPainter.fitHeight(e.text, e.right - e.left, e.textSize, aspect, AnnotationPainter.typeface(e.font, e.bold, e.italic));
     height = Math.min(.98, height);
     if (e.top + height > .99) e.top = Math.max(0, .99 - height);
     e.bottom = e.top + height;
@@ -228,9 +227,12 @@ const methods = {
     edit.value = e.text || '';
     edit.style.setProperty('--ph', `rgba(${(e.color >> 16) & 255},${(e.color >> 8) & 255},${e.color & 255},.4)`);
     edit.style.width = '120px';
-    edit.addEventListener('input', () => { e.text = edit.value; this._inlineDirty = true; this._inlineMarksDirty = true; });
+    edit.addEventListener('input', ev => {
+      if (ev && ev.inputType === 'insertLineBreak') this.continueList(edit.selectionStart - 1);   // Enter inside a list line starts the next item
+      e.text = edit.value; this._inlineDirty = true; if (this._inlineSync) this._inlineSync();
+    });
+    for (const t of ['keyup', 'click', 'select']) edit.addEventListener(t, () => { if (this._inlineSync) this._inlineSync(); });
     layer.append(edit);
-    this.inlineMarks = h('div', { class: 'm3-inline-marks', dataset: { tag: 'inline_marks' } }); layer.append(this.inlineMarks);
     this.inlineMove = this.inlineHandle('✥', '글상자 이동', (dx, dy, page) => {
       const w = e.right - e.left, hh = e.bottom - e.top;
       const nx = Math.max(0, Math.min(1 - w, e.left + dx / page.width())), ny = Math.max(0, Math.min(1 - hh, e.top + dy / page.height()));
@@ -273,19 +275,12 @@ const methods = {
     const px = Math.max(9, page.width() * e.textSize);
     let changed = false;
     if (Math.abs((this._inlinePx || 0) - px) > .4) { this._inlinePx = px; edit.style.fontSize = px + 'px'; edit.style.lineHeight = (px * 1.35) + 'px'; changed = true; }
-    const kind = e.list || 'none', nLines = (edit.value.match(/\n/g) || []).length + 1;
-    const padL = (3 + (kind === 'none' ? 0 : (kind === 'number' && nLines >= 10 ? 2.1 : 1.6) * px)).toFixed(1) + 'px';
-    if (edit.style.paddingLeft !== padL) { edit.style.paddingLeft = padL; changed = true; }
+    if (edit.style.paddingLeft !== '3px') { edit.style.paddingLeft = '3px'; changed = true; }
     if (edit.style.left !== left + 'px') edit.style.left = left + 'px';
     if (edit.style.top !== top + 'px') edit.style.top = top + 'px';
     if (edit.style.width !== width + 'px') { edit.style.width = width + 'px'; changed = true; }
     if (changed || this._inlineDirty) { this._inlineDirty = false; edit.style.height = 'auto'; edit.style.height = edit.scrollHeight + 2 + 'px'; }
     const height = edit.offsetHeight;
-    if (this.inlineMarks) {
-      const ms = this.inlineMarks.style;
-      if (ms.left !== left + 'px') ms.left = left + 'px'; if (ms.top !== top + 'px') ms.top = top + 'px';
-      if (changed || this._inlineMarksDirty !== false) { this._inlineMarksDirty = false; this.updateInlineMarkers(); }
-    }
     const editBottom = top + Math.max(18, height);
     this.placeHandle(this.inlineMove, left - 8, top - 34);
     this.placeHandle(this.inlineDelete, left + width - 22, top - 34);
@@ -319,45 +314,47 @@ const methods = {
     const tf = AnnotationPainter.typeface(e.font, e.bold, e.italic);
     edit.style.fontFamily = tf.family; edit.style.fontWeight = tf.getStyle() & 1 ? '700' : '400'; edit.style.fontStyle = tf.getStyle() & 2 ? 'italic' : 'normal';
     edit.style.color = css(e.color | 0xFF000000);
-    edit.style.textAlign = e.align || 'left'; edit.style.textDecoration = e.underline ? 'underline' : 'none';
-    this._inlineMarksDirty = true;
+    edit.style.textAlign = ['left', 'center', 'right'][AnnotationPainter.alignIndex(e.align)];
+    edit.style.textDecoration = [e.underline ? 'underline' : '', e.strike ? 'line-through' : ''].filter(Boolean).join(' ') || 'none';
     if (this._inlineSync) this._inlineSync();
     if (this.inlineSize) this.inlineSize.textContent = this.pointsOf(e) + 'pt';
     this._inlineDirty = true; this.positionInlineText();
   },
-  /** List markers (bullet / number / check box) of the typing box being edited, laid out with the same AnnotationPainter.layoutText the page painter uses. */
-  updateInlineMarkers() {
-    const m = this.inlineMarks, e = this.inlineElement, edit = this.inlineEdit; if (!m || !e || !edit) return;
-    m.textContent = '';
-    const list = e.list || 'none', px = this._inlinePx || 0; if (list === 'none' || px <= 0) return;
-    const ctx = this._measureCtx || (this._measureCtx = document.createElement('canvas').getContext('2d'));
-    ctx.font = AnnotationPainter.typeface(e.font, e.bold, e.italic).css(px);
-    const boxW = Math.max(px, edit.clientWidth - 6);
-    const L = AnnotationPainter.layoutText(s => ctx.measureText(s).width, edit.value, boxW, px, { list, align: e.align || 'left' });
-    const color = css(e.color | 0xFF000000), ox = 4, oy = 3;      // textarea border (1) + padding (3 / 2)
-    const mr = ox + L.markerW - px * .35;
-    for (const ln of L.lines) {
-      if (!ln.first) continue;
-      const base = oy + ln.y;
-      if (list === 'bullet') {
-        const d = px * .26;
-        m.append(h('div', { class: 'm3-mk', style: { left: (mr - px * .3 - d / 2) + 'px', top: (base - px * .33 - d / 2) + 'px', width: d + 'px', height: d + 'px', borderRadius: '50%', background: color } }));
-      } else if (list === 'number') {
-        m.append(h('div', { class: 'm3-mk m3-mk-num', style: { left: '0', width: mr + 'px', top: (base - px) + 'px', fontSize: px + 'px', lineHeight: (px * 1.35) + 'px', color, fontFamily: edit.style.fontFamily, fontWeight: edit.style.fontWeight } }, (ln.para + 1) + '.'));
-      } else {
-        const r = AnnotationPainter.checkBoxRect(mr, base, px), on = e.isChecked ? e.isChecked(ln.para) : !!(e.checked && e.checked[ln.para]), para = ln.para;
-        const box = h('div', { class: 'm3-mk m3-chk' + (on ? ' on' : ''), role: 'checkbox', 'aria-checked': String(on), 'aria-label': (para + 1) + '번째 줄 완료 표시', dataset: { tag: 'inline_check', line: para },
-          style: { left: r.left + 'px', top: r.top + 'px', width: r.width() + 'px', height: r.height() + 'px', borderColor: color, background: on ? color : 'transparent', borderRadius: (px * .14) + 'px', borderWidth: Math.max(1, px * .08) + 'px' } },
-        on ? icon('ic_check_bold', Math.max(8, r.width() * .85), '#fff') : null);
-        box.addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); });
-        box.addEventListener('click', ev => {
-          ev.preventDefault(); ev.stopPropagation();
-          if (e.setChecked) e.setChecked(para, !on); else { if (!Array.isArray(e.checked)) e.checked = []; while (e.checked.length <= para) e.checked.push(false); e.checked[para] = !on; }
-          this._inlineMarksDirty = true; this.updateInlineMarkers();
-        });
-        m.append(box);
-      }
-    }
+  // ---- list markers typed as plain text ('• ', '1. ', '☐ '/'☑ ') exactly like Android v1.29.0, so they survive export and backups
+  /** Adds, switches or removes the marker on every line touched by the selection (or the cursor line). kind: 1 bullet, 2 number, 3 checklist. */
+  toggleListMarker(kind) {
+    const edit = this.inlineEdit; if (!edit) return;
+    const PE = AnnotationStore.PageElement, all = edit.value;
+    const a = Math.min(edit.selectionStart, edit.selectionEnd), b = Math.max(edit.selectionStart, edit.selectionEnd);
+    const start = a === 0 ? 0 : all.lastIndexOf('\n', a - 1) + 1; let end = all.indexOf('\n', b); if (end < 0) end = all.length;
+    const lines = all.substring(start, end).split('\n');
+    const allSame = lines.every(l => PE.markerKind(l) === kind);
+    const allUnchecked = kind === 3 && allSame && lines.every(l => l.startsWith(PE.CHECK));
+    let number = 1;
+    const out = lines.map(line => {
+      const body = line.substring(PE.markerLength(line));
+      if (allUnchecked) return PE.CHECKED + body;
+      if (allSame) return body;
+      return PE.markerFor(kind, number++) + body;
+    }).join('\n');
+    edit.setRangeText(out, start, end, 'end');
+    this.inlineElement.text = edit.value; this._inlineDirty = true; this.positionInlineText(); if (this._inlineSync) this._inlineSync();
+  },
+  /** After Enter inside a list: starts the next item (numbers count up); Enter on an empty item ends the list. */
+  continueList(newlineAt) {
+    const edit = this.inlineEdit, PE = AnnotationStore.PageElement; if (!edit || newlineAt < 0 || edit.value[newlineAt] !== '\n') return;
+    const text = edit.value, lineStart = newlineAt === 0 ? 0 : text.lastIndexOf('\n', newlineAt - 1) + 1;
+    const previous = text.substring(lineStart, newlineAt), kind = PE.markerKind(previous); if (kind === 0) return;
+    if (previous.length === PE.markerLength(previous)) { edit.setRangeText('', lineStart, newlineAt + 1, 'end'); return; }
+    let number = 1; if (kind === 2) number = parseInt(/^(\d+)\. /.exec(previous)[1], 10) + 1;
+    const marker = PE.markerFor(kind, number);
+    edit.setRangeText(marker, newlineAt + 1, newlineAt + 1, 'end');
+  },
+  /** Marker kind of the line holding the caret (0 none, 1 bullet, 2 number, 3 checklist). */
+  currentLineKind() {
+    const edit = this.inlineEdit; if (!edit) return 0;
+    const all = edit.value, at = Math.max(0, edit.selectionStart), start = at === 0 ? 0 : all.lastIndexOf('\n', at - 1) + 1; let end = all.indexOf('\n', start);
+    return AnnotationStore.PageElement.markerKind(all.substring(start, end < 0 ? all.length : end));
   },
   changeInlineSize(delta) {
     if (!this.inlineElement) return;
@@ -386,23 +383,25 @@ const methods = {
     const bold = tbtn(icon('ic_bold', 20, 'currentColor'), '굵게', 'text_bold', () => { e.bold = !e.bold; this.applyInlineStyle(); });
     const italic = tbtn(icon('ic_italic', 20, 'currentColor'), '기울임', 'text_italic', () => { e.italic = !e.italic; this.applyInlineStyle(); });
     const underline = tbtn(icon('ic_underline', 20, 'currentColor'), '밑줄', 'text_underline', () => { e.underline = !e.underline; this.applyInlineStyle(); });
+    const strike = tbtn(icon('ic_strike', 20, 'currentColor'), '취소선', 'text_strike', () => { e.strike = !e.strike; this.applyInlineStyle(); });
     const minus = tbtn(icon('ic_minus', 18, 'currentColor'), '글자 작게', 'text_smaller', () => this.changeInlineSize(-1));
     const plus = tbtn(icon('ic_plus', 18, 'currentColor'), '글자 크게', 'text_bigger', () => this.changeInlineSize(1));
     this.inlineSize = h('div', { class: 'm3-inline-size', dataset: { tag: 'text_size' } });
-    row.append(style, bold, italic, underline, h('div', { class: 'm3-sep' }), minus, this.inlineSize, plus, h('div', { style: { flex: '1' } }));
+    row.append(style, bold, italic, underline, strike, h('div', { class: 'm3-sep' }), minus, this.inlineSize, plus, h('div', { style: { flex: '1' } }));
     row.append(iconButton('ic_delete', '글상자 삭제', DANGER, () => this.deleteInlineText(), 34, 34, 7));
     const done = iconButton('ic_check', '입력 완료', 0xFFFFFFFF | 0, () => this.commitInlineText(), 34, 34, 7);
     done.dataset.tag = 'text_done'; done.style.background = css(ACCENT); done.style.borderRadius = '17px'; done.style.marginLeft = '4px';
     row.append(done);
-    const aligns = [['left', '왼쪽 정렬', 'ic_align_left'], ['center', '가운데 정렬', 'ic_align_center'], ['right', '오른쪽 정렬', 'ic_align_right']]
-      .map(([v, label, ic]) => ({ v, b: tbtn(icon(ic, 20, 'currentColor'), label, 'text_align_' + v, () => { e.align = v; this.applyInlineStyle(); }) }));
-    const lists = [['bullet', '글머리 기호', 'ic_list_bullet'], ['number', '번호 목록', 'ic_list_number'], ['check', '체크리스트', 'ic_list_check']]
-      .map(([v, label, ic]) => ({ v, b: tbtn(icon(ic, 20, 'currentColor'), label, 'text_list_' + v, () => { e.list = e.list === v ? 'none' : v; this.applyInlineStyle(); }) }));
+    const aligns = [[0, 'left', '왼쪽 정렬', 'ic_align_left'], [1, 'center', '가운데 정렬', 'ic_align_center'], [2, 'right', '오른쪽 정렬', 'ic_align_right']]
+      .map(([v, name, label, ic]) => ({ v, b: tbtn(icon(ic, 20, 'currentColor'), label, 'text_align_' + name, () => { e.align = v; this.applyInlineStyle(); }) }));
+    const lists = [[1, 'bullet', '글머리 기호', 'ic_list_bullet'], [2, 'number', '번호 매기기', 'ic_list_number'], [3, 'check', '체크리스트', 'ic_list_check']]
+      .map(([v, name, label, ic]) => ({ v, b: tbtn(icon(ic, 20, 'currentColor'), label, 'text_list_' + name, () => { this.toggleListMarker(v); this.inlineEdit && this.inlineEdit.focus(); }) }));
     row2.append(...aligns.map(a => a.b), h('div', { class: 'm3-sep' }), ...lists.map(l => l.b));
     const mark = (b, on) => { b.classList.toggle('on', !!on); b.setAttribute('aria-pressed', String(!!on)); };
     this._inlineSync = () => {
-      mark(bold, e.bold); mark(italic, e.italic); mark(underline, e.underline);
-      aligns.forEach(a => mark(a.b, (e.align || 'left') === a.v)); lists.forEach(l => mark(l.b, e.list === l.v));
+      mark(bold, e.bold); mark(italic, e.italic); mark(underline, e.underline); mark(strike, e.strike);
+      const al = AnnotationPainter.alignIndex(e.align), ck = this.currentLineKind();
+      aligns.forEach(a => mark(a.b, al === a.v)); lists.forEach(l => mark(l.b, ck === l.v));
     };
     card.append(row, row2, panel);
     this.inlineBar = card;
@@ -411,9 +410,9 @@ const methods = {
   removeInlineViews() {
     AnnotationPainter.skip = null;
     if (this._inlineRaf) cancelAnimationFrame(this._inlineRaf); this._inlineRaf = 0;
-    for (const v of [this.inlineEdit, this.inlineMarks, this.inlineMove, this.inlineResize, this.inlineDelete, this.inlineBar]) if (v) v.remove();
+    for (const v of [this.inlineEdit, this.inlineMove, this.inlineResize, this.inlineDelete, this.inlineBar]) if (v) v.remove();
     if (this.inlineEdit && document.activeElement === this.inlineEdit) this.inlineEdit.blur();
-    this.inlineEdit = null; this.inlineMarks = null; this._inlineSync = null; this.inlineMove = this.inlineResize = this.inlineDelete = null; this.inlineBar = null; this.inlineSize = null;
+    this.inlineEdit = null; this._inlineSync = null; this.inlineMove = this.inlineResize = this.inlineDelete = null; this.inlineBar = null; this.inlineSize = null;
     this.inlineElement = null; this.inlineStore = null; this.inlineView = null; this._inlinePx = 0;
   },
   /** Saves the text being typed (an empty new box is dropped; emptying an old box deletes it). */
@@ -425,7 +424,6 @@ const methods = {
     if (text === '') { if (!fresh && target) { const i = target.elements.indexOf(e); if (i >= 0) target.elements.splice(i, 1); target.save(); } }
     else {
       e.text = text;
-      if (e.list !== 'check') e.checked = []; else if (Array.isArray(e.checked)) e.checked.length = Math.min(e.checked.length, text.split('\n').length);
       this.fitTextElement(e);
       if (fresh && target && !target.elements.includes(e)) target.elements.push(e);
       if (target) target.save();
@@ -648,7 +646,7 @@ export function initMain3(app) {
   // only fill what part 1/2 have not set up already
   const dflt = (k, v) => { if (app[k] === undefined) app[k] = v; };
   for (const k of ['inlineEdit', 'inlineElement', 'inlineStore', 'inlineView', 'inlineMove', 'inlineResize', 'inlineDelete', 'inlineBar', 'inlineSize',
-    'recorder', 'recordingFile', 'recordingStore', 'recorderBar', 'recorderTime', 'lassoBar', 'inlineMarks']) dflt(k, null);
+    'recorder', 'recordingFile', 'recordingStore', 'recorderBar', 'recorderTime', 'lassoBar']) dflt(k, null);
   dflt('inlineFresh', false); dflt('recordingStarted', 0); dflt('recordingPage', 0);
   app.lassoShape = prefs.getInt('lasso_shape', 0);
   app._appVersion = ''; app._destroyed = false;
@@ -678,12 +676,12 @@ const HELP = [
     "두 쪽 보기|가로로 넓은 화면(태블릿·폴드)에서 두 페이지를 나란히 봅니다."],
   ["4. 텍스트 선택과 단어 찾기",
     "선택하기|단어를 길게 누른 뒤 드래그해서 범위를 정합니다.",
-    "선택 팝업|하이라이트 · 복사 · 번역 · 읽어주기 · 단어장 찾기 · 개요 · 메모 · 발췌 · 링크가 나타납니다.",
-    "단어장 연결|‘단어장 찾기’ 후 사전 앱의 ‘PDF로 돌아가기’ 버튼으로 돌아옵니다."],
+    "선택 팝업|선택한 글자를 가리지 않는 위치(아래 · 위 · 옆)에 열립니다. 하이라이트 · 복사 · 번역 · 읽어주기 · 단어장 · 개요 · 메모 · 발췌 · 링크가 있고, 맨 아래 ‘삽입’을 누르면 사진 · 스티커 · 도형 같은 삽입 항목이 열립니다.",
+    "단어장|‘단어장’을 누르면 선택한 영어 단어가 복사되고 ‘단어가 복사되었습니다’ 메시지가 나타납니다. 복사한 단어는 원하는 사전이나 단어장 앱에 붙여넣어 사용하세요."],
   ["5. 필기 (펜)",
     "펜 선택|하단의 연필 아이콘을 눌러 필기 모드로 들어갑니다. S펜은 바로 쓰이고, 손가락 필기는 펜 메뉴의 ‘손가락 필기’를 켜야 합니다.",
     "펜 메뉴|펜 아이콘을 한 번 더 누르면 펜 종류(볼펜 · 연필 · 만년필 · 붓 · 사인펜), 굵기(선 4단계), 색, 투명도, 직선 · 손가락 필기 스위치가 아이콘으로 나타납니다.",
-    "펜 종류|펜 메뉴에서 볼펜 · 연필 · 만년필 · 붓 · 사인펜을 고릅니다. 연필은 가늘고 살짝 흐리며, 만년필은 펜촉 각도에 따라 굵기가 변하고, 붓은 시작과 끝이 가늘어지며, 사인펜은 일정한 굵기로 쓰입니다.",
+    "펜 종류|펜 메뉴 맨 위 두 줄은 아이콘입니다. 첫 줄은 굵기(4단계, 선이 굵어지는 순서), 둘째 줄은 볼펜 · 연필 · 만년필 · 붓 · 사인펜이며 각 칸에 실제 획 모양이 그려져 있습니다. 연필은 가늘고 살짝 흐리며, 만년필은 펜촉 각도에 따라 굵기가 변하고, 붓은 시작과 끝이 가늘어지며, 사인펜은 일정한 굵기로 쓰입니다.",
     "굵기·색·투명도|굵기는 선 아이콘 4단계(얇게~최대), 색은 기본 팔레트 또는 무지개 칩으로 원하는 색을 만들고, 투명도 막대로 흐리게 할 수 있습니다.",
     "직선|펜 메뉴의 직선(／) 아이콘을 켜면 시작점과 끝점을 잇는 반듯한 선을 긋습니다.",
     "지우개|지우개 아이콘으로 필기와 하이라이트를 지웁니다. 지울 부분을 문지르거나 눌러서 한 획(하이라이트는 한 덩어리)씩 지워집니다. 실행 취소·다시 실행도 사용할 수 있습니다.",
@@ -693,7 +691,7 @@ const HELP = [
     "색·투명도|하이라이트 아이콘을 한 번 더 누르면 색을 고를 수 있고, 무지개 칩에서 투명도까지 조절합니다.",
     "삭제|지우개로 문지르면 지워집니다. 하이라이트는 개요 목록에 나타나지 않습니다(메모가 붙은 것만 ‘메모’ 목록에 표시됩니다)."],
   ["7. 텍스트 상자",
-    "넣기|하단의 T 아이콘을 누르고 문서를 탭하면 입력할 수 있습니다. 입력 중에는 글꼴 · 굵게 · 기울임 · 밑줄 · 크기 · 색과 정렬 · 목록을 바꾸는 카드가 글상자 위나 아래에 나타나 입력 내용을 가리지 않습니다.",
+    "넣기|하단의 T 아이콘을 누르고 문서를 탭하면 입력할 수 있습니다. 입력 중에는 글꼴 · 굵게 · 기울임 · 밑줄 · 취소선 · 크기 · 색과 정렬(왼쪽 · 가운데 · 오른쪽) · 글머리 기호 · 번호 매기기 · 체크리스트를 바꾸는 카드가 글상자 위나 아래에 나타납니다. 목록 줄에서 Enter를 누르면 다음 항목이 이어지고, 빈 항목에서 Enter를 누르면 목록이 끝납니다. 체크리스트 버튼을 한 번 더 누르면 ☑ 로 바뀌고, 또 누르면 해제됩니다(문서에서는 ☐ ☑ 를 눌러도 바뀝니다). 목록 표시는 글자로 저장되어 안드로이드 앱과 백업이 호환됩니다.",
     "정렬 · 목록 · 밑줄|카드의 둘째 줄에서 왼쪽 · 가운데 · 오른쪽 정렬과 글머리 기호(●) · 번호 목록(1. 2. 3.) · 체크리스트(☑)를 고릅니다. 체크리스트는 입력 중이나 입력을 마친 뒤에도 네모 칸을 눌러 완료 표시를 할 수 있습니다. ‘Aa’를 누르면 글꼴과 색 줄이 펼쳐집니다.",
     "이동·크기·삭제|입력 중 상자 위의 핸들로 이동하고, 모서리 핸들로 너비를 조절하며, 빨간 휴지통 또는 상자 위의 × 로 삭제합니다. ✓ 버튼으로 입력을 마칩니다."],
   ["8. 메모 포스트잇",
@@ -703,7 +701,7 @@ const HELP = [
     "숨기기·최소화|메모와 번역 포스트잇은 펼치기 · 최소화 · 숨기기로 관리합니다."],
   ["9. 삽입: 사진 · 스티커 · 도형 · 표 · 링크",
     "삽입 메뉴|하단의 + 상자 아이콘을 누르거나 문서의 빈 곳을 길게 눌러 열고, 넣을 종류를 고릅니다. 사진·동영상·유튜브 주소는 끌어다 놓거나 붙여넣기(Ctrl+V)도 됩니다.",
-    "선택·이동·크기|넣은 개체를 한 번 탭하면 테두리와 8개의 핸들이 보입니다. 안쪽을 끌어 옮기고, 핸들을 끌어 크기를 바꿉니다(사진은 모서리 핸들이 가로세로 비율을 유지합니다). 마우스와 터치 모두 됩니다.",
+    "선택·이동·크기|넣은 개체를 한 번 탭하면 테두리와 핸들이 보입니다. 몸통을 끌면 이동, 네 모서리 핸들을 끌면 가로세로 비율을 유지한 채 크기 조절, 사진 · 스티커 · 동영상은 변 가운데의 막대 핸들을 끌어 가로 또는 세로만 따로 늘이거나 줄일 수 있습니다. 오른쪽 위의 빨간 × 를 누르면 바로 삭제됩니다. 메모와 번역 포스트잇도 한 번 탭하면 같은 방식으로 크기 · 회전(↻) · 삭제(×) · 이동을 할 수 있고, 한 번 더 탭하면 내용을 편집합니다. 마우스와 터치 모두 됩니다.",
     "삭제|선택한 개체의 ✕ 버튼을 누르거나 키보드 Delete 키를 누르면 지워집니다. 이미 선택된 개체를 한 번 더 탭하면 위치·크기 입력이나 색 설정 같은 세부 메뉴가 열립니다.",
     "회전|사진·스티커·도형·표는 선택하면 위쪽에 ↻ 핸들이 나타납니다. 끌면 돌아가고 15° 단위 근처에서 자석처럼 맞춰집니다. 도형은 모양 수정 창의 ‘회전’ 막대로 각도를 정할 수도 있습니다.",
     "도형·표|선 색, 채우기 색, 선 굵기를 정하고, 색마다 무지개 칩으로 원하는 색과 투명도를 고릅니다. 표는 행·열 수, 머리글 색, 칸 내용을 편집할 수 있습니다.",
@@ -718,13 +716,12 @@ const HELP = [
   ["12. 음성 녹음 · 검색 · 번역",
     "음성 녹음|개요 패널의 마이크 탭에서 녹음하면 현재 페이지에 ‘▶ 녹음’ 표시가 붙고, 탭하면 재생합니다.",
     "검색|돋보기 아이콘으로 본문 글자를 찾고, 손글씨 필기도 검색됩니다.",
-    "번역·읽어주기|글자를 선택한 뒤 팝업에서 번역 또는 읽어주기를 고릅니다. 번역은 번역 창에서 Google 번역으로 열거나 직접 붙여넣어 사용합니다(기기 내 번역은 지원하지 않습니다)."],
+    "번역·읽어주기|글자를 선택한 뒤 팝업에서 번역 또는 읽어주기를 고릅니다. 번역 결과가 있으면 바로 포스트잇으로 붙고 원문 · 번역 카드(수정 · 복사 · 삭제)가 열립니다. 기기 내 번역이 없으면 Google 번역이 열리고, 번역을 붙여넣은 뒤 ‘포스트잇 붙이기’를 누릅니다."],
   ["13. 문서 변환 · 내보내기",
     "Office·한글 문서|HWP · HWPX · DOC · DOCX · PPT · PPTX · XLS · XLSX는 PDF로 변환해 문서함에 가져와 엽니다. 서식은 변환 엔진과 글꼴에 따라 달라질 수 있고, HWP·DOC의 본문 미리보기는 글자만 표시합니다.",
     "내보내기·백업|더보기 메뉴에서 기록이 포함된 PDF를 내보내거나 기록을 파일로 백업·복원합니다.",
-    "인쇄|더보기 메뉴의 ‘인쇄’(Ctrl + P)로 필기가 포함된 문서를 프린터나 PDF로 인쇄합니다.",
-    "구글 드라이브 동기화|더보기 메뉴의 ‘구글 드라이브 동기화’에서 구글 계정으로 로그인하면 모바일 앱과 필기·문서를 맞출 수 있습니다. 직접 켠 경우에만 동작하며 계정별로 따로 설정됩니다."],
+    "인쇄|더보기 메뉴의 ‘인쇄’(Ctrl + P)로 필기가 포함된 문서를 프린터나 PDF로 인쇄합니다."],
   ["14. 인터넷 연결이 없을 때",
-    "인터넷이 필요한 기능|번역(구글 번역 열기) · 사전 웹 검색 · 구글 드라이브 동기화 · YouTube 링크 미리보기와 온라인 이미지 끌어오기, 그리고 WebView2 런타임을 처음 설치할 때 인터넷이 필요합니다. 연결이 없으면 해당 기능만 실패하고 나머지는 그대로 사용할 수 있습니다.",
+    "인터넷이 필요한 기능|번역(구글 번역 열기) · 사전 웹 검색 · YouTube 링크 미리보기와 온라인 이미지 끌어오기, 그리고 WebView2 런타임을 처음 설치할 때 인터넷이 필요합니다. 연결이 없으면 해당 기능만 실패하고 나머지는 그대로 사용할 수 있습니다.",
     "인터넷 없이 되는 기능|PDF 열기 · 필기(펜·하이라이트·메모·도형) · 검색 · HWP·Office 문서 변환(PC에 Office 또는 LibreOffice가 설치되어 있어야 합니다) · OCR(글자 인식, Windows OCR 언어팩이 설치되어 있어야 합니다) · 내보내기 · 인쇄 · 문서함은 인터넷 없이 모두 동작합니다.",
-    "회사 내부망에서|인터넷이 막힌 회사 내부망에서도 PDF를 열어 읽고 필기하고 인쇄하는 데는 지장이 없습니다. 번역이나 동기화는 외부 접속이 가능한 곳에서 사용하세요. 더보기 메뉴의 ‘오프라인 사용 안내’에서 같은 내용을 다시 볼 수 있습니다."]];
+    "회사 내부망에서|인터넷이 막힌 회사 내부망에서도 PDF를 열어 읽고 필기하고 인쇄하는 데는 지장이 없습니다. 번역은 외부 접속이 가능한 곳에서 사용하세요. 더보기 메뉴의 ‘오프라인 사용 안내’에서 같은 내용을 다시 볼 수 있습니다."]];

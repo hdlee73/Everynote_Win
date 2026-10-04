@@ -64,11 +64,18 @@ function segmentedView(labels, current, choose) {
   refresh();
   return row;
 }
+/** Small canvas (Android v1.29.0 pen menu): draw(ctx, w, h) paints a real sample stroke of the pen type. */
+function penSample(draw) {
+  const dpr = window.devicePixelRatio || 1, w = 44, hgt = 26, c = document.createElement('canvas');
+  c.width = Math.round(w * dpr); c.height = Math.round(hgt * dpr); c.style.width = w + 'px'; c.style.height = hgt + 'px'; c.className = 'm-pensample';
+  const g = c.getContext('2d'); if (g) { g.scale(dpr, dpr); draw(g, w, hgt); }
+  return c;
+}
 /** iconSegmented(items=[{icon,label}], current, choose): row of round icon buttons (Samsung Notes style) with tooltips + aria-labels. */
 function iconSegView(items, current, choose, tag = '') {
   const row = h('div', { class: 'm-iseg', dataset: tag ? { tag } : {} });
   const btns = items.map((it, i) => {
-    const b = h('button', { class: 'm-ibtn', type: 'button', 'aria-label': it.label, title: it.label, 'aria-pressed': 'false', dataset: { idx: i } }, mkIcon(it.icon, 24, 'currentColor'));
+    const b = h('button', { class: 'm-ibtn', type: 'button', 'aria-label': it.label, title: it.label, 'aria-pressed': 'false', dataset: { idx: i } }, it.draw ? penSample(it.draw) : mkIcon(it.icon, 24, 'currentColor'));
     b.addEventListener('click', () => { choose(i); row.refresh(); });
     row.append(b); return b;
   });
@@ -356,7 +363,7 @@ const methods = {
     else if (e.key === 'Home') { e.preventDefault(); if (this.currentPage > 0) this.showPage(0); }
     else if (e.key === 'End') { e.preventDefault(); if (this.currentPage < this.renderer.pageCount - 1) this.showPage(this.renderer.pageCount - 1); }
   },
-  /** Calls a method implemented by another part (print, drive sync, offline guide) or says it is missing. */
+  /** Calls a method implemented by another part (print, offline guide) or says it is missing. */
   callUi2(name, ...args) {
     if (typeof this[name] === 'function') return this[name](...args);
     toast('이 기능은 아직 사용할 수 없습니다'); return undefined;
@@ -640,14 +647,21 @@ const methods = {
   showPenMenu(anchor) {
     const box = h('div', { class: 'm-menubox', dataset: { tag: 'pen_menu' }, style: { padding: '4px 2px 0' } });
     const apply = () => { this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools(); this.updateInkButton(); };
-    // pen type: icon buttons (ballpoint / pencil / fountain / brush / felt marker)
-    box.append(iconSegView(AnnotationPainter.PEN_NAMES.map((name, i) => ({ icon: PEN_ICONS[i] || 'ic_ink', label: name })), () => this.inkPen, i => {
-      this.inkPen = i; this.pageView.setInkPen(i); this.recentPrefs.putInt('ink_pen', i); this.syncOtherTools(); this.updateInkButton();
-    }, 'pen_types'));
-    // stroke width: four lines of growing thickness
-    box.append(iconSegView(WIDTH_ICONS.map((ic, i) => ({ icon: ic, label: '굵기 · ' + WIDTH_NAMES[i] })), () => this.widthIndex(), i => {
+    // stroke width (Android v1.29.0 order: first row): four lines of growing thickness
+    box.append(iconSegView(WIDTH_ICONS.map((ic, i) => ({ icon: ic, label: '굵기 · ' + WIDTH_NAMES[i], draw: (g, w, hh) => {
+      g.strokeStyle = '#1C1C1E'; g.lineCap = 'round'; g.lineWidth = 1.2 + i * 1.9; g.beginPath(); g.moveTo(w * .22, hh / 2); g.lineTo(w * .78, hh / 2); g.stroke();
+    } })), () => this.widthIndex(), i => {
       this.inkWidth = INK_WIDTHS[i]; this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools();
     }, 'pen_widths'));
+    // pen type (second row): each cell shows a real sample stroke of ballpoint / pencil / fountain / brush / felt marker
+    box.append(iconSegView(AnnotationPainter.PEN_NAMES.map((name, i) => ({ icon: PEN_ICONS[i] || 'ic_ink', label: name, draw: (g, w, hh) => {
+      const s = new AnnotationStore.InkStroke(); s.pen = i; s.color = 0xFF1C1C1E | 0; s.width = i === 4 ? .07 : i === 3 ? .06 : .034;
+      for (let k = 0; k <= 12; k++) s.points.push(new AnnotationStore.InkPoint(.18 + .64 * k / 12, .5 + .2 * Math.sin(k / 12 * Math.PI * 2), k < 2 || k > 10 ? .5 : .9));
+      const saveDark = AnnotationPainter.dark; AnnotationPainter.dark = false;
+      try { AnnotationPainter.stroke(g, new RectF(0, 0, w, hh), s); } finally { AnnotationPainter.dark = saveDark; }
+    } })), () => this.inkPen, i => {
+      this.inkPen = i; this.pageView.setInkPen(i); this.recentPrefs.putInt('ink_pen', i); this.syncOtherTools(); this.updateInkButton();
+    }, 'pen_types'));
     const known = INK_COLORS.concat(INK_COLORS2);
     const pickInk = c => { this.inkColor = ((this.inkColor & 0xFF000000) | (c & 0xFFFFFF)) | 0; apply(); row1.refresh(); row2.refresh(); };
     const row1 = swatchesView(INK_COLORS, () => this.inkColor | 0xFF000000, pickInk, 22, 0, known);
@@ -718,7 +732,6 @@ const methods = {
       toast(!awake ? '읽는 동안 화면이 꺼지지 않습니다' : '화면 자동 꺼짐을 따릅니다');
     }).tint('#8E8E93').selected(awake));
     if (doc) rows.push(new Row('인쇄', 'ic_print', () => this.callUi2('printDocument')).tint('#007AFF'));
-    rows.push(new Row('구글 드라이브 동기화', 'ic_cloud_sync', () => this.callUi2('showSyncSettings')).tint('#34A853'));
     rows.push(new Row('오프라인 사용 안내', 'ic_wifi_off', () => this.callUi2('showAboutOffline')).tint('#8E8E93'));
     rows.push(new Row('사용법', 'ic_outline', () => this.showHelp()).tint('#8E8E93'));
     const shortcuts = [];
@@ -1535,13 +1548,17 @@ const methods = {
       () => this.onMemoPointRequested(page, u.right, u.top),
       () => this.addStudyEntry(selection.text, u.left, u.top, true), () => this.createHyperlink(selection)];
     const rows = labels.map((label, i) => new Row(label, icons[i], () => { actions[i](); after(); }).tint(tints[i]));
-    rows.push(Row.divider());
-    this.dropTarget = [page, u.left, u.bottom]; this.dropTime = Date.now();
-    for (const row of this.insertRows()) if (row.label !== '하이퍼링크') rows.push(row);
-    this.showMenuAt(view, anchorX, anchorY, rows, () => view.clearTextSelectionOverlay());
+    // Android v1.29.0: the insert items live in a '삽입' submenu, and the card avoids the selected text (below / above / beside it)
+    const pr = view.pageRect(), vr = view.el.getBoundingClientRect();
+    const avoid = { left: vr.left + pr.left + u.left * pr.width(), top: vr.top + pr.top + u.top * pr.height(), right: vr.left + pr.left + u.right * pr.width(), bottom: vr.top + pr.top + u.bottom * pr.height() };
+    rows.push(new Row('삽입', 'ic_insert', () => {
+      this.dropTarget = [page, u.left, u.bottom]; this.dropTime = Date.now();
+      this.showMenuAt(view, anchorX, anchorY, this.insertRows(), () => view.clearTextSelectionOverlay(), avoid);
+    }).tint('#FF2D55').submenu());
+    this.showMenuAt(view, anchorX, anchorY, rows, () => view.clearTextSelectionOverlay(), avoid);
   },
-  /** Shows a floating menu card next to a point inside a page view (above the point when it is in the lower half). */
-  showMenuAt(view, viewX, viewY, rows, onDismiss) {
+  /** Shows a floating menu card next to a point inside a page view (above the point when it is in the lower half). avoid: viewport rect the card must not cover. */
+  showMenuAt(view, viewX, viewY, rows, onDismiss, avoid) {
     if (!view) return null;
     const r = view.el.getBoundingClientRect();
     const left = r.left + viewX, top = r.top + viewY;
@@ -1550,7 +1567,7 @@ const methods = {
     const handle = AnchoredMenu.show(anchor, above, rows, null, onDismiss ? () => {
       if (this.selectionPopup === handle) this.selectionPopup = null;
       onDismiss();
-    } : null);
+    } : null, avoid || null);
     if (onDismiss) this.selectionPopup = handle;
     return handle;
   },
@@ -1562,14 +1579,17 @@ const methods = {
     }
     toast('선택한 내용을 복사했습니다');
   },
-  /** The LEXI dictionary app does not exist on Windows: open a web dictionary for the selection instead. */
+  /** 단어장 (Android v1.28/1.29 copies the English word and opens the 영어 스터디 app): Windows has no such app, so only copy the word. */
   async openDictionary(word) {
-    let query = word.replace(/^[^A-Za-z]+|[^A-Za-z'-]+$/g, '').trim();
-    if (query === '') query = word.trim();
-    try { await host.shellOpen('https://en.dict.naver.com/#/search?query=' + encodeURIComponent(query)); }
+    let query = String(word || '').replace(/^[^A-Za-z]+|[^A-Za-z'-]+$/g, '').trim();
+    if (query === '') query = String(word || '').trim();
+    if (query === '') return;
+    try { await navigator.clipboard.writeText(query); }
     catch (e) {
-      new AlertDialog.Builder().setTitle('단어장 앱이 필요합니다').setMessage('LEXI 단어장 앱을 설치하면 선택한 단어를 바로 검색할 수 있습니다.').setPositiveButton('확인', null).show();
+      const ta = h('textarea', { style: { position: 'fixed', left: '-1000px', top: '0' } }); ta.value = query; document.body.append(ta); ta.select();
+      try { document.execCommand('copy'); } catch (e2) { /* ignore */ } ta.remove();
     }
+    toast('단어가 복사되었습니다');
   },
   addOcrHighlights(bounds) {
     for (const b of bounds) {
@@ -1642,34 +1662,57 @@ const methods = {
   },
 
   // ============================================================ translation sticky notes
+  /** Android v1.29.0 card: original + editable translation + 복사 / 삭제 / 저장. A translation that was produced is put on the page right away as a post-it;
+   *  an empty result (manual Google Translate flow) is pasted into the card and attached with '포스트잇 붙이기'. */
   showTranslationResult(source, translated, bounds) {
-    const targetStore = this.store, targetPage = this.currentPage;
-    const original = h('div', { class: 'm-original' }, '원문\n' + source);
-    const result = h('textarea', { class: 'm-result', placeholder: '번역 앱에서 결과를 복사한 뒤 붙여넣으세요', rows: 3, spellcheck: 'false', 'aria-label': '번역 결과' });
+    const store = this.store, page = this.currentPage; let note = null;
+    if (String(translated).trim() !== '') {
+      note = new TranslationNote(); note.page = page; note.left = bounds.left; note.top = bounds.top; note.right = bounds.right; note.bottom = bounds.bottom;
+      note.source = source; note.translated = String(translated).trim(); store.translations.push(note); store.save(); this.pageView.invalidate();
+    }
+    this.openTranslationCard({ source, note, translated: String(translated), bounds, store, page });
+  },
+  editTranslation(note) { this.openTranslationCard({ source: note.source || '', note, translated: note.translated || '', bounds: null, store: this.store, page: note.page }); },
+  openTranslationCard({ source, note, translated, bounds, store, page }) {
+    const toKorean = !/[가-힣]/.test(source);
+    const btn = (label, cls, tag, fn) => { const b = h('button', { type: 'button', class: 'm-tc-btn ' + cls, dataset: { tag } }, label); b.addEventListener('click', fn); return b; };
+    const result = h('textarea', { class: 'm-tc-result', rows: 2, spellcheck: 'false', 'aria-label': '번역', dataset: { tag: 'translation_result' }, placeholder: '번역 앱에서 결과를 복사한 뒤 붙여넣으세요' });
     result.value = translated;
-    const grow = () => { result.style.height = 'auto'; result.style.height = Math.min(172, Math.max(92, result.scrollHeight + 2)) + 'px'; };
+    const grow = () => { result.style.height = 'auto'; result.style.height = Math.min(190, Math.max(56, result.scrollHeight + 2)) + 'px'; };
     result.addEventListener('input', grow);
-    const panel = h('div', { class: 'm-transpanel' }, original, result);
-    const dialog = new AlertDialog.Builder().setTitle('번역 · 포스트잇').setView(panel)
-      .setPositiveButton('포스트잇 저장', () => {
-        const value = result.value.trim(); if (value === '') return;
-        const n = new TranslationNote(); n.page = targetPage; n.left = bounds.left; n.top = bounds.top; n.right = bounds.right; n.bottom = bounds.bottom;
-        n.source = source; n.translated = value; targetStore.translations.push(n); targetStore.save(); this.pageView.invalidate(); toast('번역 포스트잇을 저장했습니다');
-      }).setNeutralButton('붙여넣기', null).setNegativeButton('닫기', null).create();
-    rebindButton(dialog, BUTTON_NEUTRAL, async () => {
+    const head = h('div', { class: 'm-tc-head' },
+      h('div', { class: 'm-tc-chip' }, mkIcon('ic_translate', 22, argb(ACCENT))), h('div', { class: 'm-tc-title' }, '번역'),
+      h('div', { class: 'm-tc-pair' }, toKorean ? '영어 → 한국어' : '한국어 → 영어'));
+    const original = h('div', { class: 'm-tc-original', dataset: { tag: 'translation_original' } }, source);
+    let dialog = null;
+    const close = () => { if (dialog) dialog.dismiss(); };
+    const attached = () => note != null && store.translations.includes(note);
+    const copy = btn('복사', 'gray', 'translation_copy', () => {
+      const t = result.value;
+      (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).catch(() => { result.select(); try { document.execCommand('copy'); } catch (e) { /* ignore */ } });
+      toast('번역을 복사했습니다');
+    });
+    const del = btn('삭제', 'red', 'translation_delete', () => {
+      const i = store.translations.indexOf(note); if (i >= 0) store.translations.splice(i, 1);
+      store.save(); this.pageView.invalidate(); toast('번역 포스트잇을 삭제했습니다'); close();
+    });
+    const view = btn('표시', 'gray', 'translation_display', () => { close(); this.showTranslationDisplayOptions(note); });
+    const paste = btn('붙여넣기', 'gray', 'translation_paste', async () => {
       try { const t = await navigator.clipboard.readText(); if (t) { result.value = t; grow(); } } catch (e) { toast('클립보드를 읽을 수 없습니다'); }
     });
+    const closeBtn = btn('닫기', 'gray', 'translation_close', close);
+    const save = btn(attached() ? '저장' : '포스트잇 붙이기', 'accent', 'translation_save', () => {
+      const value = result.value.trim();
+      if (attached()) { if (value !== '') note.translated = value; store.save(); this.pageView.invalidate(); close(); return; }
+      if (value === '') return;
+      note = new TranslationNote(); note.page = page; note.left = bounds.left; note.top = bounds.top; note.right = bounds.right; note.bottom = bounds.bottom;
+      note.source = source; note.translated = value; store.translations.push(note); store.save(); this.pageView.invalidate(); toast('페이지에 포스트잇으로 붙였습니다'); close();
+    });
+    const bar = h('div', { class: 'm-tc-bar' }, copy, ...(attached() ? [del, view] : [paste]), h('div', { style: { flex: '1' } }), closeBtn, save);
+    const card = h('div', { class: 'm-tcard', dataset: { tag: 'translation_card' } }, head,
+      h('div', { class: 'm-tc-label' }, '원문'), original, h('div', { class: 'm-tc-label' }, '번역 · 직접 고칠 수 있습니다'), result, bar);
+    dialog = new AlertDialog.Builder().setView(card).create();
     dialog.show(); grow();
-  },
-  editTranslation(note) {
-    const input = h('textarea', { class: 'field m-edittext', rows: 3, spellcheck: 'false', 'aria-label': '번역' }); input.value = note.translated;
-    new AlertDialog.Builder().setTitle('번역 포스트잇 · p.' + (note.page + 1)).setMessage('원문: ' + note.source).setView(input)
-      .setPositiveButton('저장', () => { note.translated = input.value.trim(); this.store.save(); this.pageView.invalidate(); })
-      .setNegativeButton('삭제', () => {
-        const i = this.store.translations.indexOf(note); if (i >= 0) this.store.translations.splice(i, 1);
-        this.store.save(); this.pageView.invalidate(); toast('번역 포스트잇을 삭제했습니다');
-      })
-      .setNeutralButton('표시 설정', () => this.showTranslationDisplayOptions(note)).show();
   },
   showTranslationDisplayOptions(note) {
     const choices = ['펼쳐서 표시', '최소화', '숨기기'], checked = !note.visible ? 2 : (note.minimized ? 1 : 0);

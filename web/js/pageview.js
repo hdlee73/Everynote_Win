@@ -207,7 +207,7 @@ export class PdfPageView {
     this.drawing = false; this.panning = false; this.gestureMoved = false; this.scalingOccurred = false;
     this.verticalPageSwipe = false; this.outlineMode = false;
     this.inkMode = 0; this.inkColor = 0xFF1C1C1E | 0; this.inkWidth = 0.004; this.inkPen = 0;
-    this.selectedMemo = null; this.memoDrag = 0; this.memoStartX = 0; this.memoStartY = 0; this.memoW0 = 0; this.memoH0 = 0; this.elementRot0 = 0;
+    this.selSticky = null; this.stDrag = 0; this.stMoved = false; this.stStartX = 0; this.stStartY = 0; this.stW0 = 0; this.stH0 = 0; this.stAx0 = 0; this.stAy0 = 0; this.elementRot0 = 0;
     this.activeStroke = null; this.stylusDrawing = false;
     this.fingerInk = false; this.pageSwipeEnabled = false;
     this.scale = 1;
@@ -361,7 +361,7 @@ export class PdfPageView {
   showPage(pageBitmap, pageNumber, allMarks, allStrokes, allTranslations) {
     this.clearLassoSelection();
     this.stopTextSelection();
-    this.noteHitBoxes.clear(); this.memoHitBoxes.clear(); this._setSelected(null); this.selectedMemo = null; this.memoDrag = 0;
+    this.noteHitBoxes.clear(); this.memoHitBoxes.clear(); this._setSelected(null); this.selSticky = null; this.stDrag = 0;
     if (this.bitmap !== pageBitmap) this._darkBitmap = null;
     this.bitmap = pageBitmap;
     this.page = pageNumber;
@@ -580,11 +580,13 @@ export class PdfPageView {
   _handleSpots(se, b, dest) {
     const turns = AnnotationPainter.rotates(se), out = [];
     out.push({ id: 2, x: b.left, y: b.top, kind: 'c' }, { id: 3, x: b.right, y: b.top, kind: 'c' }, { id: 4, x: b.left, y: b.bottom, kind: 'c' }, { id: 5, x: b.right, y: b.bottom, kind: 'c' });
-    if (b.width() >= 44) out.push({ id: H_T, x: b.centerX(), y: b.top, kind: 'e' }, { id: H_B, x: b.centerX(), y: b.bottom, kind: 'e' });
-    if (b.height() >= 44) out.push({ id: H_L, x: b.left, y: b.centerY(), kind: 'e' }, { id: H_R, x: b.right, y: b.centerY(), kind: 'e' });
+    // Android v1.29.0: pictures / stickers / videos always have the four edge-middle bar handles (width and height independently)
+    const bars = PdfPageView.aspectLocked(se);
+    if (bars || b.width() >= 44) out.push({ id: H_T, x: b.centerX(), y: b.top, kind: 'e', w: 9, h: 4 }, { id: H_B, x: b.centerX(), y: b.bottom, kind: 'e', w: 9, h: 4 });
+    if (bars || b.height() >= 44) out.push({ id: H_L, x: b.left, y: b.centerY(), kind: 'e', w: 4, h: 9 }, { id: H_R, x: b.right, y: b.centerY(), kind: 'e', w: 4, h: 9 });
     if (turns) out.push({ id: H_ROT, x: b.centerX(), y: b.top - 28 * DP, kind: 'r' });
     const flip = !(turns && se.rot) && (dest.top + se.top * dest.height() - 42 * DP) < 0;
-    out.push({ id: H_DEL, x: b.right, y: flip ? b.bottom + 28 * DP : b.top - 28 * DP, kind: 'd' });
+    out.push({ id: H_DEL, x: b.right + 14 * DP, y: flip ? b.bottom + 28 * DP : b.top - 28 * DP, kind: 'd' });
     return out;
   }
   _drawElementHandles(ctx, dest) {
@@ -597,7 +599,7 @@ export class PdfPageView {
     if (turns) { ctx.beginPath(); ctx.moveTo(b.centerX(), b.top); ctx.lineTo(b.centerX(), b.top - 24 * d); ctx.stroke(); }
     for (const h of this._handleSpots(se, b, dest)) {
       if (h.kind === 'c') { ctx.beginPath(); ctx.arc(h.x, h.y, 8 * d, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); }
-      else if (h.kind === 'e') { roundRectPath(ctx, h.x - 7 * d, h.y - 7 * d, h.x + 7 * d, h.y + 7 * d, 3 * d, 3 * d); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); }
+      else if (h.kind === 'e') { roundRectPath(ctx, h.x - h.w * d, h.y - h.h * d, h.x + h.w * d, h.y + h.h * d, 4 * d, 4 * d); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); }
       else if (h.kind === 'r') {
         ctx.beginPath(); ctx.arc(h.x, h.y, 10 * d, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
         ctx.fillStyle = BLUE; ctx.font = `${13 * d}px ${FONT_SANS}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
@@ -645,7 +647,7 @@ export class PdfPageView {
       if (hit === 0) { if (touch || !this._toolActive()) this._setSelected(null); this.invalidate(); return false; }
       if (hit !== H_MOVE && hit !== H_ROT && hit !== H_DEL && !PdfPageView.resizable(se)) hit = H_MOVE;
       this._L('onSelectionAdjustStarted'); this.elementDrag = hit; this.elementMoved = false; this.elementStartX = e.x; this.elementStartY = e.y;
-      this.elementOrigin.set(new RectF(se.left, se.top, se.right, se.bottom)); this.elementRot0 = se.rot || 0;
+      this.elementOrigin.set(new RectF(se.left, se.top, se.right, se.bottom)); this.elementRot0 = se.rot || 0; this._stretch0 = !!se.stretch;
       return true;
     }
     if (this.elementDrag === 0) return false;
@@ -684,31 +686,20 @@ export class PdfPageView {
             const roomX = leftCorner ? fx : 1 - fx; if (nw > roomX) { nw = roomX; nh = nw * dest.width() / (ratio * dest.height()); }
           }
           el.left = leftCorner ? fx - nw : fx; el.right = leftCorner ? fx : fx + nw; el.top = topCorner ? fy - nh : fy; el.bottom = topCorner ? fy : fy + nh;
-        } else {   // edge handles: one side moves; aspect-locked kinds scale uniformly about the opposite edge / centre line
-          const horiz = id === H_L || id === H_R;
-          if (!locked) {
-            if (id === H_L) { el.left = Math.min(nx, o.right - MINW); el.right = o.right; el.top = o.top; el.bottom = o.bottom; }
-            else if (id === H_R) { el.left = o.left; el.right = Math.max(nx, o.left + MINW); el.top = o.top; el.bottom = o.bottom; }
-            else if (id === H_T) { el.top = Math.min(ny, o.bottom - MINH); el.bottom = o.bottom; el.left = o.left; el.right = o.right; }
-            else { el.top = o.top; el.bottom = Math.max(ny, o.top + MINH); el.left = o.left; el.right = o.right; }
-          } else {
-            const cx = (o.left + o.right) / 2, cy = (o.top + o.bottom) / 2;
-            let k = horiz ? (id === H_L ? o.right - nx : nx - o.left) / w : (id === H_T ? o.bottom - ny : ny - o.top) / h;
-            const kmin = Math.max(MINW / w, MINH / h);
-            // the dragged side may go as far as the page edge; the perpendicular axis grows symmetrically
-            const kmax = horiz ? Math.min((id === H_L ? o.right : 1 - o.left) / w, 2 * Math.min(cy, 1 - cy) / h) : Math.min((id === H_T ? o.bottom : 1 - o.top) / h, 2 * Math.min(cx, 1 - cx) / w);
-            k = Math.max(kmin, Math.min(Math.max(kmin, kmax), k));
-            const nw = w * k, nh = h * k;
-            if (horiz) { el.left = id === H_L ? o.right - nw : o.left; el.right = id === H_L ? o.right : o.left + nw; el.top = cy - nh / 2; el.bottom = cy + nh / 2; }
-            else { el.top = id === H_T ? o.bottom - nh : o.top; el.bottom = id === H_T ? o.bottom : o.top + nh; el.left = cx - nw / 2; el.right = cx + nw / 2; }
-          }
+        } else {   // edge handles
+          // one side moves; the other three stay. Aspect-locked kinds become `stretch` (their picture fills the box).
+          if (id === H_L) { el.left = Math.min(nx, o.right - MINW); el.right = o.right; el.top = o.top; el.bottom = o.bottom; }
+          else if (id === H_R) { el.left = o.left; el.right = Math.max(nx, o.left + MINW); el.top = o.top; el.bottom = o.bottom; }
+          else if (id === H_T) { el.top = Math.min(ny, o.bottom - MINH); el.bottom = o.bottom; el.left = o.left; el.right = o.right; }
+          else { el.top = o.top; el.bottom = Math.max(ny, o.top + MINH); el.left = o.left; el.right = o.right; }
+          if (locked) el.stretch = true;
         }
       }
       this.invalidate(); return true;
     }
     if (action === UP || action === CANCEL) {
       const moved = this.elementMoved, id = this.elementDrag; this.elementDrag = 0; this.elementMoved = false;
-      if (action === CANCEL) { const o = this.elementOrigin; se.rot = this.elementRot0; se.left = o.left; se.top = o.top; se.right = o.right; se.bottom = o.bottom; this.invalidate(); }
+      if (action === CANCEL) { const o = this.elementOrigin; se.rot = this.elementRot0; se.stretch = !!this._stretch0; se.left = o.left; se.top = o.top; se.right = o.right; se.bottom = o.bottom; this.invalidate(); }
       else if (moved) this._L('onInkChanged'); else if (id === H_MOVE) this._L('onElementTapped', se);
       return true;
     }
@@ -764,9 +755,9 @@ export class PdfPageView {
       if (this.strokes) for (const s of this.strokes) if (s.page === this.page) AnnotationPainter.stroke(ctx, dest, s);
       this.memoHitBoxes.clear();
       if (this.marks) for (const m of this.marks) if (m.page === this.page && m.visible && (m.noteOnly || (m.note != null && m.note.length > 0))) this._drawMemo(ctx, dest, m);
-      this._drawMemoSelection(ctx);
       this.noteHitBoxes.clear();
       if (this.translations) for (const n of this.translations) if (n.page === this.page && n.visible) this._drawTranslation(ctx, dest, n);
+      this._drawMemoSelection(ctx);
       if (!sup && this.drawing) {
         ctx.fillStyle = argb(this.highlightColor);
         const centerY = (this.startY + this.currentY) / 2, half = this.highlightHeight(dest) / 2;
@@ -795,7 +786,7 @@ export class PdfPageView {
     }
   }
 
-  _drawSticky(ctx, dest, nx, ny, text, minimized, accent, paper = 0xFFFFF3A6 | 0, fontSp = 13, boxSize = 1, customW = 0, customH = 0) {
+  _drawSticky(ctx, dest, nx, ny, text, minimized, accent, paper = 0xFFFFF3A6 | 0, fontSp = 13, boxSize = 1, customW = 0, customH = 0, rot = 0) {
     const d = DP;
     const anchorX = dest.left + nx * dest.width(), anchorY = dest.top + ny * dest.height();
     if (minimized) {
@@ -813,6 +804,12 @@ export class PdfPageView {
     let left = Math.min(dest.right - w - 6 * d, anchorX + 8 * d); if (left < dest.left) left = dest.left + 6 * d;
     const top = Math.max(dest.top + 6 * d, Math.min(dest.bottom - h - 6 * d, anchorY));
     const box = new RectF(left, top, left + w, top + h);
+    ctx.save();
+    try { if (rot) AnnotationPainter.rotateAround(ctx, rot, box.centerX(), box.centerY()); this._drawStickyBody(ctx, box, anchorX, anchorY, text, accent, paper, fontSp); } finally { ctx.restore(); }
+    return box;
+  }
+  _drawStickyBody(ctx, box, anchorX, anchorY, text, accent, paper, fontSp) {
+    const d = DP;
     fillRoundRect(ctx, box.left, box.top, box.right, box.bottom, 10 * d, paper);
     fillCircle(ctx, anchorX, anchorY, 6 * d, accent);
     ctx.fillStyle = argb(0xFF3F3A2D); ctx.font = `${fontSp * d}px ${FONT_SANS}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
@@ -822,49 +819,102 @@ export class PdfPageView {
       for (const word of javaSplit(paragraph, ' ')) {
         const candidate = line === '' ? word : line + ' ' + word;
         if (ctx.measureText(candidate).width > max && line !== '') {
-          ctx.fillText(line, x, y); y += lineHeight; line = word; if (y > box.bottom - 12 * d) return box;
+          ctx.fillText(line, x, y); y += lineHeight; line = word; if (y > box.bottom - 12 * d) return;
         } else line = candidate;
       }
-      if (line !== '') { ctx.fillText(line, x, y); y += 18 * d; if (y > box.bottom - 12 * d) return box; }
+      if (line !== '') { ctx.fillText(line, x, y); y += 18 * d; if (y > box.bottom - 12 * d) return; }
     }
-    return box;
   }
-  _drawMemo(ctx, dest, m) { this.memoHitBoxes.set(m, this._drawSticky(ctx, dest, m.right, m.top, m.note, m.minimized, 0xFFFFB300 | 0, m.paper, m.fontSp, m.boxSize, m.boxW, m.boxH)); }
-  /** A tapped memo shows a dashed frame with a round handle at its lower-right corner; dragging the handle resizes it. */
+  _drawMemo(ctx, dest, m) { this.memoHitBoxes.set(m, this._drawSticky(ctx, dest, m.right, m.top, m.note, m.minimized, 0xFFFFB300 | 0, m.paper, m.fontSp, m.boxSize, m.boxW, m.boxH, m.rot)); }
+  // ---- selected post-it (a memo Mark or a TranslationNote), Android v1.29.0: dashed frame, 4 corner handles (size), ↻ knob (rotation),
+  // red × (delete) and body drag (move). Anchor = (right, top) of the mark / note.
+  get selectedMemo() { return this.selSticky; }
+  set selectedMemo(v) { this.selSticky = v; }
+  _stBox(o) { return o instanceof Mark ? this.memoHitBoxes.get(o) : this.noteHitBoxes.get(o); }
+  _stPage(o) { return o.page; }
+  _stSetAnchor(o, x, y) { o.right = Math.max(0, Math.min(1, x)); o.top = Math.max(0, Math.min(1, y)); }
+  _stickyAt(x, y) {
+    const hit = (o, b) => { if (!b) return false; const q = o.minimized || !o.rot ? [x, y] : PdfPageView.unrotate(x, y, b.centerX(), b.centerY(), o.rot); return b.contains(q[0], q[1]); };
+    for (const [n, b] of Array.from(this.noteHitBoxes).reverse()) if (hit(n, b)) return n;
+    for (const [m, b] of Array.from(this.memoHitBoxes).reverse()) if (hit(m, b)) return m;
+    return null;
+  }
   _drawMemoSelection(ctx) {
-    const m = this.selectedMemo; if (!m) return;
-    const b = this.memoHitBoxes.get(m); if (!b || m.page !== this.page || m.minimized) return;
-    const d = DP;
+    const o = this.selSticky; if (!o) return;
+    const b = this._stBox(o); if (!b || o.page !== this.page || o.minimized) return;
+    const d = DP, BLUE = argb(0xFF007AFF);
     ctx.save();
-    ctx.lineWidth = 2 * d; ctx.strokeStyle = argb(0xFF007AFF); ctx.setLineDash([8 * d, 5 * d]);
+    if (o.rot) AnnotationPainter.rotateAround(ctx, o.rot, b.centerX(), b.centerY());
+    ctx.lineWidth = 2 * d; ctx.strokeStyle = BLUE; ctx.setLineDash([8 * d, 5 * d]);
     roundRectPath(ctx, b.left, b.top, b.right, b.bottom, 10 * d, 10 * d); ctx.stroke(); ctx.setLineDash([]);
-    ctx.beginPath(); ctx.arc(b.right, b.bottom, 10 * d, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
-    ctx.fillStyle = argb(0xFF007AFF); ctx.font = `${11 * d}px ${FONT_SANS}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    ctx.fillText('↘', b.right, b.bottom + 4 * d);
+    ctx.beginPath(); ctx.moveTo(b.centerX(), b.top); ctx.lineTo(b.centerX(), b.top - 28 * d); ctx.stroke();
+    for (const [cx, cy] of [[b.left, b.top], [b.right, b.top], [b.left, b.bottom], [b.right, b.bottom]]) {
+      ctx.beginPath(); ctx.arc(cx, cy, 8 * d, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
+    }
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.beginPath(); ctx.arc(b.centerX(), b.top - 28 * d, 12 * d, 0, Math.PI * 2); ctx.fillStyle = BLUE; ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = `${15 * d}px ${FONT_SANS}`; ctx.fillText('↻', b.centerX(), b.top - 28 * d + 5 * d);
+    ctx.beginPath(); ctx.arc(b.right + 14 * d, b.top - 28 * d, 12 * d, 0, Math.PI * 2); ctx.fillStyle = argb(0xFFFF3B30); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = `${16 * d}px ${FONT_SANS}`; ctx.fillText('×', b.right + 14 * d, b.top - 28 * d + 5.5 * d);
+    ctx.textAlign = 'left';
     ctx.restore();
   }
   _handleMemoGesture(e, dest) {
-    const m = this.selectedMemo; if (!m) return false;
-    const b = this.memoHitBoxes.get(m);
-    if (!b || m.page !== this.page || m.minimized) { this.selectedMemo = null; this.memoDrag = 0; return false; }
-    const action = e.action, density = DP;
+    const o = this.selSticky; if (!o) return false;
+    const b = this._stBox(o);
+    if (!b || o.page !== this.page || o.minimized) { this.selSticky = null; this.stDrag = 0; return false; }
+    const action = e.action, d = DP;
     if (action === DOWN && e.pointerCount === 1 && !this.isStylus(e)) {
-      if (Math.hypot(e.x - b.right, e.y - b.bottom) <= 26 * density) {
-        this.memoDrag = 1; this.memoStartX = e.x; this.memoStartY = e.y; this.memoW0 = b.width() / density; this.memoH0 = b.height() / density;
-        this._L('onSelectionAdjustStarted'); return true;
-      }
-      return false;
+      const [x, y] = o.rot ? PdfPageView.unrotate(e.x, e.y, b.centerX(), b.centerY(), o.rot) : [e.x, e.y];
+      let hit = 0;
+      if (Math.hypot(x - (b.right + 14 * d), y - (b.top - 28 * d)) <= 20 * d) hit = 7;
+      else if (Math.hypot(x - b.centerX(), y - (b.top - 28 * d)) <= 20 * d) hit = 5;
+      else if (Math.hypot(x - b.left, y - b.top) <= 22 * d) hit = 1; else if (Math.hypot(x - b.right, y - b.top) <= 22 * d) hit = 2;
+      else if (Math.hypot(x - b.left, y - b.bottom) <= 22 * d) hit = 3; else if (Math.hypot(x - b.right, y - b.bottom) <= 22 * d) hit = 4;
+      else if (b.contains(x, y)) hit = 6;
+      if (hit === 0) return false;
+      this.stDrag = hit; this.stMoved = false; this.stStartX = e.x; this.stStartY = e.y; this.stW0 = b.width() / d; this.stH0 = b.height() / d; this.stAx0 = o.right; this.stAy0 = o.top;
+      if (hit !== 7) this._L('onSelectionAdjustStarted');
+      return true;
     }
-    if (this.memoDrag === 0) return false;
+    if (this.stDrag === 0) return false;
+    const rot = o.rot || 0;
     if (action === MOVE) {
-      const w = this.memoW0 + (e.x - this.memoStartX) / density, h = this.memoH0 + (e.y - this.memoStartY) / density;
-      m.boxW = Math.max(90, Math.min(Math.min(560, dest.width() / density * 0.92), w)); m.boxH = Math.max(48, Math.min(700, h));
+      const dx = e.x - this.stStartX, dy = e.y - this.stStartY;
+      if (this.stDrag === 6) {
+        if (!this.stMoved && Math.hypot(dx, dy) < 14) return true;
+        this.stMoved = true; this._stSetAnchor(o, this.stAx0 + dx / dest.width(), this.stAy0 + dy / dest.height()); this.invalidate(); return true;
+      }
+      if (this.stDrag === 5) {
+        const ang = Math.atan2(e.y - b.centerY(), e.x - b.centerX()) * 180 / Math.PI + 90; let r = ((ang % 360) + 360) % 360;
+        for (let k = 0; k <= 360; k += 90) if (Math.abs(r - k) < 4) r = k % 360;
+        o.rot = Math.fround(r); this.stMoved = true; this.invalidate(); return true;
+      }
+      if (this.stDrag >= 1 && this.stDrag <= 4) {
+        const rr = -rot * Math.PI / 180, lx = (dx * Math.cos(rr) - dy * Math.sin(rr)) / d, ly = (dx * Math.sin(rr) + dy * Math.cos(rr)) / d;
+        const left = this.stDrag === 1 || this.stDrag === 3, top = this.stDrag === 1 || this.stDrag === 2, maxW = Math.min(560, dest.width() / d * .92);
+        const w = Math.max(90, Math.min(maxW, left ? this.stW0 - lx : this.stW0 + lx)), h = Math.max(48, Math.min(700, top ? this.stH0 - ly : this.stH0 + ly));
+        o.boxW = Math.fround(w); o.boxH = Math.fround(h);
+        this._stSetAnchor(o, this.stAx0 + (left ? (this.stW0 - w) * d / dest.width() : 0), this.stAy0 + (top ? (this.stH0 - h) * d / dest.height() : 0));
+        this.stMoved = true; this.invalidate(); return true;
+      }
+      return true;
+    }
+    if (action === UP || action === CANCEL) {
+      const mode = this.stDrag; this.stDrag = 0;
+      if (action === UP) {
+        if (mode === 7) {
+          this.selSticky = null;
+          const list = o instanceof Mark ? this.marks : this.translations; const i = list ? list.indexOf(o) : -1; if (i >= 0) list.splice(i, 1);
+          this._L('onInkChanged');
+        } else if (mode === 6 && !this.stMoved) { this.selSticky = null; this._L(o instanceof Mark ? 'onMarkTapped' : 'onTranslationTapped', o); }
+        else if (this.stMoved) this._L('onInkChanged');
+      }
       this.invalidate(); return true;
     }
-    if (action === UP || action === CANCEL) { this.memoDrag = 0; if (action === UP) this._L('onInkChanged'); this.invalidate(); return true; }
     return true;
   }
-  _drawTranslation(ctx, dest, n) { this.noteHitBoxes.set(n, this._drawSticky(ctx, dest, n.right, n.top, n.translated, n.minimized, 0xFF7C3AED | 0)); }
+  _drawTranslation(ctx, dest, n) { this.noteHitBoxes.set(n, this._drawSticky(ctx, dest, n.right, n.top, n.translated, n.minimized, 0xFF7C3AED | 0, 0xFFFFF3A6 | 0, 13, 1, n.boxW, n.boxH, n.rot)); }
 
   // ---- lasso -------------------------------------------------------------------------------------------------
   _normalizedPoint(x, y, dest) { return { x: Math.max(0, Math.min(1, (x - dest.left) / dest.width())), y: Math.max(0, Math.min(1, (y - dest.top) / dest.height())) }; }
@@ -1353,12 +1403,12 @@ export class PdfPageView {
       if (this.panning && this.gestureMoved) { this.panning = false; return true; }
       if (this.scalingOccurred) { this.panning = false; return true; }
       if (Math.hypot(e.x - this.startX, e.y - this.startY) < 20) {
-        for (const [n, b] of Array.from(this.noteHitBoxes).reverse()) if (b && b.contains(e.x, e.y)) { this._L('onTranslationTapped', n); return true; }
-        for (const [m, b] of Array.from(this.memoHitBoxes).reverse()) if (b && b.contains(e.x, e.y)) {
-          if (!m.minimized && m !== this.selectedMemo) { this.selectedMemo = m; this.invalidate(); return true; }
-          this.selectedMemo = null; this._L('onMarkTapped', m); return true;
+        const hitSticky = this._stickyAt(e.x, e.y);
+        if (hitSticky) {
+          if (!hitSticky.minimized && hitSticky !== this.selSticky) { this.selSticky = hitSticky; this._setSelected(null); this.invalidate(); return true; }
+          this.selSticky = null; this._L(hitSticky instanceof Mark ? 'onMarkTapped' : 'onTranslationTapped', hitSticky); return true;
         }
-        if (this.selectedMemo) { this.selectedMemo = null; this.invalidate(); }
+        if (this.selSticky) { this.selSticky = null; this.invalidate(); }
       }
       if (this.drawing) {
         this.currentX = Math.max(dest.left, Math.min(dest.right, e.x)); this.currentY = Math.max(dest.top, Math.min(dest.bottom, e.y));
@@ -1382,12 +1432,12 @@ export class PdfPageView {
         if (this.annotationStore) for (let i = this.annotationStore.elements.length - 1; i >= 0; i--) {
           const el = this.annotationStore.elements[i];
           if (el.page === this.page && this.elementContains(el, e.x, e.y, dest)) {
-            if (el.kind === 'text' && el.list === 'check') {   // clickable check boxes toggle `checked`
+            if (el.kind === 'text' && /(^|\n)[☐☑] /.test(el.text || '')) {   // tapping a leading ☐ / ☑ toggles it (plain-text marker)
               const pad = Math.max(4, Math.min(10, dest.width() * el.textSize * 0.3));
               const hit = AnnotationPainter.checkBoxes(dest, el).find(c => e.x >= c.rect.left - pad && e.x <= c.rect.right + pad && e.y >= c.rect.top - pad && e.y <= c.rect.bottom + pad);
-              if (hit) { el.toggleChecked ? el.toggleChecked(hit.index) : (el.checked = el.checked || [], el.checked[hit.index] = !el.checked[hit.index]); this.invalidate(); this._L('onCheckToggled', el, hit.index, !!el.checked[hit.index]); this._L('onInkChanged'); return true; }
+              if (hit) { const on = el.toggleCheck(hit.index); this.invalidate(); this._L('onCheckToggled', el, hit.index, on); this._L('onInkChanged'); return true; }
             }
-            if (PdfPageView.selectable(el)) { if (el === this._selectedElement) this._L('onElementTapped', el); else { this._setSelected(el); this.invalidate(); } }
+            if (PdfPageView.selectable(el)) { if (el === this._selectedElement) this._L('onElementTapped', el); else { this.selSticky = null; this._setSelected(el); this.invalidate(); } }
             else this._L('onElementTapped', el);
             return true;
           }

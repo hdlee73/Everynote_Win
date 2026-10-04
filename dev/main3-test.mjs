@@ -61,21 +61,33 @@ await shot('04c-inline-bar-open');
 const tb = await ev(() => { const b = [...app.inlineBar.querySelectorAll('.m3-tbtn,.m3-ib')].filter(x => x.dataset.tag !== 'text_style_toggle'); return { n: b.length, textless: b.every(x => x.textContent.trim() === '' && x.querySelector('svg') && x.title && x.getAttribute('aria-label')) }; });
 check('typing toolbar: align/list/underline/B/I are icon buttons with tooltips', tb.n >= 13 && tb.textless, JSON.stringify(tb));
 check('bold/size from toolbar applied to element', await ev(() => app.inlineElement.bold === true && app.inlineBar.querySelector('[data-tag="text_bold"]').classList.contains('on')));
-await page.click('[data-tag="text_underline"]'); await page.click('[data-tag="text_align_center"]');
-check('underline + center set on element', await ev(() => app.inlineElement.underline === true && app.inlineElement.align === 'center' && app.inlineEdit.style.textAlign === 'center' && app.inlineEdit.style.textDecoration.includes('underline')));
+await page.click('[data-tag="text_underline"]'); await page.click('[data-tag="text_align_center"]'); await page.click('[data-tag="text_strike"]');
+check('underline + strike + center set on element (Android int align)', await ev(() => app.inlineElement.underline === true && app.inlineElement.strike === true && app.inlineElement.align === 1 && app.inlineEdit.style.textAlign === 'center' && app.inlineEdit.style.textDecoration.includes('underline') && app.inlineEdit.style.textDecoration.includes('line-through')));
+// list markers are plain text typed into the box (like Android v1.29.0)
+await page.keyboard.press('Control+A');
 await page.click('[data-tag="text_list_bullet"]');
-check('bullet list: markers per line', await ev(() => app.inlineElement.list === 'bullet' && app.inlineMarks.querySelectorAll('.m3-mk').length === 2), await ev(() => app.inlineMarks.children.length));
+check('bullet list: every selected line gets "• "', await ev(() => app.inlineEdit.value === '• 안녕하세요 PDF Note\n• 두번째 줄 입력' && app.inlineElement.text === app.inlineEdit.value && app.inlineElement.list === undefined), await ev(() => JSON.stringify(app.inlineEdit.value)));
 await shot('04d-inline-bullet');
-await page.click('[data-tag="text_list_number"]');
-check('numbered list: 1. 2.', await ev(() => [...app.inlineMarks.querySelectorAll('.m3-mk-num')].map(x => x.textContent).join() === '1.,2.'));
-await page.click('[data-tag="text_list_check"]');
-check('check list: boxes', await ev(() => app.inlineElement.list === 'check' && app.inlineMarks.querySelectorAll('.m3-chk').length === 2));
-await page.locator('[data-tag="inline_check"]').nth(1).click();
-check('tapping a check box stores checked[1]', await ev(() => app.inlineElement.checked[1] === true && !app.inlineElement.checked[0]));
+await page.keyboard.press('Control+A'); await page.click('[data-tag="text_list_number"]');
+check('numbered list: "1. " "2. " (switches kind)', await ev(() => app.inlineEdit.value === '1. 안녕하세요 PDF Note\n2. 두번째 줄 입력'));
+await page.keyboard.press('Control+A'); await page.click('[data-tag="text_list_check"]');
+check('check list: "☐ " on every line', await ev(() => app.inlineEdit.value === '☐ 안녕하세요 PDF Note\n☐ 두번째 줄 입력' && app.inlineBar.querySelector('[data-tag="text_list_check"]').classList.contains('on')));
+await page.keyboard.press('Control+A'); await page.click('[data-tag="text_list_check"]');
+check('check list button again: all lines become "☑ "', await ev(() => app.inlineEdit.value === '☑ 안녕하세요 PDF Note\n☑ 두번째 줄 입력'));
 await shot('04e-inline-check');
-await page.click('[data-tag="text_list_check"]');
-check('list button toggles off', await ev(() => app.inlineElement.list === 'none' && app.inlineMarks.children.length === 0));
-await page.click('[data-tag="text_list_bullet"]'); await page.click('[data-tag="text_align_left"]'); await page.click('[data-tag="text_underline"]');
+await page.keyboard.press('Control+A'); await page.click('[data-tag="text_list_check"]');
+check('check list button a third time removes the markers', await ev(() => app.inlineEdit.value === '안녕하세요 PDF Note\n두번째 줄 입력'));
+// Enter continues a list item; Enter on an empty item ends the list
+await page.keyboard.press('Control+A'); await page.click('[data-tag="text_list_number"]');
+await page.keyboard.press('Control+End'); await page.keyboard.press('Enter'); await page.keyboard.type('셋째');
+check('Enter in a numbered list starts "3. "', await ev(() => app.inlineEdit.value.endsWith('\n3. 셋째') && app.inlineElement.text === app.inlineEdit.value), await ev(() => JSON.stringify(app.inlineEdit.value)));
+await page.keyboard.press('Enter'); await page.keyboard.press('Enter');
+check('Enter on an empty item ends the list (marker removed)', await ev(() => app.inlineEdit.value.endsWith('\n3. 셋째\n') && !/\n4\. $/.test(app.inlineEdit.value)), await ev(() => JSON.stringify(app.inlineEdit.value)));
+await page.keyboard.press('Backspace');
+await page.keyboard.press('Control+A'); await page.click('[data-tag="text_list_bullet"]'); await page.keyboard.press('Control+End'); await page.keyboard.press('Enter'); await page.keyboard.type('x');
+check('Enter in a bullet list starts "• "', await ev(() => app.inlineEdit.value.endsWith('\n• x')), await ev(() => JSON.stringify(app.inlineEdit.value)));
+await page.keyboard.press('Control+A'); await page.click('[data-tag="text_list_bullet"]');   // all bullets -> removed
+await page.keyboard.press('Control+A'); await page.click('[data-tag="text_list_bullet"]'); await page.click('[data-tag="text_align_left"]'); await page.click('[data-tag="text_underline"]'); await page.click('[data-tag="text_strike"]');
 await page.click('[data-tag="text_fonts"] .m2-seg-chip:nth-child(2)'); await page.click('[data-tag="text_colors"] .m2-dot:nth-child(3)');
 await shot('05-inline-styled');
 check('size 18pt', (await ev(() => app.inlineSize.textContent)) === '18pt', await ev(() => app.inlineSize.textContent));
@@ -95,7 +107,7 @@ await page.mouse.move(mb.x + 15, mb.y + 15); await page.mouse.down(); await page
 check('move handle moved element', (await ev(() => app.inlineElement.left)) > before);
 await page.click('[data-tag="text_done"]');
 check('committed into store', await ev(() => app.store.elements.length === 1 && app.store.elements[0].kind === 'text' && app.store.elements[0].bold && app.store.elements[0].font === 'serif' && !app.inlineEdit && window.AP.skip === null), '');
-check('align/underline/list persisted in element JSON (additive)', await ev(() => { const o = app.store.elements[0].toJSON ? app.store.elements[0].toJSON() : app.store.elements[0]; return app.store.elements[0].list === 'bullet' && app.store.elements[0].align === 'left' && app.store.elements[0].underline === false && o.list === 'bullet'; }));
+check('align/underline/strike persisted with the Android keys; list markers are plain text', await ev(() => { const e = app.store.elements[0], o = JSON.parse(JSON.stringify(e.toJson())); return e.text.startsWith('• ') && o.align === 0 && o.underline === false && o.strike === false && o.stretch === false && !('list' in o) && !('checked' in o); }));
 await shot('06-after-commit');
 const h0 = await ev(() => { const e = app.store.elements[0]; return [e.bottom - e.top, e.textSize]; });
 check('box fitted to content', h0[0] > .03, JSON.stringify(h0));
@@ -140,16 +152,16 @@ check('onStop/flushAll ok', true);
 // ---- help
 await ev(() => app.showHelp()); await shot('21-help');
 const help = await ev(() => { const c = document.querySelector('.m3-help'), r = c.getBoundingClientRect(); return { heads: [...c.querySelectorAll('.m3-help-h')].map(x => x.textContent), items: c.querySelectorAll('.m3-help-item').length, align: getComputedStyle(c).textAlign, titleAlign: getComputedStyle(c.querySelector('.m3-help-title')).textAlign, w: r.width, h: r.height, win: innerHeight }; });
-check('help: 14 chapters, 56 items, left aligned, tall card', help.heads.length === 14 && help.items === 56 && help.align === 'left' && help.h > help.win * .85 && help.heads[0] === '1. 기본 원리' && help.heads[13] === '14. 인터넷 연결이 없을 때', JSON.stringify({ ...help, heads: help.heads.length }));
+check('help: 14 chapters, 55 items, left aligned, tall card', help.heads.length === 14 && help.items === 55 && help.align === 'left' && help.h > help.win * .85 && help.heads[0] === '1. 기본 원리' && help.heads[13] === '14. 인터넷 연결이 없을 때', JSON.stringify({ ...help, heads: help.heads.length }));
 const helpText = await ev(() => document.querySelector('.m3-help').textContent);
 check('help: Everynote name, offline section lists internet-needed + offline features', await ev(() => document.querySelector('.m3-help-title').textContent) === 'Everynote 사용법' && !/PDF Note/.test(helpText)
-  && ['구글 번역', '사전 웹 검색', '구글 드라이브 동기화', 'YouTube', 'WebView2', 'LibreOffice', 'Windows OCR 언어팩', '인쇄', '문서함'].every(k => helpText.includes(k)));
+  && ['구글 번역', '사전 웹 검색', 'YouTube', 'WebView2', 'LibreOffice', 'Windows OCR 언어팩', '인쇄', '문서함'].every(k => helpText.includes(k)));
 await page.evaluate(() => document.querySelector('.m3-help-body').scrollTo(0, 99999)); await shot('21b-help-end');
 await page.click('.m3-help-ok'); await page.waitForTimeout(300);
 check('help closed', (await page.locator('.m3-help').count()) === 0);
-await ev(() => { window.__ui2 = []; for (const n of ['printDocument', 'showSyncSettings', 'showAboutOffline']) app[n] = () => window.__ui2.push(n); app.showTools(); }); await page.waitForTimeout(300);
-for (const n of ['인쇄', '구글 드라이브 동기화', '오프라인 사용 안내']) { await page.locator('.m2-tile[aria-label="' + n + '"]').first().click(); await page.waitForTimeout(250); await ev(() => app.showTools()); await page.waitForTimeout(250); }
-check('tools sheet: print / drive sync / offline guide call UI2 methods', (await ev(() => window.__ui2.join())) === 'printDocument,showSyncSettings,showAboutOffline', await ev(() => window.__ui2.join()));
+await ev(() => { window.__ui2 = []; for (const n of ['printDocument', 'showAboutOffline']) app[n] = () => window.__ui2.push(n); app.showTools(); }); await page.waitForTimeout(300);
+for (const n of ['인쇄', '오프라인 사용 안내']) { await page.locator('.m2-tile[aria-label="' + n + '"]').first().click(); await page.waitForTimeout(250); await ev(() => app.showTools()); await page.waitForTimeout(250); }
+check('tools sheet: print / offline guide call UI2 methods', (await ev(() => window.__ui2.join())) === 'printDocument,showAboutOffline', await ev(() => window.__ui2.join()));
 await page.click('.m2-bs-head [aria-label=닫기]'); await page.waitForTimeout(300);
 await ev(() => app.showTools()); await page.waitForTimeout(300);
 check('export tiles: 원본 파일 내보내기 present, 본문 미리보기 저장 removed', (await page.locator('.m2-tile[aria-label="원본 파일 내보내기"]').count()) === 1 && (await page.locator('.m2-tile[aria-label="본문 미리보기 저장"]').count()) === 0);

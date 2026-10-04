@@ -99,26 +99,23 @@ parseColor(hex), drawShape(c,b,spec,pageWidth), drawTable(c,b,text,pageWidth)`; 
 * shapes.js is unchanged (rotation is applied by the painter).
 * `ui/colorpicker.js`: `ColorPicker.PALETTE` (32 ARGB ints, 4 rows of 8), `ColorPicker.show(context, title, initialArgb, alpha, onPick)` (context ignored; returns the AlertDialog; `onPick(argbInt)`, opacity 255 when `alpha` is false), plus `ColorPicker.colorToHSV/HSVToColor`. Styles in `css/colorpicker.css` (linked in index.html).
 
-## v3.0.0 additions (Everynote)
-### PageElement text formatting (typing boxes, requirement 7) — additive JSON, Android ignores the keys
-| field | values | JSON |
+## v3.0.0 additions (Everynote) - text formatting, superseded by v1.29.0 below
+The v3.0 storage (`align` as `'left'|'center'|'right'`, `underline`, `list`, `checked[]`) was replaced by the Android v1.29.0 keys. v3.0 data is still **read** (see "Backward compatibility").
+
+## Android v1.29.0 compatibility (JSON keys identical to Android, backups interchange)
+### PageElement (typing boxes, pictures)
+| field | values | JSON (always written, after `italic`, in this order) |
 |---|---|---|
-| `align` | `'left'` (default) \| `'center'` \| `'right'` (`PageElement.ALIGNS`) | `"align"` written only when not `left` |
-| `underline` | bool | `"underline":true` only when true |
-| `list` | `'none'` (default) \| `'bullet'` \| `'number'` \| `'check'` (`PageElement.LISTS`) | `"list"` only when not `none` |
-| `checked` | `bool[]`; `checked[i]` = state of the i-th `'\n'`-separated line (only meaningful for `list === 'check'`) | `"checked":[…]` only when any is true, trailing `false`s trimmed |
+| `align` | int 0 left (default) \| 1 centre \| 2 right, clamped on read | `"align":0` |
+| `underline` | bool | `"underline":false` |
+| `strike` | bool (strike-through) | `"strike":false` |
+| `stretch` | bool; image/sticker/video box is filled instead of keeping the picture ratio | `"stretch":false` |
 
-Keys come after `italic`; elements without formatting serialize exactly as v2 (byte identical). Reading: unknown `align`/`list` -> default, `underline` via optBoolean, `checked` not an array -> `[]`, entries coerced to bool (max 5000). Helpers: `e.isChecked(i)`, `e.setChecked(i, v)`, `e.toggleChecked(i)` (returns the new state). Bold/italic/font/size/colour keep their existing fields; `bold`+`underline`+`align`+`list` combine freely. Export/import JSON and `cloneAnnotations` carry the fields.
-Deleting/inserting lines in the editor is the editor's job: keep `checked` index-aligned with the lines (`text.split('\n')`).
-
-### Text layout (the contract between painter and the inline editor)
-`AnnotationPainter.layoutText(measure, text, widthPx, sizePx, {align, list})` -> `{markerW, textW, pitch, lines:[{para, first, text, x, y, w}], height}` (x = left offset of the line from the box left, y = baseline offset from the box top, w = width without trailing blanks).
-* font: the element's typeface at `sizePx = max(9, pageWidthPx * textSize)`; line pitch `1.35 * size`, first baseline `size`; wrapping is by characters (as v2), so lines never exceed `textW`.
-* list kinds reserve a marker column on the left: `1.6 * size` (`2.1 * size` for a number list of 10+ lines); `textW = boxWidth - markerW`. The marker belongs to the first wrapped line of each `'\n'` line; continuation lines start at the same x (hanging indent). An empty line keeps its marker/number and one pitch.
-  * bullet: filled circle, radius `0.13 size`, centre `x = markerW - 0.45 size`, `y = baseline - 0.33 size`.
-  * number: `"<n>."` (n = line index + 1, blank lines count) right-aligned to `markerW - 0.35 size`, same font/colour.
-  * check: rounded square `0.8 size`, right edge at `markerW - 0.35 size`, bottom `0.03 size` below the baseline (`AnnotationPainter.checkBoxRect(mr, baseline, size)`), 1 px+ outline in the text colour; checked = filled with a contrasting tick and the line's text/underline drawn at 50 % opacity.
-* alignment applies inside the text area (`markerW .. markerW+textW`) per wrapped line; trailing blanks are ignored for centre/right.
-* underline: rectangle `y = baseline + 0.12 size`, thickness `max(1, 0.065 size)`, spanning the line's text width (`w`).
-* CSS equivalent for a DOM editor: one block per line with `padding-left: 1.6em` (2.1em), `text-align`, `line-height: 1.35`, `text-decoration: underline; text-underline-offset: .12em`, marker as an absolutely positioned `::before` at `left: .25em`.
-Other painter API: `AnnotationPainter.textBlock(c, text, box, size, color, face, {align, underline, list, checked})` (`text()` = `textBlock()` with defaults, pixel identical), `textOpts(e)`, `checkBoxes(pageRect, e)` -> `[{index, rect}]` page-px rects of the boxes (used for hit testing, e.g. by the editor), `checkBoxRect`, `fitHeight(text, widthFraction, sizeFraction, pageAspect, face, list='none')` (new optional 6th arg: the marker column narrows the text area). `AnnotationPainter.elements()` / `all()` (export, print, thumbnails) paint the formatting for every `kind:'text'` element.
+Key order of an element: `rot,page,kind,text,asset,left,top,right,bottom,textSize,color,font,bold,italic,align,underline,strike,stretch`.
+**List formats have no key**: bullets, numbers and checklists are plain text at the start of a line - `"\u2022 "`, `"<n>. "`, `"\u2610 "` (open) / `"\u2611 "` (done) - so they survive export and the Windows/Android round trip. Helpers: `PageElement.BULLET/CHECK/CHECKED`, `markerKind(line)` (0 none, 1 bullet, 2 number, 3 checklist), `markerLength(line)`, `markerFor(kind, number)`, `e.toggleCheck(i)` (flips the i-th line's ☐/☑, returns the new checked state; Windows extra: tapping a leading ☐/☑ on the page toggles it).
+### Backward compatibility (Windows v3.0 data)
+`align` given as a string (`'left'|'center'|'right'`) maps to 0/1/2. `list` (`'bullet'|'number'|'check'`) + `checked[]` on a `kind:'text'` element is migrated while reading: every line that has no marker gets `"\u2022 "`, `"<line index + 1>. "` or `"\u2611 "`/`"\u2610 "` (per `checked[i]`) prepended; the keys are not written any more (`PageElement.migrateLegacyList`).
+### Mark / TranslationNote
+`Mark.rot` (degrees, JSON `rot` right after `boxH`, before `page`). `TranslationNote.boxW/boxH/rot` (dp / dp / degrees; JSON `boxW,boxH,rot` are the **first** keys, then `page,left,...`); old data reads 0. Both are written by the post-it selection frame of the page view (api-pageview.md).
+### Painter
+`AnnotationPainter.layoutText(measure, text, widthPx, sizePx, {align})` -> `{pitch, lines:[{para, first, text, x, y, w}], height}`: x = offset from the box left, y = baseline offset from the box top, w = line width (trailing blanks ignored when align != 0); font `max(9, pageWidthPx*textSize)`, pitch `1.35*size`, first baseline `size`, character wrapping. `alignIndex(a)` (0/1/2 from a number or a v3 name). `textBlock(c, text, box, size, color, face, {align, underline, strike})`; `text(c, text, box, size, color, face = DEFAULT, align = 0, underline = false, strike = false)` (same signature as Java); `textOpts(e)` -> `{align, underline, strike}`; underline = rect at `baseline + .12 size`, strike = rect at `baseline - .3 size`, thickness `max(1, .065 size)`. `checkBoxes(pageRect, e)` -> `[{index, rect}]` of the leading ☐/☑ of text lines (hit test only). `fitHeight(text, widthFraction, sizeFraction, pageAspect, face)` (the 6th `list` argument is gone). Images: `e.stretch` draws the bitmap into the whole box. `checkBoxRect` and the marker column no longer exist.

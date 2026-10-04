@@ -56,6 +56,7 @@ Object.assign(ICONS, {
   "ic_minus": "<path d=\"M5,12 h14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "ic_bold": "<path d=\"M7,4.5 h5.5 a3.5,3.5 0 0 1 0,7 H7 z M7,11.5 h6.5 a3.5,3.5 0 0 1 0,7 H7 z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "ic_italic": "<path d=\"M10,5 h8 M6,19 h8 M15,5 L9,19\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
+  "ic_strike": "<path d=\"M4,12 h16 M16.5,7.5 a4.5,3.2 0 0 0 -4.5,-2.5 c-2.8,0 -4.5,1.3 -4.5,3 c0,1.4 1,2.2 2.8,3 M8,16.5 a4.8,3.2 0 0 0 4,2 c2.8,0 4.5,-1.3 4.5,-3\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "ic_underline": "<path d=\"M7,4.5 v7 a5,5 0 0 0 10,0 v-7 M5,20 h14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "ic_align_left": "<path d=\"M4,6 h16 M4,10 h10 M4,14 h16 M4,18 h10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "ic_align_center": "<path d=\"M4,6 h16 M7,10 h10 M4,14 h16 M7,18 h10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
@@ -75,7 +76,6 @@ Object.assign(ICONS, {
   "ic_width_4": "<path d=\"M4,12 h16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"6.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "ic_opacity": "<path d=\"M12,3.5 C8.5,8 6,11 6,14.5 a6,6 0 0 0 12,0 C18,11 15.5,8 12,3.5 z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "ic_print": "<path d=\"M7,9 V4 h10 v5 M7,17 H5.2 A1.7,1.7 0 0 1 3.5,15.3 V10.7 A1.7,1.7 0 0 1 5.2,9 h13.6 a1.7,1.7 0 0 1 1.7,1.7 v4.6 a1.7,1.7 0 0 1 -1.7,1.7 H17 M7,14 h10 v6 H7 z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
-  "ic_cloud_sync": "<path d=\"M7.5,18.5 a4.2,4.2 0 0 1 -.8,-8.3 a5.6,5.6 0 0 1 10.7,-.9 A4.7,4.7 0 0 1 17,18.5 z M12,15.8 V10.6 M9.7,12.7 L12,10.4 l2.3,2.3\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "ic_wifi_off": "<path d=\"M3.5,9.6 a12.5,12.5 0 0 1 4.2,-2.6 M20.5,9.6 A12.5,12.5 0 0 0 12,6.2 M6.6,13.2 a8,8 0 0 1 3,-1.9 M17.4,13.2 A8,8 0 0 0 14.6,11.4 M9.6,16.6 a4,4 0 0 1 4.8,0 M12,20 h.01 M4,4.5 L20,20.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "ic_zoom": "<path d=\"M4.5,10.5 a6,6 0 1 0 12,0 a6,6 0 1 0 -12,0 z M15,15 L20,20 M8,10.5 h5 M10.5,8 v5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
 });

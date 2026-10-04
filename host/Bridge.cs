@@ -10,7 +10,6 @@ namespace PdfNote;
 sealed class Bridge
 {
     readonly MainWindow win;
-    readonly GoogleService google = new();
     readonly Dictionary<string, WriteSession> writes = new();
     readonly Dictionary<string, CancellationTokenSource> conversions = new();
     readonly List<string> args = new();
@@ -148,11 +147,6 @@ sealed class Bridge
                     try { c?.Cancel(); } catch { }
                     return true;
                 }
-            case "google.status": return google.Status();
-            case "google.config": return google.Config(S(a, "clientId", false), S(a, "clientSecret", false));
-            case "google.signIn": return await google.SignIn(CancellationToken.None);
-            case "google.signOut": return await google.SignOut();
-            case "google.request": return await google.Request(a, CancellationToken.None);
             case "ocr.recognize": return await OcrService.RecognizeAsync(S(a, "png"), S(a, "lang", false));
             default: throw new NotSupportedException("unknown host method " + m);
         }

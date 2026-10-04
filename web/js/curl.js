@@ -45,7 +45,7 @@ export class PageCurlView {
     this.el.style.cssText = 'display:block;width:100%;height:100%;touch-action:none;';
     this.ctx = this.el.getContext('2d');
     this.fixedHalf = this.under = this.front = this.back = null;
-    this.mirrored = false; this.spine = 0; this._progress = 0; this._touch = .88;
+    this.mirrored = false; this.spine = 0; this._progress = 0; this._touch = .88; this._touched = false; this._grabBottom = true;
     this.width = 0; this.height = 0; this._dpr = 1; this._raf = 0; this._released = false;
     // keep the backing store in sync with the CSS box
     this._ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => this.resize()) : null;
@@ -56,11 +56,17 @@ export class PageCurlView {
   setup(fixedHalf, under, front, back, mirrored, spineFraction) {
     this.fixedHalf = fixedHalf; this.under = under; this.front = front; this.back = back;
     this.mirrored = !!mirrored; this.spine = spineFraction || 0;
+    this._touched = false; this._touch = .88;   // Android v1.29.0: the grabbed corner is latched on first touch
     this.invalidate();
   }
   setProgress(value) { this._progress = Math.max(0, Math.min(1, value)); this.invalidate(); }
   progress() { return this._progress; }
-  setTouch(fraction) { const v = Math.max(0, Math.min(1, fraction)); if (v !== this._touch) { this._touch = v; this.invalidate(); } }
+  /** The corner (top / bottom) is latched when the finger first lands; afterwards only the finger height changes the fold angle. */
+  setTouch(fraction) {
+    const v = Math.max(0, Math.min(1, fraction));
+    if (!this._touched) { this._touched = true; this._grabBottom = v > .5; }
+    if (v !== this._touch) { this._touch = v; this.invalidate(); }
+  }
   get touch() { return this._touch; }
 
   release() {
@@ -122,8 +128,14 @@ export class PageCurlView {
   /** The turning leaf: the grabbed corner C goes to the finger point G, the fold is their perpendicular bisector. */
   drawFold(ctx, s, w, h, lw, t) {
     const { front, back } = this;
-    const cy = this._touch > .5 ? h : 0, dir = cy > 0 ? -1 : 1;
-    const dx = 2.04 * lw * Math.pow(t, 1.2), dy = dx * .38 * Math.pow(1 - t, 1.2) * (h / Math.max(1, lw));
+    const touched = !!this._touched, cy = (touched ? this._grabBottom : this._touch > .5) ? h : 0, dir = cy > 0 ? -1 : 1;
+    const dx = 2.04 * lw * Math.pow(t, 1.2);
+    let dy = dx * .38 * Math.pow(1 - t, 1.2) * (h / Math.max(1, lw));
+    if (touched) {   // follow the finger: the higher it is lifted from the grabbed corner, the steeper the fold tilts
+      let rise = Math.max(0, cy > 0 ? cy - this._touch * h : this._touch * h);
+      rise = Math.min(rise, Math.max(dx, .1 * w) * 2.6);
+      dy = Math.max(dy * .3, rise * (1 - .45 * t));
+    }
     const gx = w - dx, gy = cy + dir * dy;
     let nx = gx - w, ny = gy - cy; const len = Math.hypot(nx, ny); nx /= len; ny /= len;
     const mx = (w + gx) / 2, my = (cy + gy) / 2, tx = -ny, ty2 = nx, big = 4 * (w + h);

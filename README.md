@@ -12,7 +12,6 @@
 - 옆 패널(미리보기·학습)의 너비를 구분선 드래그로 조절, 문서 영역과 구분되는 어두운 배경과 종이 그림자
 - 글상자 서식: 정렬(왼쪽/가운데/오른쪽), 글머리표(점·번호·체크리스트), 밑줄 등. 삽입한 도형·이미지는 핸들로 크기를 조절하고 삭제 버튼으로 지울 수 있음
 - 쓰기 도구는 삼성 노트처럼 아이콘으로 표시
-- **Google 드라이브 동기화(선택)**: 모바일 앱과 같은 구글 계정으로 노트를 맞춥니다. 기본은 꺼져 있고, 메뉴의 ‘동기화 설정’에서 계정별로 켭니다.
 - 안드로이드 백업(JSON)과 호환
 
 ## 설치
@@ -31,7 +30,7 @@
 4. 시작 메뉴에 Everynote가 만들어집니다. 시작 메뉴/바탕 화면 아이콘을 우클릭 > **작업 표시줄에 고정**하세요.
 5. 실행 중인 Everynote가 있으면 설치/제거 때 자동으로 닫힙니다.
 
-제거: Windows 설정 > 앱 > 설치된 앱 > Everynote > 제거. **내 문서와 설정은 기본으로 남겨 둡니다.** 제거 중 묻는 창에서 ‘예’를 고르면 설정·Google 로그인·캐시(`%LOCALAPPDATA%\PDFNote`)를 지우고, 한 번 더 확인한 뒤에만 문서 폴더(`문서\PDF Note`)까지 지웁니다.
+제거: Windows 설정 > 앱 > 설치된 앱 > Everynote > 제거. **내 문서와 설정은 기본으로 남겨 둡니다.** 제거 중 묻는 창에서 ‘예’를 고르면 설정·캐시(`%LOCALAPPDATA%\PDFNote`)를 지우고, 한 번 더 확인한 뒤에만 문서 폴더(`문서\PDF Note`)까지 지웁니다.
 자동 설치(조용히): `Everynote-Setup-….exe /VERYSILENT /TASKS="desktopicon"`, 제거는 `"%LOCALAPPDATA%\Programs\Everynote\unins000.exe" /VERYSILENT` (`/PURGEDATA`로 설정까지 삭제).
 
 요구 사항: Windows 10(1809 이상)/11, **WebView2 런타임**(Windows 11과 최신 Windows 10에는 기본 포함. 없으면 실행할 때 안내 창이 열립니다).
@@ -42,7 +41,6 @@ Everynote의 핵심 기능은 **인터넷 없이 모두 동작**합니다: 문�
 
 | 기능 | 오프라인에서 | 비고 |
 |---|---|---|
-| Google 드라이브 동기화 | **사용 불가** | `accounts.google.com`, `*.googleapis.com`(HTTPS 443)에 접속할 수 있어야 합니다. 프록시·방화벽에서 허용되지 않으면 로그인 단계에서 실패하며, 앱의 나머지 기능에는 영향이 없습니다. 오프라인 중 수정한 내용은 연결되면 다음 동기화 때 반영됩니다. |
 | 번역(글자 선택 > 번역) | 사용 불가 | 기본 브라우저로 Google 번역 페이지를 엽니다. |
 | 사전(글자 선택 > 사전) | 사용 불가 | 기본 브라우저로 네이버 사전을 엽니다. |
 | 유튜브 영상 링크·미리보기 | 사용 불가 | 삽입한 영상의 썸네일과 재생은 인터넷이 필요합니다. |
@@ -54,9 +52,6 @@ Everynote의 핵심 기능은 **인터넷 없이 모두 동작**합니다: 문�
 
 Everynote는 자동 업데이트나 사용 통계 전송을 하지 않습니다. 인터넷에 접속하는 것은 위 표의 기능을 직접 사용할 때뿐입니다.
 
-## Google 드라이브 동기화 설정(개발자/관리자용)
-구글 로그인에는 OAuth 클라이언트(데스크톱 앱 유형)가 필요합니다. Google Cloud Console에서 만든 클라이언트 ID/비밀번호를 앱의 ‘동기화 설정’에 입력하거나 환경 변수 `EVERYNOTE_GOOGLE_CLIENT_ID`, `EVERYNOTE_GOOGLE_CLIENT_SECRET`로 지정합니다. 입력한 값과 로그인 토큰은 Windows 데이터 보호(DPAPI, 현재 사용자 전용)로 암호화되어 `%LOCALAPPDATA%\PDFNote\google.json`에 저장됩니다. 권한 범위는 `drive.file`(이 앱이 만든 파일만)과 `email`뿐입니다. 자세한 프로토콜은 `docs/api-host.md`.
-
 ## 구조
-`web/` HTML/JS 앱(안드로이드 클래스를 같은 이름으로 이식) + `host/` WPF·WebView2 셸(파일·변환·OCR·Google 로그인) + `installer/` Inno Setup 설치 프로그램. 빌드/CI는 `.github/workflows/build.yml`, 자세한 내용은 `docs/`.
+`web/` HTML/JS 앱(안드로이드 클래스를 같은 이름으로 이식) + `host/` WPF·WebView2 셸(파일·변환·OCR) + `installer/` Inno Setup 설치 프로그램. 빌드/CI는 `.github/workflows/build.yml`, 자세한 내용은 `docs/`.
 아이콘은 `web/assets/everynote-icon.svg`에서 `python tools/make_icons.py`로 만듭니다.

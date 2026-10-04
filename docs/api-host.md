@@ -1,4 +1,4 @@
-# Host shell (host/), conversion (js/office.js), Google access, installer and CI
+# Host shell (host/), conversion (js/office.js), installer and CI
 
 WPF (.NET 8) window hosting WebView2. The whole `web/**` tree is embedded in the exe as resources and served from
 `https://app.pdfnote.local/*` (no loose folder). Protocol: header of `web/js/host.js`.
@@ -15,7 +15,6 @@ WPF (.NET 8) window hosting WebView2. The whole `web/**` tree is embedded in the
 | `host/Paths.cs` | folders, log, `PathPolicy` allow-list |
 | `host/Office.cs`, `SpreadsheetPrep.cs` | Office/LibreOffice conversion, port of Android `SpreadsheetImport` (xlsx) |
 | `host/Ocr.cs` | `Windows.Media.Ocr` |
-| `host/Google.cs` | Google OAuth (loopback + PKCE), DPAPI token store, `google.request` proxy |
 | `installer/Everynote.iss` | Inno Setup script (+ `Korean.isl`, `everynote.ico`, wizard images, icon SVG) |
 | `tools/installer-smoke.ps1` | CI test of the installer (silent install / uninstall) |
 | `tools/make_icons.py` | `web/assets/everynote-icon.svg` -> PNGs, `host/Assets/app.ico`, installer images |
@@ -72,32 +71,8 @@ const { pdf: path } = await convertOffice(path, 'docx', text => setStatus(text),
   (`변환이 중단되었습니다`). The caller (app.js) shows the Android dialogs/toasts and falls back to `offerOfficeImport`.
 * Not implemented here (lead): the AlertDialogs, `importConverted`, `offerOfficeImport`, text-only preview.
 
-## Google account (`host/Google.cs`, protocol in `web/js/host.js`)
+## Printing
 
-Opt-in Drive sync support. The page never sees tokens, client id or secret.
-
-* `google.config({clientId, clientSecret})` stores the OAuth client (type "Desktop app") DPAPI-protected; empty values clear it; a different client id signs out.
-  Fallback when nothing was stored: env `EVERYNOTE_GOOGLE_CLIENT_ID` / `EVERYNOTE_GOOGLE_CLIENT_SECRET` (`PDFNOTE_GOOGLE_*` accepted). Returns the status.
-* `google.status()` -> `{signedIn, email, configured}`. `google.signOut()` revokes the token (best effort) and forgets it (client config stays).
-* `google.signIn()` -> `{email}`. Opens the system browser (ShellExecute) at accounts.google.com with `scope = https://www.googleapis.com/auth/drive.file email`,
-  `access_type=offline`, `prompt=consent select_account`, PKCE `S256`, `state`; an `HttpListener` on `http://127.0.0.1:<random port>/` receives the code
-  (shows a small "login complete" page), the code is exchanged at `oauth2.googleapis.com/token`, the e-mail comes from `oauth2/v3/userinfo`. 5 minute timeout
-  (`로그인이 취소되었거나 시간이 초과되었습니다`); a second `signIn` cancels the first. Errors: `Google 클라이언트 ID가 설정되지 않았습니다`, `Google 로그인이 거부되었습니다`.
-* Storage: `<data>\google.json` = `{v:1, blob: base64(DPAPI(CurrentUser, entropy) of {clientId, clientSecret, refreshToken, accessToken, expiresAt, email})}`.
-* `google.request({method, url, headers, body, bodyBase64, uploadPath, savePath})` -> `{status, headers:{lowercase:'value'}, text}` or `{status, headers, savedPath}`.
-  * URL must be `https://` (default port, no user info) and host `accounts.google.com` or `*.googleapis.com`, otherwise `허용되지 않는 주소입니다`.
-    The `Authorization` bearer is added for `*.googleapis.com` only; `Authorization/Host/Cookie/...` request headers from the page are dropped.
-    The token is refreshed when it expires within 60 s and once more after a 401; a revoked refresh token (`invalid_grant`) signs the user out
-    (`Google 로그인이 만료되었습니다. 다시 로그인하세요`). Not signed in -> `Google에 로그인되어 있지 않습니다`.
-  * Body: `body` (UTF-8 text, default `application/json`), `bodyBase64`, or `uploadPath` (a file streamed from disk; read allow-list). Set `Content-Type` in `headers`.
-    Resumable uploads work as on the web: POST the metadata to `.../upload/drive/v3/files?uploadType=resumable`, read the `location` response header, then
-    `PUT` that URL with `uploadPath`.
-  * Response: non-2xx and no `savePath` -> `text` (limit 32 MiB, else error); with `savePath` a 2xx body is streamed to `<savePath>.<x>.part` and renamed (write allow-list),
-    result has `savedPath` instead of `text` (error responses still come back as `text`).
-  * Redirects are followed manually for GET/HEAD only (max 5, each target must pass the same URL check). Timeouts: 3 min, 45 min with `uploadPath`/`savePath`.
-* Browser/dev fallback (`host._fakeGoogle`): `configured` after `config()`, `signIn()` succeeds, and `google.request` talks to a tiny in-memory Drive v3 (files list/query
-  by name/parents/mimeType/trashed, create/get/`alt=media`/patch/delete, `uploadType=media|multipart|resumable`), enough for sync tests; `host._fakeGoogle.requests` logs calls.
-* `host.google.{status,config,signIn,signOut,request,json}` are the JS helpers (`json(method,url,body)` parses and throws with `.status`).
 * Printing: done in the page with `window.print()` (print-only DOM); WebView2 shows its print dialog. Nothing to allow on the host side; Ctrl+P is a page shortcut because browser accelerator keys stay off.
 
 ## Security model
@@ -112,7 +87,6 @@ Opt-in Drive sync support. The page never sees tokens, client id or secret.
   allowed roots are not resolved.
 * `file.pdfnote.local` answers CORS only for `https://app.pdfnote.local`. Context menu, browser accelerator keys (F5/F12/Ctrl+P...), zoom
   and DevTools are off unless `--dev` / `PDFNOTE_DEV=1` (`PDFNOTE_DEV_URL=http://localhost:8123/` to load a dev server).
-* Google: only the page can call `google.*`; the host enforces the URL allow-list itself (HTTPS, `*.googleapis.com` / `accounts.google.com`), never returns secrets and never sends the bearer to other hosts.
 * Permissions: microphone and clipboard-read allowed for the app origin only, everything else denied.
 * Office documents are opened read-only with macros force-disabled; LibreOffice runs with its own profile and without UI.
 

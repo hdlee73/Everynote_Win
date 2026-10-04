@@ -76,12 +76,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [CustomMessages]
 english.TaskAssoc=Add "Open with Everynote" for PDF, HWP and Office documents (does not change your default apps)
 english.GroupAssoc=File types:
-english.PurgeData=Also delete Everynote settings, Google sign-in and cache?%n%n(%1)%n%nYour documents are kept either way.
+english.PurgeData=Also delete Everynote settings and cache?%n%n(%1)%n%nYour documents are kept either way.
 english.PurgeLibrary=Also delete your Everynote documents folder and the notes in it?%n%n(%1)%n%nThis cannot be undone.
 english.RunApp=Launch Everynote
 korean.TaskAssoc=PDF, HWP, Office 문서에 "Everynote로 열기" 추가 (기본 앱은 바뀌지 않습니다)
 korean.GroupAssoc=파일 형식:
-korean.PurgeData=Everynote 설정, Google 로그인 정보, 캐시도 함께 삭제할까요?%n%n(%1)%n%n문서는 어느 쪽을 선택해도 그대로 남습니다.
+korean.PurgeData=Everynote 설정과 캐시도 함께 삭제할까요?%n%n(%1)%n%n문서는 어느 쪽을 선택해도 그대로 남습니다.
 korean.PurgeLibrary=Everynote 문서 폴더와 그 안의 노트도 함께 삭제할까요?%n%n(%1)%n%n되돌릴 수 없습니다.
 korean.RunApp=Everynote 실행
 

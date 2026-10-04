@@ -55,10 +55,11 @@ const bars = await page.evaluate(() => ({ readHasText: !!app.readBar.querySelect
 check('typing button moved to reading bar next to pen', bars.readHasText && !bars.writeHasText && /필기 모드\|타이핑/.test(bars.order), bars.order);
 await page.evaluate(() => { app.setWriteMode(true); app.showPenMenu(app.penButton); }); await page.waitForTimeout(300);
 const pen = await page.evaluate(() => ({ chips: [...document.querySelectorAll('.amenu .m-iseg[data-tag^="pen_"]:not(.m-opts)')].map(r => [...r.children].map(c => c.getAttribute('aria-label')).join(',')),
-  texts: [...document.querySelectorAll('.amenu .m-iseg .m-ibtn')].map(b => b.textContent.trim()).join(''), titles: [...document.querySelectorAll('.amenu .m-iseg .m-ibtn')].every(b => b.title && b.querySelector('svg')),
+  texts: [...document.querySelectorAll('.amenu .m-iseg .m-ibtn')].map(b => b.textContent.trim()).join(''), titles: [...document.querySelectorAll('.amenu .m-iseg .m-ibtn')].every(b => b.title && (b.querySelector('svg') || b.querySelector('canvas.m-pensample'))),
+  samples: document.querySelectorAll('.amenu .m-pensample').length,
   opts: [...document.querySelectorAll('.amenu .m-opts .m-ibtn')].map(b => b.getAttribute('aria-label')).join('|'), rows: document.querySelectorAll('.amenu .amenu-row').length,
   dots: document.querySelectorAll('.amenu .m-sw .dot').length, more: document.querySelectorAll('.amenu [data-tag="color_more"]').length, op: !!document.querySelector('.amenu [data-tag="opacity_bar"]') }));
-check('pen menu: 5 pen types + 4 widths are icon buttons (no text, tooltips)', pen.chips.length === 2 && pen.chips[0] === '볼펜,연필,만년필,붓,사인펜' && pen.chips[1] === '굵기 · 얇게,굵기 · 보통,굵기 · 굵게,굵기 · 최대' && pen.texts === '' && pen.titles, JSON.stringify(pen));
+check('pen menu (v1.29): widths row first, then pen types; both are icon / sample-stroke buttons (no text, tooltips)', pen.chips.length === 2 && pen.chips[1] === '볼펜,연필,만년필,붓,사인펜' && pen.chips[0] === '굵기 · 얇게,굵기 · 보통,굵기 · 굵게,굵기 · 최대' && pen.texts === '' && pen.titles && pen.samples === 9, JSON.stringify(pen));
 check('pen menu: 직선 + 손가락 필기 are icon toggles; no text rows left', /^직선.*\|손가락 필기$/.test(pen.opts) && pen.rows === 0, pen.opts + ' rows=' + pen.rows);
 check('pen menu: 2 swatch rows (8+8+rainbow chip) + opacity bar', pen.dots === 17 && pen.more === 1 && pen.op, JSON.stringify(pen));
 await shot('07-pen-menu');
@@ -90,12 +91,55 @@ await page.evaluate(() => { window.__cleared = 0; app.pageView.clearTextSelectio
   app.showTextSelectionPopup({ text: 'Hello 안녕', bounds: [u], unionBounds: u }, 300, 300); });
 await page.waitForTimeout(300);
 const rowsText = await page.evaluate(() => [...document.querySelectorAll('.amenu .amenu-row')].map(r => r.getAttribute('aria-label')));
-check('selection popup = one list (9 actions + insert rows, no hyperlink)', rowsText.slice(0, 9).join() === '하이라이트,복사,번역,읽어주기,단어장,개요,메모,발췌,링크' && rowsText.includes('사진·이미지') && rowsText.includes('도형') && rowsText.filter(x => x === '하이퍼링크').length === 0, rowsText.join());
+check('v1.29 selection popup = 9 actions + a 삽입 submenu row (insert items are not inline)', rowsText.join() === '하이라이트,복사,번역,읽어주기,단어장,개요,메모,발췌,링크,삽입', rowsText.join());
+const geo = await page.evaluate(() => { const v = app.pageView, vr = v.el.getBoundingClientRect(), pr = v.pageRect(), u = { left: .2, top: .3, right: .5, bottom: .34 };
+  const s = { l: vr.left + pr.left + u.left * pr.width(), t: vr.top + pr.top + u.top * pr.height(), r: vr.left + pr.left + u.right * pr.width(), b: vr.top + pr.top + u.bottom * pr.height() };
+  const c = document.querySelector('.amenu').getBoundingClientRect(); return { s, c: { l: c.left, t: c.top, r: c.right, b: c.bottom } }; });
+check('v1.29 selection popup does not cover the selected text (below / above / beside)', geo.c.r <= geo.s.l + 0.5 || geo.c.l >= geo.s.r - 0.5 || geo.c.b <= geo.s.t + 0.5 || geo.c.t >= geo.s.b - 0.5, JSON.stringify(geo));
+await shot('06-selpop-avoid');
+await page.locator('.amenu .amenu-row[aria-label="삽입"]').click(); await page.waitForTimeout(300);
+const rows2 = await page.evaluate(() => [...document.querySelectorAll('.amenu .amenu-row')].map(r => r.getAttribute('aria-label')));
+check('삽입 submenu lists the insert rows (incl. 하이퍼링크) and still avoids the text', rows2.includes('사진·이미지') && rows2.includes('도형') && rows2.includes('하이퍼링크') && await page.evaluate(g => { const c = document.querySelector('.amenu').getBoundingClientRect(); return c.right <= g.s.l + 0.5 || c.left >= g.s.r - 0.5 || c.bottom <= g.s.t + 0.5 || c.top >= g.s.b - 0.5; }, geo), rows2.join());
+await page.evaluate(() => { window.__cleared = 0; app.showTextSelectionPopup({ text: 'Hello 안녕', bounds: [{ left: .2, top: .3, right: .5, bottom: .34 }], unionBounds: { left: .2, top: .3, right: .5, bottom: .34 } }, 300, 300); });
+await page.waitForTimeout(300);
+// 단어장: copies the word, toasts, nothing else (no web page, no other app)
+await page.evaluate(async () => { const { host } = await import('/js/host.js'); window.__opened = 0; const o = host.shellOpen; host.shellOpen = (...a) => { window.__opened++; return Promise.resolve(); }; window.__copied = null;
+  try { Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async t => { window.__copied = t; }, readText: async () => '' } }); } catch (e) { /* ignore */ } });
+await page.locator('.amenu .amenu-row[aria-label="단어장"]').click(); await page.waitForTimeout(300);
+check('단어장 copies the cleaned word and toasts "단어가 복사되었습니다", opens nothing', await page.evaluate(() => window.__copied === 'Hello' && window.__opened === 0 && document.querySelector('.toast').textContent === '단어가 복사되었습니다' && document.querySelector('.toast').classList.contains('show')), JSON.stringify(await page.evaluate(() => [window.__copied, window.__opened, document.querySelector('.toast').textContent])));
+await page.evaluate(() => { window.__cleared = 0; app.showTextSelectionPopup({ text: 'Hello 안녕', bounds: [{ left: .2, top: .3, right: .5, bottom: .34 }], unionBounds: { left: .2, top: .3, right: .5, bottom: .34 } }, 300, 300); });
+await page.waitForTimeout(300);
 check('legacy tile popup is gone', (await page.locator('.m-selpop').count()) === 0);
 check('selection popup registered', await page.evaluate(() => !!app.selectionPopup));
 await shot('06-selpop');
 await page.mouse.click(5, 400); await page.waitForTimeout(250);
 check('dismissing the popup clears the selection overlay', (await page.evaluate(() => window.__cleared)) >= 1 && (await page.evaluate(() => app.selectionPopup)) === null);
+
+// ---- v1.29 translation card: result is attached right away; original + editable translation; 복사 / 삭제 / 저장
+{
+  const n0 = await page.evaluate(() => app.store.translations.length);
+  await page.evaluate(async () => { const { RectF } = await import('/js/util.js'); window.__copied = null; app.showTranslationResult('Hello world', '안녕 세상', new RectF(.2, .3, .5, .34)); });
+  await page.waitForTimeout(300);
+  const c = await page.evaluate(() => ({ card: !!document.querySelector('[data-tag="translation_card"]'), orig: document.querySelector('[data-tag="translation_original"]').textContent, val: document.querySelector('[data-tag="translation_result"]').value,
+    pair: document.querySelector('.m-tc-pair').textContent, btns: [...document.querySelectorAll('.m-tc-btn')].map(b => b.textContent).join('|'), n: app.store.translations.length, last: app.store.translations.at(-1).translated }));
+  check('translation card: new design, translation put on the page right away', c.card && c.orig === 'Hello world' && c.val === '안녕 세상' && c.pair === '영어 → 한국어' && c.n === n0 + 1 && c.last === '안녕 세상' && /^복사\|삭제\|표시\|닫기\|저장$/.test(c.btns), JSON.stringify(c));
+  await shot('10-translation-card');
+  await page.locator('[data-tag="translation_copy"]').click(); await page.waitForTimeout(150);
+  check('translation card: 복사 copies the (edited) translation', await page.evaluate(() => window.__copied === '안녕 세상'));
+  await page.locator('[data-tag="translation_result"]').fill('수정한 번역');
+  await page.locator('[data-tag="translation_save"]').click(); await page.waitForTimeout(250);
+  check('translation card: 수정 + 저장 updates the note', await page.evaluate(() => app.store.translations.at(-1).translated === '수정한 번역' && !document.querySelector('[data-tag="translation_card"]')));
+  await page.evaluate(() => app.editTranslation(app.store.translations.at(-1))); await page.waitForTimeout(250);
+  check('tapping a translation note opens the same card (Korean source -> English label)', await page.evaluate(() => document.querySelector('[data-tag="translation_original"]').textContent === 'Hello world' && document.querySelector('[data-tag="translation_result"]').value === '수정한 번역'));
+  await page.locator('[data-tag="translation_delete"]').click(); await page.waitForTimeout(250);
+  check('translation card: 삭제 removes the note', await page.evaluate(n => app.store.translations.length === n, n0));
+  // manual flow (empty result): nothing is attached until 포스트잇 붙이기
+  await page.evaluate(async () => { const { RectF } = await import('/js/util.js'); app.showTranslationResult('안녕', '', new RectF(.2, .3, .5, .34)); }); await page.waitForTimeout(250);
+  check('empty translation: not attached yet, button is 포스트잇 붙이기', await page.evaluate(n => app.store.translations.length === n && document.querySelector('[data-tag="translation_save"]').textContent === '포스트잇 붙이기' && document.querySelector('.m-tc-pair').textContent === '한국어 → 영어', n0));
+  await page.locator('[data-tag="translation_result"]').fill('hello'); await page.locator('[data-tag="translation_save"]').click(); await page.waitForTimeout(250);
+  check('포스트잇 붙이기 attaches the pasted translation', await page.evaluate(n => app.store.translations.length === n + 1 && app.store.translations.at(-1).translated === 'hello', n0));
+  await page.evaluate(() => { app.store.translations.length = 0; app.pageView.invalidate(); });
+}
 
 // ================= v3.0: zoom pill, add page, mouse/keyboard page turning, menu entries, element delete hook
 await page.evaluate(() => { app.setInkMode(0); app.setWriteMode(false); app.showPage(2); }); await page.waitForTimeout(900);
@@ -152,15 +196,15 @@ await page.evaluate(() => { window.__mrd.length = 0; app.setWriteMode(false); })
 check('read mode -> setMouseReadDrag(true)', await page.evaluate(() => window.__mrd.length >= 2 && window.__mrd.every(x => x === true)));
 check('arrows keep working while writing (keyboard)', await (async () => { await page.evaluate(() => app.setWriteMode(true)); const b = await at(); await page.keyboard.press('ArrowRight'); await page.waitForTimeout(500); const a = await at(); await page.evaluate(() => app.setWriteMode(false)); return a === b + 1; })());
 // main menu entries (UI2 methods stubbed)
-await page.evaluate(() => { window.__ui2 = []; for (const n of ['printDocument', 'showSyncSettings', 'showAboutOffline']) app[n] = () => window.__ui2.push(n); app.showMainMenu(document.querySelector('.m-ib:last-child'), false); });
+await page.evaluate(() => { window.__ui2 = []; for (const n of ['printDocument', 'showAboutOffline']) app[n] = () => window.__ui2.push(n); app.showMainMenu(document.querySelector('.m-ib:last-child'), false); });
 await page.waitForTimeout(250); await shot('12-main-menu');
 const mm = await page.evaluate(() => [...document.querySelectorAll('.amenu .amenu-row')].map(r => r.getAttribute('aria-label')));
-check('main menu has 인쇄 / 구글 드라이브 동기화 / 오프라인 사용 안내', ['인쇄', '구글 드라이브 동기화', '오프라인 사용 안내'].every(x => mm.includes(x)), mm.join());
-for (const n of ['인쇄', '구글 드라이브 동기화', '오프라인 사용 안내']) {
+check('main menu has 인쇄 / 오프라인 사용 안내', ['인쇄', '오프라인 사용 안내'].every(x => mm.includes(x)), mm.join());
+for (const n of ['인쇄', '오프라인 사용 안내']) {
   await page.locator('.amenu .amenu-row[aria-label="' + n + '"]').click(); await page.waitForTimeout(200);
   await page.evaluate(() => app.showMainMenu(document.querySelector('.m-ib:last-child'), false)); await page.waitForTimeout(200);
 }
-check('menu entries call printDocument / showSyncSettings / showAboutOffline', (await page.evaluate(() => window.__ui2.join())) === 'printDocument,showSyncSettings,showAboutOffline', await page.evaluate(() => window.__ui2.join()));
+check('menu entries call printDocument / showAboutOffline', (await page.evaluate(() => window.__ui2.join())) === 'printDocument,showAboutOffline', await page.evaluate(() => window.__ui2.join()));
 await page.keyboard.press('Escape'); await page.mouse.click(5, 400); await page.waitForTimeout(200);
 await page.evaluate(() => { window.__ui2.length = 0; });
 await page.keyboard.press('Control+p'); await page.waitForTimeout(150);

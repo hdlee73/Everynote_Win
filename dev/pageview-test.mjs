@@ -126,7 +126,7 @@ await ev(() => T.view.setOutlineMode(false));
 await ev(() => { const m = new T.Mark(); m.page = 0; m.left = .25; m.right = .3; m.top = .55; m.bottom = .6; m.noteOnly = true; m.note = '메모 테스트 문장입니다 hello world'; T.store.marks.push(m); T.view.invalidate(); });
 await shot('03-memo');
 await clearLog();
-const box = await ev(() => { const m = T.store.marks[T.store.marks.length - 1]; const b = T.view.memoHitBoxes.get(m); return [b.left + 10, b.top + 10]; });
+const box = await ev(() => { const m = T.store.marks[T.store.marks.length - 1]; const b = T.view.memoHitBoxes.get(m); return [(b.left + b.right) / 2, (b.top + b.bottom) / 2]; });
 await drag([box, box], { type: 'touch', id: 7 });
 check('v1.27: first tap selects the memo (no onMarkTapped yet)', (await logOf('onMarkTapped')) === 0);
 await drag([box, box], { type: 'touch', id: 71 });
@@ -322,6 +322,48 @@ mbox = await mb();
 await clearLog();
 await drag([[ (mbox.l + mbox.r) / 2, mbox.t + 20 ], [ (mbox.l + mbox.r) / 2, mbox.t + 20 ]], { type: 'touch', id: 63 });
 check('second tap opens the memo', (await logOf('onMarkTapped')) === 1 && (await ev(() => T.view.selectedMemo)) === null);
+// --- v1.29: post-it selection like shapes (4 corner sizes, rotate knob, red x delete, body move), for memos and translation notes
+{
+  await ev(() => { const m = T.store.marks[0]; T.memo2 = m; m.boxW = 0; m.boxH = 0; T.view.selectedMemo = null; T.view.invalidate(); T.view.flush(); });
+  await clearLog();
+  let bb = await mb();
+  await drag([[ (bb.l + bb.r) / 2, (bb.t + bb.b) / 2 ], [ (bb.l + bb.r) / 2, (bb.t + bb.b) / 2 ]], { type: 'touch', id: 640 });
+  check('v1.29: first tap selects the post-it', await ev(() => T.view.selectedMemo === T.memo));
+  // top-left corner shrinks from the top-left and keeps the opposite corner; anchor (right, top) follows
+  const a0 = await ev(() => [T.memo.right, T.memo.top]);
+  await drag(line(bb.l, bb.t, bb.l - 40, bb.t - 20, 5), { type: 'touch', id: 641 });
+  const bb1 = await mb(); const sz1 = await ev(() => [T.memo.boxW, T.memo.boxH]);
+  check('v1.29: TL corner enlarges width/height from the top-left', bb1.l < bb.l - 20 && bb1.t < bb.t - 10 && Math.abs(bb1.r - bb.r) < 3 && Math.abs(bb1.b - bb.b) < 3 && sz1[0] > 0, JSON.stringify([bb, bb1, sz1]));
+  // rotate knob: 28 dp above the top centre -> drag to the right of the centre = 90 degrees
+  const cx = (bb1.l + bb1.r) / 2, cy = (bb1.t + bb1.b) / 2;
+  await drag(line(cx, bb1.t - 28, cx + 120, cy, 8), { type: 'touch', id: 642 });
+  check('v1.29: rotate knob turns the post-it (snaps to 90)', (await ev(() => T.memo.rot)) === 90, String(await ev(() => T.memo.rot)));
+  await shot('19-sticky-rotated');
+  // body drag moves the anchor
+  const aBefore = await ev(() => [T.memo.right, T.memo.top]);
+  await drag(line(cx, cy, cx + 30, cy + 30, 5), { type: 'touch', id: 643 });
+  const aAfter = await ev(() => [T.memo.right, T.memo.top]);
+  check('v1.29: body drag moves the post-it', aAfter[0] > aBefore[0] + 0.01 && aAfter[1] > aBefore[1] + 0.01, JSON.stringify([aBefore, aAfter]));
+  // translation note: selectable the same way, stores boxW/boxH/rot
+  await ev(() => { const n = new T.TranslationNote(); n.page = 0; n.left = .5; n.right = .55; n.top = .2; n.bottom = .25; n.source = 'hello'; n.translated = '안녕하세요 번역 테스트'; T.store.translations.push(n); T.note = n; T.view.selectedMemo = null; T.view.invalidate(); T.view.flush(); });
+  const nb = await ev(() => { const b = T.view.noteHitBoxes.get(T.note); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; });
+  await clearLog();
+  await drag([[ (nb.l + nb.r) / 2, (nb.t + nb.b) / 2 ], [ (nb.l + nb.r) / 2, (nb.t + nb.b) / 2 ]], { type: 'touch', id: 644 });
+  check('v1.29: first tap on a translation note selects it', (await ev(() => T.view.selectedMemo === T.note)) && (await logOf('onTranslationTapped')) === 0);
+  await drag(line(nb.r, nb.b, nb.r + 50, nb.b + 40, 5), { type: 'touch', id: 645 });
+  check('v1.29: translation note resize writes boxW/boxH', (await ev(() => T.note.boxW > 0 && T.note.boxH > 0)));
+  // delete x (right + 14, top - 28)
+  const nb2 = await ev(() => { const b = T.view.noteHitBoxes.get(T.note); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; });
+  await drag([[nb2.r + 14, nb2.t - 28], [nb2.r + 14, nb2.t - 28]], { type: 'touch', id: 646 });
+  check('v1.29: red x deletes the translation note', !(await ev(() => T.store.translations.includes(T.note))) && (await ev(() => T.view.selectedMemo)) === null);
+  check('v1.29: second tap on a selected translation note opens it', await (async () => {
+    await ev(() => { const n = new T.TranslationNote(); n.page = 0; n.left = .5; n.right = .55; n.top = .2; n.bottom = .25; n.source = 'a'; n.translated = 'b c d e'; T.store.translations.push(n); T.note = n; T.view.invalidate(); T.view.flush(); });
+    const q = await ev(() => { const b = T.view.noteHitBoxes.get(T.note); return [(b.left + b.right) / 2, (b.top + b.bottom) / 2]; });
+    await clearLog(); await drag([q, q], { type: 'touch', id: 647 }); await drag([q, q], { type: 'touch', id: 648 });
+    return (await logOf('onTranslationTapped')) === 1;
+  })());
+  await ev(() => { T.store.translations.length = 0; });
+}
 await ev(() => { T.store.marks.length = 0; T.view.invalidate(); });
 // text recognition radius: 3dp (touch) / 10dp (direct selection) instead of 16dp
 const radius = await ev(() => { const v = T.view, d = v.contentRect(); v.textSelectMode = true; const R = { wordBounds: { left: .4, top: .4, right: .5, bottom: .42 } }; v.textRegions = [R];
@@ -421,7 +463,20 @@ await clearLog();
   b = await box('img');
   await drag(line((b.l + b.r) / 2, b.b, (b.l + b.r) / 2, b.b + 30, 5), { type: 'touch', id: 79 });
   const r2 = await ratio('img'); const gi2 = await geo('img');
-  check('image edge handle scales uniformly (aspect kept)', Math.abs(r2 - r0) < 0.02 && gi2[3] > gi1[3] + 0.005, `r ${r2.toFixed(3)}`);
+  check('v1.29: image edge-middle bar handle stretches one axis only and sets stretch', Math.abs(r2 - r0) > 0.02 && gi2[3] > gi1[3] + 0.005 && Math.abs(gi2[0] - gi1[0]) < 1e-6 && Math.abs(gi2[2] - gi1[2]) < 1e-6 && (await ev(() => T.img.stretch)) === true, `r ${r2.toFixed(3)} ${JSON.stringify([gi1, gi2])}`);
+  // corners keep the (now stretched) box ratio
+  const rs0 = await ratio('img'); b = await box('img');
+  await drag(line(b.r, b.b, b.r + 40, b.b + 40, 5), { type: 'mouse', id: 790 });
+  check('v1.29: corner of a stretched image keeps its ratio', Math.abs((await ratio('img')) - rs0) < 0.03);
+  // left / top bars
+  b = await box('img'); const gl0 = await geo('img');
+  await drag(line(b.l, (b.t + b.b) / 2, b.l - 20, (b.t + b.b) / 2, 4), { type: 'mouse', id: 791 });
+  const gl1 = await geo('img'); check('v1.29: left bar moves only the left edge', gl1[0] < gl0[0] - 0.01 && Math.abs(gl1[2] - gl0[2]) < 1e-6 && Math.abs(gl1[1] - gl0[1]) < 1e-6 && Math.abs(gl1[3] - gl0[3]) < 1e-6);
+  b = await box('img');
+  await drag(line((b.l + b.r) / 2, b.t, (b.l + b.r) / 2, b.t - 15, 4), { type: 'mouse', id: 792 });
+  const gt1 = await geo('img'); check('v1.29: top bar moves only the top edge', gt1[1] < gl1[1] - 0.005 && Math.abs(gt1[3] - gl1[3]) < 1e-6);
+  const delPos = await ev(() => { const v = T.view, e = T.img, r = v.pageRect(), s = v._handleSpots(e, new (r.constructor)(r.left + e.left * r.width(), r.top + e.top * r.height(), r.left + e.right * r.width(), r.top + e.bottom * r.height()), r); const d = s.find(h => h.kind === 'd'), b = { r: r.left + e.right * r.width(), t: r.top + e.top * r.height() }; return [d.x - b.r, d.y - b.t]; });
+  check('v1.29: red x delete button sits at the top-right (right+14, top-28)', Math.abs(delPos[0] - 14) < 0.5 && Math.abs(delPos[1] + 28) < 0.5, JSON.stringify(delPos));
   await shot('15-image-resized');
   // text box: select + resize + second tap edits
   await clearLog();
@@ -437,13 +492,13 @@ await clearLog();
   // delete button
   await clearLog();
   b = await box('tb'); const n0 = await ev(() => T.store.elements.length);
-  await tap(b.r, b.t - 28, { type: 'mouse', id: 83 });
+  await tap(b.r + 14, b.t - 28, { type: 'mouse', id: 83 });
   const n1 = await ev(() => T.store.elements.length);
   check('delete button removes the element', n1 === n0 - 1 && !(await ev(() => T.store.elements.includes(T.tb))) && (await ev(() => T.view.selectedElement())) === null);
   check('onElementDeleted(e) fired once', (await logOf('onElementDeleted')) === 1 && (await ev(() => T.log.find(l => l.n === 'onElementDeleted').a[0] === T.tb)));
   // delete with touch on the image + deleteSelectedElement API
   await tap(px(.2), py(.35), { type: 'touch', id: 84 }); b = await box('img');
-  await tap(b.r, b.t - 28, { type: 'touch', id: 85 });
+  await tap(b.r + 14, b.t - 28, { type: 'touch', id: 85 });
   check('delete button works with touch', !(await ev(() => T.store.elements.includes(T.img))));
   await tap(px(.6), py(.62), { type: 'touch', id: 86 });
   check('deleteSelectedElement() API', (await ev(() => T.view.selectedElement() === T.shape && T.view.deleteSelectedElement())) && (await ev(() => T.store.elements.length)) === 0);
@@ -509,23 +564,22 @@ await clearLog();
     const { PageElement } = await import('/js/store.js');
     const mk = (o) => { const e = Object.assign(new PageElement(), { page: 0, kind: 'text', textSize: .03 }, o); T.store.elements.push(e); return e; };
     mk({ text: 'Left aligned plain', left: .06, top: .42, right: .48, bottom: .47 });
-    mk({ text: 'Centered\nunderlined text', left: .06, top: .49, right: .48, bottom: .57, align: 'center', underline: true });
-    mk({ text: 'Right aligned\n오른쪽 정렬', left: .06, top: .59, right: .48, bottom: .67, align: 'right' });
-    mk({ text: 'First bullet\nSecond bullet with a very long line that must wrap around\nThird', left: .06, top: .69, right: .48, bottom: .83, list: 'bullet' });
-    mk({ text: 'One\nTwo\nThree\n\nFive', left: .52, top: .42, right: .94, bottom: .56, list: 'number' });
-    T.chk = mk({ text: 'Buy milk\nCall mom\nSend the report', left: .52, top: .58, right: .94, bottom: .68, list: 'check', checked: [true, false, true] });
-    mk({ text: 'Centered bullets\nunderline too', left: .52, top: .70, right: .94, bottom: .80, list: 'bullet', align: 'center', underline: true });
+    mk({ text: 'Centered\nunderlined text', left: .06, top: .49, right: .48, bottom: .57, align: 1, underline: true });
+    mk({ text: 'Right aligned\n오른쪽 정렬', left: .06, top: .59, right: .48, bottom: .67, align: 2, strike: true });
+    mk({ text: '\u2022 First bullet\n\u2022 Second bullet with a very long line that must wrap around\n\u2022 Third', left: .06, top: .69, right: .48, bottom: .83 });
+    mk({ text: '1. One\n2. Two\n3. Three\n\n4. Five', left: .52, top: .42, right: .94, bottom: .56 });
+    T.chk = mk({ text: '\u2611 Buy milk\n\u2610 Call mom\n\u2611 Send the report', left: .52, top: .58, right: .94, bottom: .68 });
+    mk({ text: '\u2022 Centered bullets\n\u2022 underline + strike', left: .52, top: .70, right: .94, bottom: .80, align: 1, underline: true, strike: true });
     T.view.invalidate();
   });
   await shot('17-text-formats');
   const lay = await ev(async () => {
     const { AnnotationPainter } = await import('/js/painter.js'); const c = document.createElement('canvas').getContext('2d'); c.font = '20px sans-serif'; const m = s => c.measureText(s).width;
-    const L = AnnotationPainter.layoutText(m, 'ab\nlonger line', 300, 20, { align: 'right', list: 'bullet' });
-    const C = AnnotationPainter.layoutText(m, 'ab', 300, 20, { align: 'center' });
-    return { markerW: L.markerW, textW: L.textW, rightEdge: L.lines[1].x + L.lines[1].w, centerMid: C.lines[0].x + C.lines[0].w / 2, y: L.lines.map(l => l.y), n: AnnotationPainter.layoutText(m, 'x', 300, 20, { list: 'number' }).markerW, n10: AnnotationPainter.layoutText(m, '1\n2\n3\n4\n5\n6\n7\n8\n9\n10', 300, 20, { list: 'number' }).markerW };
+    const L = AnnotationPainter.layoutText(m, 'ab\nlonger line', 300, 20, { align: 2 });
+    const C = AnnotationPainter.layoutText(m, 'ab', 300, 20, { align: 1 });
+    return { rightEdge: L.lines[1].x + L.lines[1].w, centerMid: C.lines[0].x + C.lines[0].w / 2, y: L.lines.map(l => l.y) };
   });
-  check('layoutText: marker column 1.6em (2.1em for 10+ numbers)', lay.markerW === 32 && lay.n === 32 && lay.n10 === 42, JSON.stringify(lay));
-  check('layoutText: right/center alignment inside the text area', Math.abs(lay.rightEdge - 300) < 0.01 && Math.abs(lay.centerMid - 150) < 0.01 && lay.y[0] === 20 && Math.abs(lay.y[1] - 47) < 1e-9, JSON.stringify(lay));
+  check('layoutText: right/center alignment (Android int align)', Math.abs(lay.rightEdge - 300) < 0.01 && Math.abs(lay.centerMid - 150) < 0.01 && lay.y[0] === 20 && Math.abs(lay.y[1] - 47) < 1e-9, JSON.stringify(lay));
   // pixel checks: centred text is centred in its box, right text ends at the right edge
   const cen = await ev(() => { const v = T.view, r = v.pageRect(), c = v.snapshot(false, 1), g = c.getContext('2d'); const e = T.store.elements[1];
     const x0 = Math.round(r.left + e.left * r.width()), x1 = Math.round(r.left + e.right * r.width()), y0 = Math.round(r.top + (e.top) * r.height()), y1 = Math.round(r.top + (e.top + .035) * r.height());
@@ -542,12 +596,12 @@ await clearLog();
   const cb = await ev(async () => { const { AnnotationPainter } = await import('/js/painter.js'); const r = T.view.pageRect(); return AnnotationPainter.checkBoxes(r, T.chk).map(c => ({ i: c.index, x: (c.rect.left + c.rect.right) / 2, y: (c.rect.top + c.rect.bottom) / 2 })); });
   check('checkBoxes() lists one box per line', cb.length === 3 && cb[1].y > cb[0].y, JSON.stringify(cb));
   await drag([[cb[1].x, cb[1].y], [cb[1].x, cb[1].y]], { type: 'touch', id: 101 });
-  check('tap on a check box toggles checked[1]', JSON.stringify(await ev(() => T.chk.checked)) === '[true,true,true]' && (await logOf('onCheckToggled')) === 1 && (await logOf('onInkChanged')) === 1 && (await ev(() => T.view.selectedElement())) === null);
+  check('tap on a leading marker toggles it in the text', (await ev(() => T.chk.text)) === '\u2611 Buy milk\n\u2611 Call mom\n\u2611 Send the report' && (await logOf('onCheckToggled')) === 1 && (await logOf('onInkChanged')) === 1 && (await ev(() => T.view.selectedElement())) === null);
   await drag([[cb[0].x, cb[0].y], [cb[0].x, cb[0].y]], { type: 'mouse', id: 102 });
-  check('mouse click toggles checked[0] off', JSON.stringify(await ev(() => T.chk.checked)) === '[false,true,true]');
+  check('mouse click toggles the first marker off', (await ev(() => T.chk.text.split('\n')[0])) === '\u2610 Buy milk');
   await shot('18-check-toggled');
   const js = await ev(async () => { const { stringify } = await import('/js/store.js'); return stringify(T.chk.toJson()); });
-  check('checked persisted in the element JSON', js.includes('"list":"check"') && js.includes('"checked":[false,true,true]'), js);
+  check('markers persist as plain text; no list/checked keys', js.includes('\\u2610 Buy milk') === false && js.includes('\u2610 Buy milk') && !/"list"|"checked"/.test(js), js);
   await ev(() => { T.store.elements.length = 0; T.view.selectElement(null); T.view.invalidate(); });
 }
 
