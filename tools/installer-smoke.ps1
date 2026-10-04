@@ -24,6 +24,9 @@ $marker = Join-Path $dataDir 'installer-smoke-marker.txt'
 
 function Wait-Until([scriptblock]$cond, [int]$sec = 60) { for ($i = 0; $i -lt $sec * 2; $i++) { if (& $cond) { return $true }; Start-Sleep -Milliseconds 500 }; return $false }
 
+function Dump-Log([string]$log, [string]$label) {
+  if (Test-Path $log) { $t = (Get-Content $log -Tail 30) -join "`n"; Write-Host "::warning title=inno-log-$label::$(Esc $t)" } else { Write-Host "::warning title=inno-log-$label::no log at $log" }
+}
 function Install([string]$log) {
   $p = Start-Process -FilePath $Setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/TASKS="desktopicon,associate"', "/LOG=`"$log`"") -PassThru -Wait
   return $p.ExitCode
@@ -33,6 +36,7 @@ function Uninstall([string]$log, [string[]]$extra = @()) {
   if (-not (Test-Path $un)) { return -1 }
   $p = Start-Process -FilePath $un -ArgumentList (@('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$log`"") + $extra) -PassThru -Wait
   [void](Wait-Until { -not (Test-Path $exe) } 60)
+  if ($p.ExitCode -ne 0) { Dump-Log $log 'uninstall' }
   return $p.ExitCode
 }
 

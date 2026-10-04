@@ -1,4 +1,4 @@
-# Host shell (host/), conversion (js/office.js) and CI
+# Host shell (host/), conversion (js/office.js), Google access, installer and CI
 
 WPF (.NET 8) window hosting WebView2. The whole `web/**` tree is embedded in the exe as resources and served from
 `https://app.pdfnote.local/*` (no loose folder). Protocol: header of `web/js/host.js`.
@@ -7,7 +7,7 @@ WPF (.NET 8) window hosting WebView2. The whole `web/**` tree is embedded in the
 
 | file | role |
 |---|---|
-| `host/PDFNote.csproj` | net8.0-windows10.0.19041, WPF, `Microsoft.Web.WebView2` 1.0.2903.40, embeds `..\web\**\*` as `web/<relative path>` |
+| `host/Everynote.csproj` | assembly `Everynote.exe` (product Everynote, v3.0.0), net8.0-windows10.0.19041, WPF, `Microsoft.Web.WebView2` 1.0.2903.40, `System.Security.Cryptography.ProtectedData`, embeds `..\web\**\*` as `web/<relative path>` |
 | `host/App.xaml.cs` | startup, single instance (named mutex + `PDFNote-open-<user>` pipe, CurrentUserOnly), command-line files, WebView2-runtime-missing dialog |
 | `host/MainWindow.xaml.cs` | WebView2 setup/policies, fullscreen, window state, event/response posting |
 | `host/WebServer.cs` | `app.pdfnote.local` (embedded resources) and `file.pdfnote.local/f?p=` (disk, Range) via `WebResourceRequested` (all source kinds, so workers work) |
@@ -15,6 +15,10 @@ WPF (.NET 8) window hosting WebView2. The whole `web/**` tree is embedded in the
 | `host/Paths.cs` | folders, log, `PathPolicy` allow-list |
 | `host/Office.cs`, `SpreadsheetPrep.cs` | Office/LibreOffice conversion, port of Android `SpreadsheetImport` (xlsx) |
 | `host/Ocr.cs` | `Windows.Media.Ocr` |
+| `host/Google.cs` | Google OAuth (loopback + PKCE), DPAPI token store, `google.request` proxy |
+| `installer/Everynote.iss` | Inno Setup script (+ `Korean.isl`, `everynote.ico`, wizard images, icon SVG) |
+| `tools/installer-smoke.ps1` | CI test of the installer (silent install / uninstall) |
+| `tools/make_icons.py` | `web/assets/everynote-icon.svg` -> PNGs, `host/Assets/app.ico`, installer images |
 | `web/js/office.js` | JS side of conversion (HWP in a Web Worker, Office through the host) |
 | `tools/prepare_hwp_engine.py` | Android's engine build/patch script, output `web/hwp/` |
 | `tools/smoke.ps1`, `tools/smoke-host.js` | CI smoke test (see below) |
@@ -68,6 +72,34 @@ const { pdf: path } = await convertOffice(path, 'docx', text => setStatus(text),
   (`변환이 중단되었습니다`). The caller (app.js) shows the Android dialogs/toasts and falls back to `offerOfficeImport`.
 * Not implemented here (lead): the AlertDialogs, `importConverted`, `offerOfficeImport`, text-only preview.
 
+## Google account (`host/Google.cs`, protocol in `web/js/host.js`)
+
+Opt-in Drive sync support. The page never sees tokens, client id or secret.
+
+* `google.config({clientId, clientSecret})` stores the OAuth client (type "Desktop app") DPAPI-protected; empty values clear it; a different client id signs out.
+  Fallback when nothing was stored: env `EVERYNOTE_GOOGLE_CLIENT_ID` / `EVERYNOTE_GOOGLE_CLIENT_SECRET` (`PDFNOTE_GOOGLE_*` accepted). Returns the status.
+* `google.status()` -> `{signedIn, email, configured}`. `google.signOut()` revokes the token (best effort) and forgets it (client config stays).
+* `google.signIn()` -> `{email}`. Opens the system browser (ShellExecute) at accounts.google.com with `scope = https://www.googleapis.com/auth/drive.file email`,
+  `access_type=offline`, `prompt=consent select_account`, PKCE `S256`, `state`; an `HttpListener` on `http://127.0.0.1:<random port>/` receives the code
+  (shows a small "login complete" page), the code is exchanged at `oauth2.googleapis.com/token`, the e-mail comes from `oauth2/v3/userinfo`. 5 minute timeout
+  (`로그인이 취소되었거나 시간이 초과되었습니다`); a second `signIn` cancels the first. Errors: `Google 클라이언트 ID가 설정되지 않았습니다`, `Google 로그인이 거부되었습니다`.
+* Storage: `<data>\google.json` = `{v:1, blob: base64(DPAPI(CurrentUser, entropy) of {clientId, clientSecret, refreshToken, accessToken, expiresAt, email})}`.
+* `google.request({method, url, headers, body, bodyBase64, uploadPath, savePath})` -> `{status, headers:{lowercase:'value'}, text}` or `{status, headers, savedPath}`.
+  * URL must be `https://` (default port, no user info) and host `accounts.google.com` or `*.googleapis.com`, otherwise `허용되지 않는 주소입니다`.
+    The `Authorization` bearer is added for `*.googleapis.com` only; `Authorization/Host/Cookie/...` request headers from the page are dropped.
+    The token is refreshed when it expires within 60 s and once more after a 401; a revoked refresh token (`invalid_grant`) signs the user out
+    (`Google 로그인이 만료되었습니다. 다시 로그인하세요`). Not signed in -> `Google에 로그인되어 있지 않습니다`.
+  * Body: `body` (UTF-8 text, default `application/json`), `bodyBase64`, or `uploadPath` (a file streamed from disk; read allow-list). Set `Content-Type` in `headers`.
+    Resumable uploads work as on the web: POST the metadata to `.../upload/drive/v3/files?uploadType=resumable`, read the `location` response header, then
+    `PUT` that URL with `uploadPath`.
+  * Response: non-2xx and no `savePath` -> `text` (limit 32 MiB, else error); with `savePath` a 2xx body is streamed to `<savePath>.<x>.part` and renamed (write allow-list),
+    result has `savedPath` instead of `text` (error responses still come back as `text`).
+  * Redirects are followed manually for GET/HEAD only (max 5, each target must pass the same URL check). Timeouts: 3 min, 45 min with `uploadPath`/`savePath`.
+* Browser/dev fallback (`host._fakeGoogle`): `configured` after `config()`, `signIn()` succeeds, and `google.request` talks to a tiny in-memory Drive v3 (files list/query
+  by name/parents/mimeType/trashed, create/get/`alt=media`/patch/delete, `uploadType=media|multipart|resumable`), enough for sync tests; `host._fakeGoogle.requests` logs calls.
+* `host.google.{status,config,signIn,signOut,request,json}` are the JS helpers (`json(method,url,body)` parses and throws with `.status`).
+* Printing: done in the page with `window.print()` (print-only DOM); WebView2 shows its print dialog. Nothing to allow on the host side; Ctrl+P is a page shortcut because browser accelerator keys stay off.
+
 ## Security model
 
 * Only the embedded app origin may talk to the host: `WebMessageReceived` is ignored unless `e.Source` starts with `https://app.pdfnote.local/`;
@@ -80,6 +112,7 @@ const { pdf: path } = await convertOffice(path, 'docx', text => setStatus(text),
   allowed roots are not resolved.
 * `file.pdfnote.local` answers CORS only for `https://app.pdfnote.local`. Context menu, browser accelerator keys (F5/F12/Ctrl+P...), zoom
   and DevTools are off unless `--dev` / `PDFNOTE_DEV=1` (`PDFNOTE_DEV_URL=http://localhost:8123/` to load a dev server).
+* Google: only the page can call `google.*`; the host enforces the URL allow-list itself (HTTPS, `*.googleapis.com` / `accounts.google.com`), never returns secrets and never sends the bearer to other hosts.
 * Permissions: microphone and clipboard-read allowed for the app origin only, everything else denied.
 * Office documents are opened read-only with macros force-disabled; LibreOffice runs with its own profile and without UI.
 
@@ -88,9 +121,18 @@ const { pdf: path } = await convertOffice(path, 'docx', text => setStatus(text),
 * `hwp-engine` (ubuntu): clone `sanguneo/rhwptopdf@adbc4bf`, rust wasm32 + wasm-pack, `tools/prepare_hwp_engine.py --out web/hwp`
   (same patch + regression test as Android, Noto CJK as test font), artifact `hwp-engine` (umd.js 16 KB, wasm ~6 MB). Engine files are git-ignored.
 * `build` (windows-latest): downloads the artifact into `web/hwp/` (a build without it still works, HWP then reports the missing engine; on a
-  tag it is an error), `dotnet publish` single-file self-contained ReadyToRun for `win-x64` and `win-arm64`, then the smoke test, then
-  `dist/PDFNote-<tag|dev>-win-{x64,arm64}.exe` as artifact; on `v*` tags `gh release view` -> create or `upload --clobber`, notes from
-  `docs/release-notes/<tag>.md` (falls back to `--generate-notes`). `Version` comes from the tag.
+  tag it is an error), `dotnet publish host/Everynote.csproj` single-file self-contained ReadyToRun for `win-x64` and `win-arm64`
+  (`out/<arch>/Everynote.exe`), `choco install innosetup`, compiles `installer/Everynote.iss` for both architectures
+  (`/DAppVersion /DArch /DSourceExe /DOutputBase /DOutDir`), smoke tests the app, then the installer, then
+  `dist/Everynote-<tag|dev>-win-{x64,arm64}.exe` + `dist/Everynote-Setup-<tag|dev>-{x64,arm64}.exe` as artifact `Everynote-windows`; on `v*` tags `gh release view` -> create or
+  `upload --clobber`, notes from `docs/release-notes/<tag>.md` (falls back to `--generate-notes`). `Version` comes from the tag. Branches `main`, `host-dev`, `host-v3` build on push.
+* Installer (`installer/Everynote.iss`): per-user by default (`{autopf}` = `%LOCALAPPDATA%\Programs\Everynote`, `PrivilegesRequiredOverridesAllowed=dialog commandline`), Start menu + optional
+  desktop shortcut with `AppUserModelID=hdlee73.Everynote` (the exe sets the same id at startup so taskbar pinning works), Apps & features entry (AppId `{3D6B1F4E-...}`, key `..._is1`),
+  Korean + English, closes a running instance (Restart Manager + `taskkill`), optional "Open with Everynote" task (ProgId `Everynote.Document`, `OpenWithProgids` of
+  pdf/hwp/hwpx/doc/docx/ppt/pptx/xls/xlsx, Capabilities/RegisteredApplications; UserChoice is never written). Uninstall keeps `%LOCALAPPDATA%\PDFNote` and `Documents\PDF Note`
+  unless the user answers the prompts (silent: `/PURGEDATA`, `/PURGELIBRARY`). Silent switches: `/VERYSILENT /CURRENTUSER|/ALLUSERS /TASKS="desktopicon,associate"`.
+* `tools/installer-smoke.ps1` (CI): silent install, checks exe / product name / Start menu + desktop shortcut / uninstall entry / ProgId / `.pdf` default not hijacked, starts the installed app
+  (left running; the uninstaller must close it), silent uninstall (files, shortcuts, registry gone, data kept), then reinstall without tasks (no desktop shortcut, no association) and uninstall with `/PURGEDATA`.
 * Build errors are re-emitted as `::error` annotations (read with `gh api repos/hdlee73/PDF-Note-Windows/check-runs/<job>/annotations`).
 * Smoke test (`tools/smoke.ps1`): launches the exe with `dev/samples/sample-ko.pdf`, env `PDFNOTE_DATA/LIBRARY` point to a temp dir,
   `PDFNOTE_DEBUG_PORT=9333` opens the DevTools port; waits for the page `https://app.pdfnote.local/...`, then evaluates
