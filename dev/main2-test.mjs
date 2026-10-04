@@ -91,13 +91,14 @@ check('go to page 7', (await ev(() => T.app.currentPage)) === 6);
 await ev(() => T.app.goToPage()); await page.fill('.ad-root input', 'x'); await page.click('.ad-btn >> text=이동'); await page.waitForTimeout(200); check('go to page invalid toast', (await textOf('.toast')) === '올바른 페이지를 입력하세요');
 await ev(() => T.app.choosePageSwipeDirection()); await shot('10-swipe-dir'); await page.click('.ad-cell >> nth=2'); await page.waitForTimeout(250);
 check('swipe pref', (await ev(() => [T.app.swipeEnabled, T.app.verticalPageSwipe, T.prefs.getBoolean('vertical_page_swipe', false)])).join() === 'true,true,true');
-await ev(() => T.app.showAddDocumentMenu()); await shot('11-add-doc'); await page.click('.ad-cancel'); await page.waitForTimeout(250);
+await ev(() => T.app.showAddDocumentMenu()); await shot('11-add-doc'); await page.keyboard.press('Escape'); await page.waitForTimeout(250);
 await ev(() => T.app.showOutlineItem(T.app.store.outlines[0])); await shot('12-outline-item'); await page.click('.ad-btn >> text=취소'); await page.waitForTimeout(250);
 
 // ---------------------------------------------------------------- sheets
 await ev(() => T.app.showPageMenu(2)); await shot('13-page-menu');
 check('page menu tiles', (await page.locator('.m2-tile').count()) === 3);
-await page.click('.m2-bs-head [aria-label=닫기]'); await page.waitForTimeout(300);
+check('page menu is a menu card (anchored_menu look, rows left-aligned, no icon tiles / grabber)', await page.evaluate(() => { const s = document.querySelector('[data-tag=menu_sheet]'), r = s.getBoundingClientRect(), row = s.querySelector('.m2-tile'), n = row.querySelector('.m2-tile-name').getBoundingClientRect(), rr = row.getBoundingClientRect(); return getComputedStyle(s).borderRadius === '18px' && r.width <= 322 && rr.height === 44 && n.left - rr.left < 60 && !document.querySelector('.m2-grabber,.m2-tile-chip') && Math.abs((r.left + r.right) / 2 - innerWidth / 2) < 2; }));
+await page.keyboard.press('Escape'); await page.waitForTimeout(300);
 check('sheet closed', (await page.locator('.m2-bsheet').count()) === 0);
 
 // ---------------------------------------------------------------- side panel + search

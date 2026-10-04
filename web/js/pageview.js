@@ -14,7 +14,8 @@ import { Mark, InkStroke, InkPoint } from './store.js';
 const DP = 1;
 const FONT_SANS = 'Roboto, "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif';
 const DEFAULT_PAPER = 0xFFDDDDDD | 0;
-const ZOOM_MIN = 1, ZOOM_MAX = 4;
+const ZOOM_MIN = 0.4, ZOOM_MAX = 4;   // below 1 the page is shrunk and centred on the grey backdrop (Android v1.30.1)
+const MIN_CROP_HEIGHT = 0.9;
 /** Fallback theme (css/pageview.css custom properties override these). */
 const THEME_LIGHT = { backdrop: '#D9DADF', border: 'rgba(0,0,0,0.20)', shadow: 'rgba(20,22,30,0.30)' };
 const THEME_DARK = { backdrop: '#2B2C31', border: 'rgba(255,255,255,0.16)', shadow: 'rgba(0,0,0,0.70)' };
@@ -488,7 +489,14 @@ export class PdfPageView {
   contentBounds() { return this.bounds.copy(); }
   paperColor() { return this._paper; }
   setCrop(box) {
-    if (!box || box.width() < 0.2 || box.height() < 0.2) this.crop.set(new RectF(0, 0, 1, 1)); else this.crop.set(box);
+    if (!box || box.width() < 0.2 || box.height() < 0.2) this.crop.set(new RectF(0, 0, 1, 1));
+    else {
+      // Trim left/right/top freely, but never let the vertical crop get shorter than MIN_CROP_HEIGHT of the page: a page whose text only
+      // fills its top part would otherwise get a short, wide crop box and be scaled up (width-limited) far beyond the other pages.
+      let top = box.top, bottom = box.bottom;
+      if (bottom - top < MIN_CROP_HEIGHT) { bottom = Math.min(1, top + MIN_CROP_HEIGHT); top = Math.max(0, bottom - MIN_CROP_HEIGHT); }
+      this.crop.set(new RectF(box.left, top, box.right, bottom));
+    }
     this.panX = this.panY = 0; this.invalidate();
   }
   contentSize() {
@@ -534,9 +542,9 @@ export class PdfPageView {
   // ---- zoom (v3) ---------------------------------------------------------------------------------------------
   static get ZOOM_MIN() { return ZOOM_MIN; }
   static get ZOOM_MAX() { return ZOOM_MAX; }
-  /** Current zoom: 1 = whole page fitted in the view ("100%"), max 4. */
+  /** Current zoom: 1 = whole page fitted in the view ("100%"), 0.4..4. */
   getZoom() { return this.scale; }
-  /** Sets the zoom (clamped 1..4) keeping the view point (fx, fy) (default: view centre) fixed. Fires onZoomChanged. */
+  /** Sets the zoom (clamped 0.4..4) keeping the view point (fx, fy) (default: view centre) fixed. Fires onZoomChanged. */
   setZoom(z, fx = this.width / 2, fy = this.height / 2) {
     z = Number(z); if (!Number.isFinite(z)) return this.scale;
     z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>crop test</title>
+<link rel="stylesheet" href="/css/pageview.css">
+<style>html,body{margin:0;height:100%;background:#333}#root{display:flex;width:100vw;height:100vh}</style></head>
+<body><div id="root"></div>
+<script type="module">
+import { PdfDoc } from '/js/pdfdoc.js';
+import { PdfPageView } from '/js/pageview.js';
+import { AnnotationStore } from '/js/store.js';
+import { PDFDocument, StandardFonts, rgb } from '/vendor/pdflib/pdf-lib.esm.min.js';
+
+// 2-page A4 PDF: page 1 has text from top to bottom, page 2 only across the top ~40% (bottom 60% blank).
+const d = await PDFDocument.create(), f = await d.embedFont(StandardFonts.Helvetica);
+const p1 = d.addPage([595, 842]), p2 = d.addPage([595, 842]);
+for (let i = 0; i < 40; i++) p1.drawText('Full page line ' + (i + 1) + ' lorem ipsum dolor sit amet consectetur adipiscing', { x: 50, y: 790 - i * 18.5, size: 11, font: f });
+for (let i = 0; i < 18; i++) p2.drawText('Top part line ' + (i + 1) + ' lorem ipsum dolor sit amet consectetur adipiscing', { x: 50, y: 790 - i * 18.5, size: 11, font: f });
+p2.drawRectangle({ x: 50, y: 40, width: 4, height: 4, color: rgb(1, 1, 1) });   // keeps nothing visible at the bottom (white)
+const bytes = new Uint8Array(await d.save());
+const doc = await PdfDoc.open(bytes);
+
+const store = new AnnotationStore();
+const mk = () => { const v = new PdfPageView({}); v.setAnnotationStore(store); return v; };
+const root = document.getElementById('root');
+const view = mk(); root.appendChild(view.el);
+const view2 = mk(); view2.el.style.display = 'none'; root.appendChild(view2.el);
+async function show(v, i, crop = true) {
+  const bmp = await doc.renderPage(i, 2);
+  v.showPage(bmp, i, store.marks, store.strokes, store.translations);
+  v.setCrop(crop ? v.contentBounds() : null); v.flush();
+}
+window.T = { view, view2, doc, show, root, mk };
+window.READY = true;
+</script></body></html>

@@ -36,7 +36,7 @@ SharedPreferences, kept in memory, persisted to `<data>\library.json` (same keys
 | `transfer(src,destFolder,title,move)` | async -> path | rename/move/copy; move uses `host.move` |
 | `insertPage(file,paper,afterIndex)` `deletePage(file,index)` `append(file,paper)` | async -> page count | |
 | `modified(file)` | async: `max(file mtime, sidecar mtime)` | |
-| extras | `purge(item)`, `emptyTrash()` (no UI in Android; use `Sidecars.remove`) | |
+| `purge(item)` `emptyTrash()` | async; `emptyTrash()` permanently deletes every trashed document (+ sidecars) and resolves to the count (Android v1.31.0 `emptyTrash`) | |
 
 Static: `SORT_NAMES`, `VIEW_NAMES`, `FOLDER_COLORS` (signed ints as in Java), `LEGACY_FOLDER_COLORS`, `FOLDER_COLOR_NAMES`.
 All mutators are serialised (Java `synchronized`). Errors are `IOException` (`.message` = the Korean string of the spec).
@@ -77,7 +77,7 @@ JPEG cached in `<data>\thumbs\<sha1(path)[:16]>-<sha1(path:mtime:sidecarMtime:to
 
 ## Known gaps / notes
 * Needs `Map.prototype.getOrInsertComputed` (pdf.js 5) — present in WebView2 current; the test page polyfills it for the bundled Playwright Chromium.
-* Folder rename/move/delete and permanent trash deletion do not exist in the Android UI and are not added (`purge/emptyTrash` exist in the repository only).
+* Folder rename/move/delete do not exist in the Android UI and are not added.
 * The cover placeholder is the Android `ic_note_add` glyph scaled with CENTER_CROP (large black outline) exactly as specified; flashes briefly while a cover loads.
 * In-memory cover blob URLs are never revoked (small JPEGs, LRU only bounds the lookup table).
 * `host.move` is assumed to move files/folders on the same volume; `NotebookFiles.replace` falls back to delete + move if the host refuses to overwrite.
@@ -87,3 +87,8 @@ JPEG cached in `<data>\thumbs\<sha1(path)[:16]>-<sha1(path:mtime:sidecarMtime:to
 * `new Paper(kind, color, template = null)`; kind 0..9; kind 9 needs `template` (path of a PDF or image; else throws `서식 파일을 먼저 고르세요`). `paper.spec()` = `kind:color[:template]` (stored in prefs and in the PDF Info `PDFNotePaper`, backslashes escaped), `Paper.parse(spec)` (Java `Paper.parse`, throws on malformed). `lib.paper(file)` / import / copy / move keep the template.
 * `await NotebookFiles.importTemplate(srcPath)` copies a picked PDF/image to `<data>\templates\<uuid>.<ext>` and returns the copy's path (do this before `setTemplate`/`new Paper(9, c, path)` so the template survives the original moving). Custom PDF template: first page imported per new page; image: fit-centred on the paper colour (non png/jpeg decoded via canvas and re-encoded as JPEG).
 * `PaperChoiceView`: `.setTemplate(path|null)`, `.onTemplateRequest(fn)` (Java `onTemplateRequest`; if no handler is set the view opens the file dialog itself, calls `importTemplate` and `setTemplate`), `.paper()` throws `서식 파일을 먼저 고르세요` for kind 9 until a template is set — wrap `paper()` in try/catch where the dialog's positive button uses it (`insertPage` in app-main2 line ~711 currently does not).
+
+## v3.3.0 (Android v1.31.0 port)
+* Trash dialog (`LibraryDialog.showTrash`): list rows (tap = restore) plus a neutral `휴지통 비우기` button (red) -> `confirmEmptyTrash(count)` ("영구 삭제" / "취소") -> `repository.emptyTrash()` -> refresh + toast `N개 문서를 영구 삭제했습니다`.
+* List dialogs (trash, view method, sort, folder colour, page animation, add document, ... = `AlertDialog.Builder.setItems/setSingleChoiceItems` and `showActionSheet`) are no longer bottom sheets: they are centred menu cards in the style of `ui/menu.js` (18px radius, hairline border, 44px left-aligned rows, gray caption, accent bold label + check on the selected row, red `삭제/비우기` buttons, buttons as rows under a hairline, no separate cancel card; tap outside / Esc closes). DOM: `.ad-sheet[data-tag=action_sheet] > .ad-list[data-tag=anchored_menu]`, rows `.ad-cell` (`aria-label` = label).
+* Overflow `메뉴` and the page menu (`showSheet`, `.m2-bsheet[data-tag=menu_sheet]`) use the same card: rows `.m2-tile` (20px icon, label, ✓ when `selected`), group captions and hairlines between sections; no grabber / icon tiles / close button (Esc or tap outside).

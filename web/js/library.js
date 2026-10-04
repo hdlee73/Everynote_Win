@@ -504,7 +504,7 @@ export class LibraryRepository {
       return restored;
     });
   }
-  /** Extra (not in the Android UI): remove a trashed document for good, together with its annotation sidecar. */
+  /** Remove a trashed document for good, together with its annotation sidecar. */
   purge(item) {
     return this._sync(async () => {
       if (!this._inTrash(item.file)) throw new IOException('휴지통 문서가 아닙니다');
@@ -513,7 +513,8 @@ export class LibraryRepository {
       await this.flush();
     });
   }
-  async emptyTrash() { for (const i of await this.trashItems()) await this.purge(i); }
+  /** Permanently deletes everything in the trash (Android v1.31.0 emptyTrash); resolves to the number of documents removed. */
+  async emptyTrash() { let n = 0; for (const i of await this.trashItems()) { await this.purge(i); n++; } return n; }
 
   // ---- creation
   createFolder(parent, title) {

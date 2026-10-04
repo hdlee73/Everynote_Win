@@ -427,9 +427,15 @@ await clearLog();
 {
   const z = await ev(() => { const v = T.view; const out = [v.getZoom()]; v.setZoom(2); out.push(v.getZoom()); v.zoomBy(0.5); out.push(v.getZoom()); v.setZoom(9); out.push(v.getZoom()); v.setZoom(0.2); out.push(v.getZoom());
     v.setZoom(3); v.resetZoom(); out.push(v.getZoom(), v.panX, v.panY); return out; });
-  check('zoom API setZoom/zoomBy/clamp/resetZoom', JSON.stringify(z) === '[1,2,1,4,1,1,0,0]', JSON.stringify(z));
+  check('zoom API setZoom/zoomBy/clamp(0.4..4)/resetZoom', JSON.stringify(z) === '[1,2,1,4,0.4,1,0,0]', JSON.stringify(z));
+  // Android v1.30.1: zoom out to 40%, the page is shown centred on the grey backdrop
+  const zo = await ev(() => { const v = T.view; v.resetZoom(); const r1 = v.pageRect(); v.setZoom(0.4); const r = v.pageRect(); const R = { z: v.getZoom(), w: r.width() / r1.width(), h: r.height() / r1.height(), cx: (r.left + r.right) / 2 - v.width / 2, cy: (r.top + r.bottom) / 2 - v.height / 2, panX: v.panX, panY: v.panY };
+    v.panX = 300; v.panY = 300; v.clampPan(); const r2 = v.pageRect(); R.cx2 = (r2.left + r2.right) / 2 - v.width / 2; R.cy2 = (r2.top + r2.bottom) / 2 - v.height / 2; v.setZoom(0.2); R.min = v.getZoom(); v.resetZoom(); return R; });
+  check('zoom 40%: page is 0.4x the fitted size and centred on the backdrop (pan locked)', zo.z === 0.4 && Math.abs(zo.w - 0.4) < 0.005 && Math.abs(zo.h - 0.4) < 0.005 && Math.abs(zo.cx) < 1 && Math.abs(zo.cy) < 1 && Math.abs(zo.cx2) < 1 && Math.abs(zo.cy2) < 1 && zo.min === 0.4, JSON.stringify(zo));
+  await ev(() => T.view.setZoom(0.4)); await shot('zoom-40'); await ev(() => T.view.resetZoom());
+  await ev(() => { T.log.length = 0; const v = T.view; v.setZoom(2); v.zoomBy(0.5); v.setZoom(9); v.setZoom(0.2); v.setZoom(3); v.resetZoom(); });
   const zl = await ev(() => T.log.filter(l => l.n === 'onZoomChanged').map(l => +l.a[0].toFixed(3)));
-  check('onZoomChanged fired for each real change', JSON.stringify(zl) === '[2,1,4,1,3,1]', JSON.stringify(zl));
+  check('onZoomChanged fired for each real change', JSON.stringify(zl) === '[2,1,4,0.4,3,1]', JSON.stringify(zl));
   await clearLog();
   const cz = await ev(() => { const v = T.view, r = v.contentRect(); v.setZoom(2, r.left + r.width() * .75, r.top + r.height() * .25); const [nx, ny] = v.toPage(r.left + r.width() * .75, r.top + r.height() * .25); const q = v.contentRect(); v.resetZoom(); return [Math.abs(q.width() / r.width() - 2) < .001]; });
   check('setZoom(z, fx, fy) keeps the focus point stable-ish and doubles the page', cz[0]);

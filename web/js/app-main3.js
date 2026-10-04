@@ -101,6 +101,7 @@ const methods = {
         t.push(tile('주석 백업', 'ic_copy', run('exportAnnotations')));
         t.push(tile('주석 백업 복원', 'ic_undo', run('importSidecar')));
         t.push(tile('원본 파일 내보내기', 'ic_folder_open', run('exportOriginal')));
+        t.push(tile('두 쪽 나눈 사본 만들기', 'ic_book', run('splitCurrentDocument')));
         break;
     }
     return t;

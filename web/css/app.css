@@ -19,7 +19,6 @@ button{font-family:inherit}
 .ad-dim{position:absolute;inset:0;background:rgba(0,0,0,0);display:flex;align-items:center;justify-content:center;transition:background .2s}
 .ad-root.in .ad-dim{background:rgba(0,0,0,.36)}
 .ad-root.out .ad-dim{background:rgba(0,0,0,0);transition:background .15s}
-.ad-root.sheet .ad-dim{align-items:flex-end}
 .ad-card{width:min(calc(100vw - 48px),330px);background:#fff;border-radius:18px;overflow:hidden;opacity:0;transform:scale(.9);transition:opacity .18s,transform .18s;box-shadow:0 10px 40px rgba(0,0,0,.25)}
 .ad-root.in .ad-card{opacity:1;transform:none}
 .ad-root.out .ad-card{opacity:0;transform:scale(.95);transition:opacity .12s,transform .12s}
@@ -36,18 +35,19 @@ button{font-family:inherit}
 .ad-bar.row .ad-btn{flex:1}
 .ad-btn:hover{background:rgba(0,0,0,.035)}
 .ad-btn:empty{display:none}
-.ad-sheet{width:min(100vw,480px);padding:0 10px 12px;transform:translateY(100%);transition:transform .22s cubic-bezier(.215,.61,.355,1)}
-.ad-root.in .ad-sheet{transform:none}
-.ad-root.out .ad-sheet{transform:translateY(100%);transition:transform .17s cubic-bezier(.55,.055,.675,.19)}
-.ad-list{background:#fff;border-radius:14px;overflow:hidden}
-.ad-sheet-title{font-size:13px;color:#8E8E93;text-align:center;padding:14px 16px 12px}
-.ad-sheet-msg{font-size:13px;color:#8E8E93;text-align:center;padding:0 16px 12px}
+.ad-sheet{width:min(calc(100vw - 40px),320px);opacity:0;transform:scale(.94);transition:opacity .18s,transform .18s}
+.ad-root.in .ad-sheet{opacity:1;transform:none}
+.ad-root.out .ad-sheet{opacity:0;transform:scale(.97);transition:opacity .12s,transform .12s}
+.ad-list{background:#fff;border-radius:18px;border:1px solid rgba(0,0,0,.08);padding:6px;box-shadow:0 10px 40px rgba(0,0,0,.25);overflow:hidden}
+.ad-sheet-title{font-size:13px;color:#8E8E93;padding:8px 12px 6px;text-align:left}
+.ad-sheet-msg{font-size:13px;color:#8E8E93;padding:0 12px 8px;text-align:left}
 .ad-scroll{max-height:55vh;overflow:auto}
-.ad-cell{height:54px;display:flex;align-items:center;justify-content:center;font-size:18px;color:#007AFF;padding:0 16px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ad-cell{height:44px;display:flex;align-items:center;font-size:15px;color:#1C1C1E;padding:0 12px;cursor:pointer;border-radius:10px}
+.ad-cell-label{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ad-sheet-line{height:1px;background:#E5E5EA;margin:4px 12px}
 .ad-cell:hover{background:rgba(0,0,0,.035)}
 .check-label{display:inline-flex;align-items:center;gap:8px}
-.sheet-btn{height:54px;font-size:18px}
-.ad-cancel{height:54px;font-size:18px;font-weight:700;background:#fff;border-radius:14px;margin-top:8px}
+.ad-btn.sheet-btn{height:44px;font-size:15px;justify-content:flex-start;border-radius:10px;padding:0 12px}
 
 /* ---- AnchoredMenu ---- */
 .amenu-backdrop{position:fixed;inset:0;z-index:9500}

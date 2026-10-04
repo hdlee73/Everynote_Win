@@ -230,43 +230,31 @@ const M = {};   // methods that always override
 const F = {};   // fallbacks installed only when no other part provides the method
 
 // ---- shared UI primitives ---------------------------------------------------------------------------------------------------------------
-/** Bottom sheet, One UI style (MainActivity.showSheet). sections: Section[] (or duck-typed objects). Returns a dialog with dismiss(). */
+/** Menu card (MainActivity.showSheet, Android v1.31.0): the same rounded card as the anchored menus - gray caption, grouped rows
+ *  (small icon, label, check on the selected one), hairline between groups. sections: Section[] (or duck-typed objects). Returns a dialog with dismiss(). */
 M.showSheet = function (title, sections) {
   const sheet = h('div', { class: 'm2-bsheet', dataset: { tag: 'menu_sheet' } });
-  sheet.append(h('div', { class: 'm2-grabber' }));
   let dlg;
-  const head = h('div', { class: 'm2-bs-head' }, h('div', { class: 'm2-bs-title' }, title), iconButton('ic_close', '닫기', NAVY, () => dlg.dismiss(), 40, 40));
-  head.lastChild.style.padding = '10px';
-  sheet.append(head);
+  sheet.append(h('div', { class: 'm2-bs-title' }, title));
   const body = h('div', { class: 'm2-bs-body', style: { maxHeight: Math.round(window.innerHeight * .72) + 'px' } });
-  const w = window.innerWidth, columns = w >= 840 ? 7 : w >= 520 ? 6 : 5;
   sections.forEach((section, s) => {
-    const group = h('div', { class: 'm2-bs-group' });
-    if (s > 0) group.append(h('div', { class: 'm2-bs-line' }));
-    if (section.title != null) group.append(h('div', { class: 'm2-bs-label' }, section.title));
-    if (section.custom) group.append(section.custom);
-    for (let start = 0; start < section.tiles.length; start += columns) {
-      const row = h('div', { class: 'm2-bs-row' });
-      for (let i = 0; i < columns; i++) {
-        if (start + i < section.tiles.length) row.append(this.sheetTile(() => dlg, section.tiles[start + i]));
-        else row.append(h('div', { style: { flex: '1 1 0', height: '1px' } }));
-      }
-      group.append(row);
-    }
-    body.append(group);
+    if (s > 0) body.append(h('div', { class: 'm2-bs-line' }));
+    if (section.title != null) body.append(h('div', { class: 'm2-bs-label' }, section.title));
+    if (section.custom) body.append(section.custom);
+    for (const tile of section.tiles) body.append(this.sheetTile(() => dlg, tile));
   });
   sheet.append(body);
-  dlg = new Overlay(sheet, { sheet: true });
+  dlg = new Overlay(sheet);
   dlg.show();
   return dlg;
 };
 M.sheetTile = function (dialogOrGetter, tile) {
   const dialog = typeof dialogOrGetter === 'function' ? dialogOrGetter : () => dialogOrGetter;
-  const glyphColor = tile.tintV ? css(tile.tintV) : NAVY;
   const sel = !!tile.selected;
-  const chip = h('div', { class: 'm2-tile-chip' + (sel ? ' sel' : '') }, icon(tile.icon, 24, sel ? ACTIVE_FG : glyphColor));
-  const name = h('div', { class: 'm2-tile-name', style: { color: sel ? ACTIVE_FG : NAVY } }, tile.label);
-  const cell = h('div', { class: 'm2-tile', role: 'button', 'aria-label': tile.label }, chip, name);
+  const cell = h('div', { class: 'm2-tile' + (sel ? ' sel' : ''), role: 'button', 'aria-label': tile.label });
+  if (tile.icon) cell.append(icon(tile.icon, 20, tile.tintV ? css(tile.tintV) : ACCENT, 'margin-right:12px;flex:none'));
+  cell.append(h('span', { class: 'm2-tile-name', style: { color: sel ? ACCENT : '#1C1C1E', fontWeight: sel ? '700' : '400' } }, tile.label));
+  if (sel) cell.append(icon('ic_check_bold', 20, ACCENT, 'margin-left:8px;flex:none'));
   cell.addEventListener('click', () => { if (!tile.keepOpen) dialog().dismiss(); tile.action && tile.action(); });
   return cell;
 };
@@ -955,6 +943,23 @@ M.exportOriginal = async function () {
   if (!target) return;
   try { await host.copy(source, target); toast('원본 파일을 내보냈습니다'); }
   catch (e) { toast('원본 내보내기에 실패했습니다'); }
+};
+/** Android v1.30.1 splitCurrentDocument: makes a copy of the open PDF with every landscape page cut into a left and a right page and opens it from the library. */
+M.splitCurrentDocument = async function () {
+  if (!this.activeSession || this.documentUri == null) { toast('문서를 먼저 여세요'); return; }
+  const source = this.documentUri, title = stripPdf(this.documentTitle || baseName(source) || '문서');
+  toast('한 쪽씩 나누는 중입니다');
+  let tmp = null;
+  try {
+    const office = await import('./office.js');
+    const bytes = await host.readBytes(source);
+    if (!(await office.hasLandscapePages(bytes))) { toast('나눌 가로로 넓은 면이 없습니다'); return; }
+    const cut = await office.splitSpreads(bytes);
+    tmp = await this.tempFile('.pdf'); await host.writeBytes(tmp, cut);
+    const saved = await this.importConverted(tmp, title + ' (한 쪽씩)');
+    await this.openPdf(saved); toast('나눈 사본을 문서함에 저장했습니다');
+  } catch (e) { toast('나누기 실패: ' + errMsg(e)); }
+  finally { if (tmp) host.delete(tmp).catch(() => {}); }
 };
 M.exportPdf = async function () {
   if (!this.activeSession) return;

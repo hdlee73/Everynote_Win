@@ -163,10 +163,13 @@ check('help closed', (await page.locator('.m3-help').count()) === 0);
 await ev(() => { window.__ui2 = []; for (const n of ['printDocument', 'showAboutOffline']) app[n] = () => window.__ui2.push(n); app.showTools(); }); await page.waitForTimeout(300);
 for (const n of ['인쇄', '오프라인 사용 안내']) { await page.locator('.m2-tile[aria-label="' + n + '"]').first().click(); await page.waitForTimeout(250); await ev(() => app.showTools()); await page.waitForTimeout(250); }
 check('tools sheet: print / offline guide call UI2 methods', (await ev(() => window.__ui2.join())) === 'printDocument,showAboutOffline', await ev(() => window.__ui2.join()));
-await page.click('.m2-bs-head [aria-label=닫기]'); await page.waitForTimeout(300);
+await page.keyboard.press('Escape'); await page.waitForTimeout(300);
 await ev(() => app.showTools()); await page.waitForTimeout(300);
-check('export tiles: 원본 파일 내보내기 present, 본문 미리보기 저장 removed', (await page.locator('.m2-tile[aria-label="원본 파일 내보내기"]').count()) === 1 && (await page.locator('.m2-tile[aria-label="본문 미리보기 저장"]').count()) === 0);
-await page.click('.m2-bs-head [aria-label=닫기]'); await page.waitForTimeout(300);
+check('export tiles: 원본 파일 내보내기 + 두 쪽 나눈 사본 만들기 present, 본문 미리보기 저장 removed', (await page.locator('.m2-tile[aria-label="원본 파일 내보내기"]').count()) === 1 && (await page.locator('.m2-tile[aria-label="두 쪽 나눈 사본 만들기"]').count()) === 1 && (await page.locator('.m2-tile[aria-label="본문 미리보기 저장"]').count()) === 0);
+await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+
+await ev(() => app.splitCurrentDocument()); await page.waitForFunction(() => /나눌 가로로|나누기 실패|저장했습니다/.test(document.querySelector('.toast')?.textContent || ''), null, { timeout: 15000 }).catch(() => {});
+check('두 쪽 나눈 사본 만들기 on a portrait-only PDF: friendly "nothing to split" toast', /나눌 가로로 넓은 면이 없습니다/.test(await page.evaluate(() => document.querySelector('.toast')?.textContent || '')), await page.evaluate(() => document.querySelector('.toast')?.textContent || ''));
 
 console.log(errors ? `ERRORS: ${errors}` : 'no console errors', fails ? `FAILS: ${fails}` : 'all passed');
 await browser.close(); server.close(); process.exit(fails || errors ? 1 : 0);

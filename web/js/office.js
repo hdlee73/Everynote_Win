@@ -192,14 +192,38 @@ const effectiveSize = (page) => {
   return rot % 180 === 0 ? { w: box.width, h: box.height } : { w: box.height, h: box.width };
 };
 
-/** True when the first (up to) three pages are all very wide landscape pages (width >= 1000pt and > 1.25 x height), i.e. probably two printed pages side by side. Never throws. */
+/** Android v1.30.1 looksLikeSpread: true when the PDF looks like printed two-page spreads - its (up to six first) landscape pages are all very wide
+ *  (width >= 1000pt and > 1.25 x height), or at least 70% of the text-bearing landscape pages (width > 1.2 x height) have their text in two halves
+ *  (each >= 25% of the characters) with an empty gutter in the middle (<= 1.5% in the 45-55% band). Portrait pages are ignored. Never throws. */
 export async function looksLikeSpread(pdfBytes) {
   try {
     const { PDFDocument } = await loadPdfLib();
     const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true, updateMetadata: false, throwOnInvalidObject: false });
-    const n = Math.min(3, doc.getPageCount()); if (n === 0) return false;
-    for (let i = 0; i < n; i++) { const { w, h } = effectiveSize(doc.getPage(i)); if (!(w >= 1000 && w > h * 1.25)) return false; }
-    return true;
+    const n = Math.min(6, doc.getPageCount()); if (n === 0) return false;
+    let wide = 0, landscape = 0, judged = 0, gutter = 0, pdf = null;
+    for (let i = 0; i < n; i++) {
+      const { w, h } = effectiveSize(doc.getPage(i));
+      if (w <= h * 1.2) continue;
+      landscape++; if (w >= 1000 && w > h * 1.25) wide++;
+      if (!pdf) { const { PdfDoc } = await import('./pdfdoc.js'); pdf = await PdfDoc.open(pdfBytes.slice()); }
+      let c = null; try { c = await pdf.textColumns(i); } catch (e) { c = null; }
+      if (!c || c.total < 30) continue;
+      judged++;
+      if (c.left * 1000 / c.total >= 250 && c.right * 1000 / c.total >= 250 && c.center * 1000 / c.total <= 15) gutter++;
+    }
+    if (pdf) { try { pdf.doc.destroy(); } catch (e) { /* ignore */ } }
+    if (landscape === 0) return false;
+    if (wide === landscape) return true;
+    return judged > 0 && gutter * 10 >= judged * 7;
+  } catch (e) { return false; }
+}
+
+/** True when splitSpreads would change anything: the PDF has at least one unrotated landscape page. */
+export async function hasLandscapePages(pdfBytes) {
+  try {
+    const { PDFDocument } = await loadPdfLib();
+    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true, updateMetadata: false, throwOnInvalidObject: false });
+    return doc.getPages().some(p => { const b = p.getCropBox(); return p.getRotation().angle % 180 === 0 && b.width > b.height; });
   } catch (e) { return false; }
 }
 

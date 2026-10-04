@@ -583,7 +583,7 @@ const methods = {
   setZoomOf(view, z) {
     if (!view) return;
     if (typeof view.setZoom === 'function') view.setZoom(z);
-    else { view.scale = Math.max(1, Math.min(4, z)); if (view.scale <= 1) view.panX = view.panY = 0; if (view.invalidate) view.invalidate(); }
+    else { view.scale = Math.max(0.4, Math.min(4, z)); if (view.scale <= 1) view.panX = view.panY = 0; if (view.invalidate) view.invalidate(); }
   },
   zoomViews() {
     const a = [this.firstPageView];

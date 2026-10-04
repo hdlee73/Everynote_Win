@@ -45,9 +45,9 @@ Quirk kept: `showPage()` calls `stopTextSelection()` which resets `directTextSel
 ## Input mapping
 * Pointer Events on `el` with pointer capture. `pen` and `mouse` = STYLUS (never page-swipe, ink pressure from `e.pressure` clamped 0.05..1; finger/touch pressure constant 0.65). `touch` = finger.
 * Pen eraser tip (`buttons&32` / `button===5`) and pen barrel button (`buttons&2`) = temporary eraser (works in any ink mode; only while an ink tool is active, as in Java).
-* Mouse: only the left button starts a gesture; wheel scrolls/pans when zoomed; `Ctrl+wheel` (also trackpad pinch) zooms 1..4 around the cursor (does NOT call `onZoomGestureStarted`); right click (`contextmenu`) on empty paper calls `onBlankLongPress` (desktop addition). Mouse acts as stylus, so text selection starts by dragging from a word.
+* Mouse: only the left button starts a gesture; wheel scrolls/pans when zoomed; `Ctrl+wheel` (also trackpad pinch) zooms 0.4..4 around the cursor (does NOT call `onZoomGestureStarted`); right click (`contextmenu`) on empty paper calls `onBlankLongPress` (desktop addition). Mouse acts as stylus, so text selection starts by dragging from a word.
 * Two-finger pinch emulates Android's ScaleGestureDetector (min span 27 mm ≈ 102 px, span slop 16 px).
-* Thresholds identical to Java (touch slop 14, swipe max(48, min(10% of size, 100)), edge band 72, long press 420/650 ms, tap 20, handles 22, pan damping 0.8, zoom 1..4). Haptics are no-ops.
+* Thresholds identical to Java (touch slop 14, swipe max(48, min(10% of size, 100)), edge band 72, long press 420/650 ms, tap 20, handles 22, pan damping 0.8, zoom 0.4..4). Haptics are no-ops.
 
 ## Painter / store contract used
 `AnnotationPainter.dark` set around marks/strokes/elements; `AnnotationPainter.adj(color)`; `AnnotationPainter.elements(ctx, destRectF, store, page)`; `AnnotationPainter.addImageListener(fn)` (view repaints when an element image finishes loading).
@@ -73,8 +73,8 @@ Tests: `node dev/pageview-test.mjs` (screenshots `dev/out/12-*` backdrop, `13..1
 ### Zoom API (requirement 11)
 | member | meaning |
 |---|---|
-| `getZoom()` | current zoom = `view.scale`; **1 = whole page fitted ("100%")**, max 4 (`PdfPageView.ZOOM_MIN/ZOOM_MAX`) |
-| `setZoom(z, fx?, fy?)` | clamps to 1..4, keeps the view point (fx, fy) fixed (default: view centre), returns the new zoom |
+| `getZoom()` | current zoom = `view.scale`; **1 = whole page fitted ("100%")**, min 0.4 ("40%"), max 4 (`PdfPageView.ZOOM_MIN/ZOOM_MAX`) |
+| `setZoom(z, fx?, fy?)` | clamps to 0.4..4, keeps the view point (fx, fy) fixed (default: view centre), returns the new zoom |
 | `zoomBy(f, fx?, fy?)` | `setZoom(zoom * f)` — use 1.25 / 0.8 for the +/- buttons |
 | `resetZoom()` | zoom 1, pan 0 ("100%" button) |
 | `listener.onZoomChanged(z)` | fires after **any** change: buttons, pinch, Ctrl+wheel / trackpad pinch, `focusOnPoint`, `showPage`/`clearPage` reset (checked synchronously by the API calls and once per repaint for direct `view.scale = …` writes). Not fired when the value does not change. `onZoomGestureStarted` is unchanged (finger pinch only) |
@@ -114,3 +114,8 @@ Lists are plain text (api-store.md). A tap (no movement) on the leading `☐`/`�
 
 ## Anchored menu (ui/menu.js)
 `AnchoredMenu.show(anchor, above, rows, shortcuts, onDismiss, avoid)`: `avoid` = `{left, top, right, bottom}` viewport rectangle the card must not cover. Placement order: below it, above it, right of it, left of it (sides are clamped vertically); when nothing fits the card docks at the screen edge covering the least of the rectangle. `AnchoredMenu.placeAvoiding(avoid, w, h, screenW, screenH)` is the pure function. The text-selection menu passes the selected text's rectangle and shows the insert items behind a `삽입` submenu row (`app.showMenuAt(view, x, y, rows, onDismiss, avoid)`).
+
+## v3.3.0 (Android v1.30.1 / v1.31.0 port; crop fix)
+* **Zoom out to 40%** (`ZOOM_MIN = 0.4`; Android `MIN_ZOOM`): `setZoom`, `zoomBy`, pinch and `Ctrl+wheel` go below 1. Below 1 the pan is locked to 0 (`clampPan`), so the page (the cropped printed area when "crop margins" is on) is drawn centred on the grey backdrop; `contentSize()` simply scales down. Page swiping / drag-reading stay active at `scale <= 1`. The app's zoom pill shows `40%`..`400%`, the "-" button steps by 1/1.25 down to 40%.
+* **Crop margins keep one scale across pages**: `setCrop(box)` trims left/right/top as before, but the vertical crop is never shorter than `MIN_CROP_HEIGHT = 0.9` of the page (a short box is extended downwards first, then upwards). Before, a page whose text filled only its top ~40% got a short, wide crop box, became width-limited in `contentSize()` and was shown far larger than the other pages with its bottom margin cut off. Pages with normal content (crop >= 90% tall) behave exactly as in Android; `applyCrop` (two-page view: union of both bounds) is unchanged and both views get the same clamped box.
+* Tests: `dev/crop-test.mjs` (generated 2-page PDF: page 1 full, page 2 text on the top 40% only; asserts page-2 `contentSize()` ~ page-1, crop >= 90%, bottom visible, zoom/pan limits, two-page view; screenshots `dev/out/crop-*.png`), zoom 40% checks in `dev/pageview-test.mjs` and `dev/main1-test.mjs`.

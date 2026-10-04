@@ -788,7 +788,15 @@ export class LibraryDialog {
         if (this.actions.changed) this.actions.changed(items[index].file, restored, true);
         this.refresh(); toast('복원했습니다');
       } catch (e) { toast(e.message, LONG_TOAST); }
-    }).setNegativeButton('닫기').show();
+    }).setNeutralButton('휴지통 비우기', () => this.confirmEmptyTrash(items.length)).setNegativeButton('닫기').show();
+  }
+  confirmEmptyTrash(count) {
+    new AlertDialog.Builder().setTitle('휴지통 비우기').setMessage(`휴지통의 문서 ${count}개를 영구 삭제할까요? 되돌릴 수 없습니다.`)
+      .setPositiveButton('영구 삭제', async () => {
+        if (this.busy) return; this.busy = true;
+        try { const n = await this.repository.emptyTrash(); this.busy = false; this.refresh(); toast(`${n}개 문서를 영구 삭제했습니다`); }
+        catch (e) { this.busy = false; toast(e.message || '삭제에 실패했습니다', LONG_TOAST); }
+      }).setNegativeButton('취소').show();
   }
   createFolder(parent, done) {
     const f = inputField({ hint: '폴더 이름' });

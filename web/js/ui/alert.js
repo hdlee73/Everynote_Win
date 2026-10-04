@@ -35,7 +35,7 @@ export class AlertDialog {
     const which = [BUTTON_POSITIVE, BUTTON_NEGATIVE, BUTTON_NEUTRAL];
     for (let i = 0; i < 3; i++) {
       const el = h('div', { class: 'ad-btn' + (i === 0 ? ' bold' : ''), role: 'button', 'aria-label': b.labels[i] || '' }, b.labels[i] || '');
-      if (i === 1 && b.labels[i] && String(b.labels[i]).includes('삭제')) el.style.color = '#FF3B30';
+      if (b.labels[i] && (i === 1 || b.items != null) && /삭제|비우기/.test(String(b.labels[i]))) el.style.color = '#FF3B30';
       el.addEventListener('click', () => { const l = b.listeners[i]; if (l) l(this, which[i]); this.dismiss(); });
       this.buttons[i] = el;
     }
@@ -93,20 +93,23 @@ export class AlertDialog {
     return card;
   }
 
+  /** List dialog in the same look as the anchored menu card (Android v1.31.0): left-aligned 44px rows, accent bold label + check on the chosen
+   *  row, red danger buttons, hairline before the button rows. No separate cancel card: tap outside / Esc closes it. */
   _sheet() {
     const b = this.b;
     const root = h('div', { class: 'ad-sheet', dataset: { tag: 'action_sheet' } });
-    const list = h('div', { class: 'ad-list' });
+    const list = h('div', { class: 'ad-list amenu-card', dataset: { tag: 'anchored_menu' } });
     if (b.title != null) { this.titleView = h('div', { class: 'ad-sheet-title' }, b.title); list.append(this.titleView); }
     if (b.message != null) list.append(h('div', { class: 'ad-sheet-msg' }, b.message));
     const rows = h('div', { class: 'ad-rows' });
     const cells = []; let current = b.checked;
     const refresh = () => cells.forEach((c, i) => {
-      const on = b.choice && i === current; c.textContent = ''; c.append(on ? checkLabel(b.items[i]) : document.createTextNode(b.items[i]));
-      c.style.fontWeight = on ? '700' : '400';
+      const on = b.choice && i === current; c.textContent = '';
+      c.append(h('span', { class: 'ad-cell-label', style: { color: on ? '#007AFF' : '#1C1C1E', fontWeight: on ? '700' : '400' } }, b.items[i]));
+      if (on) c.append(icon('ic_check_bold', 20, '#007AFF', 'margin-left:8px'));
+      c.classList.toggle('on', on);
     });
     b.items.forEach((label, i) => {
-      if (i > 0 || b.title != null || b.message != null) rows.append(h('div', { class: 'hair' }));
       const cell = h('div', { class: 'ad-cell', role: 'button', 'aria-label': label });
       cell.addEventListener('click', () => {
         if (b.choice) { current = i; refresh(); }
@@ -117,13 +120,17 @@ export class AlertDialog {
     });
     refresh();
     list.append(h('div', { class: 'ad-scroll' }, rows));
-    for (const slot of [0, 2]) if (b.labels[slot] != null) { list.append(h('div', { class: 'hair' })); const bt = this.buttons[slot]; bt.classList.add('sheet-btn'); list.append(bt); }
     if (b.view) list.append(b.view);
+    const slots = [0, 2, 1].filter(s => b.labels[s] != null);
+    if (slots.length) list.append(h('div', { class: 'ad-sheet-line' }));
+    for (const slot of slots) {
+      const bt = this.buttons[slot], label = String(b.labels[slot]);
+      bt.classList.add('sheet-btn');
+      bt.style.color = label.includes('삭제') || label.includes('비우기') ? '#FF3B30' : slot === 1 ? '#8E8E93' : '#007AFF';
+      bt.style.fontWeight = '400';
+      list.append(bt);
+    }
     root.append(list);
-    let c = this.buttons[1];
-    if (b.labels[1] == null) { c = h('div', { class: 'ad-btn', 'aria-label': '취소' }, '취소'); c.addEventListener('click', () => this.dismiss()); this.buttons[1] = c; }
-    c.classList.add('ad-cancel');
-    root.append(c);
     return root;
   }
 }

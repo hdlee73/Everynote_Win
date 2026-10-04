@@ -66,6 +66,25 @@ export class PdfDoc {
     return out;
   }
 
+  /** Where the characters of a page sit horizontally (Android centersShare): counts of characters whose centre lies left of 45%, right of 55% and in the
+   *  45-55% centre band, plus the total. Null for rotated pages. Used to spot two printed pages side by side. */
+  async textColumns(i) {
+    const page = await this._page(i);
+    if (((page.rotate % 360) + 360) % 180 !== 0) return null;
+    const vp = page.getViewport({ scale: 1 }), tc = await page.getTextContent();
+    const r = { left: 0, right: 0, center: 0, total: 0 };
+    for (const it of tc.items) {
+      if (!it.str || !it.str.trim()) continue;
+      const m = pdfjs.Util.transform(vp.transform, it.transform), w = (it.width || 0) * vp.scale, n = it.str.length;
+      for (let k = 0; k < n; k++) {
+        if (!it.str[k].trim()) continue;
+        const x = (m[4] + w * (k + 0.5) / n) / vp.width;
+        r.total++; if (x >= 0.45 && x <= 0.55) r.center++; else if (x < 0.5) r.left++; else r.right++;
+      }
+    }
+    return r;
+  }
+
   /** Word-level regions with line boxes, normalized (ML Kit TextRegion equivalent). Empty array if the page has no text layer. */
   async textRegions(i) {
     const page = await this._page(i);

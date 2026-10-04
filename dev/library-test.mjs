@@ -143,6 +143,18 @@ await pg.click('[aria-label="휴지통"]'); await pg.waitForTimeout(400);
 await click(pg, '.ad-cell', '한국어 샘플 (1).pdf'); await pg.waitForTimeout(600);
 await pg.click('[aria-label="휴지통"]'); await pg.waitForTimeout(500); await shot(pg, '22-trash-empty');
 ok((await pg.textContent('.ad-msg')) === '휴지통이 비어 있습니다', 'empty trash dialog'); await click(pg, '.ad-btn', '닫기');
+// v3.3.0 (Android v1.31.0): 휴지통 비우기 = confirm, then permanent delete
+await pg.evaluate(`T.host.copy(T.root+'\\\\Lecture Notes 10.pdf', T.root+'\\\\Zap.pdf').then(()=>T.dlg.repository.trash(T.root+'\\\\Zap.pdf'))`); await pg.waitForTimeout(300);
+ok((await pg.evaluate(`T.dlg.repository.trashItems().then(a=>a.length)`)) === 1, 'one document in trash');
+await pg.click('[aria-label="휴지통"]'); await pg.waitForTimeout(500); await shot(pg, '22b-trash-with-empty');
+await click(pg, '.ad-btn', '휴지통 비우기'); await pg.waitForTimeout(300); await shot(pg, '22c-empty-confirm');
+ok((await pg.textContent('.ad-msg')).includes('1개') && (await pg.textContent('.ad-msg')).includes('영구 삭제'), 'empty trash confirm message');
+await click(pg, '.ad-btn', '취소'); await pg.waitForTimeout(300);
+ok((await pg.evaluate(`T.dlg.repository.trashItems().then(a=>a.length)`)) === 1, 'cancel keeps the trash');
+await pg.click('[aria-label="휴지통"]'); await pg.waitForTimeout(400); await click(pg, '.ad-btn', '휴지통 비우기'); await pg.waitForTimeout(300);
+await click(pg, '.ad-btn', '영구 삭제'); await pg.waitForTimeout(800);
+ok((await pg.evaluate(`T.dlg.repository.trashItems().then(a=>a.length)`)) === 0 && !(await pg.evaluate(`T.host.stat(T.root+'\\\\Zap.pdf').then(s=>s.exists)`)), 'trash emptied for good');
+ok((await pg.textContent('.toast')).includes('영구 삭제했습니다'), 'empty trash toast');
 // folder colour
 await pg.click('[aria-label="폴더 열기"]'); await pg.waitForTimeout(500);
 await pg.click('.lib-manage'); await pg.waitForTimeout(300); await shot(pg, '23-manage-menu');

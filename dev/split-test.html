@@ -41,6 +41,27 @@ R.spreadMixed = await office.looksLikeSpread(await make([[1200, 800], [595, 842]
 R.spreadSquarish = await office.looksLikeSpread(await make([[1100, 1000]]));           // 1100 > 1000 but < 1.25 x height
 R.spreadRotated = await office.looksLikeSpread(await make([[800, 1200, 90]]));           // rotated portrait == wide landscape
 R.spreadGarbage = await office.looksLikeSpread(new Uint8Array([1, 2, 3]));
+// v1.30.1: body layout - landscape A4-size pages (842x595, below the 1000pt width limit) whose text sits in two blobs with a blank gap in the middle
+async function textPages(kind, n = 3, size = [842, 595]) {
+  const d = await PDFDocument.create(), f = await d.embedFont(StandardFonts.Helvetica);
+  for (let i = 0; i < n; i++) {
+    const [w, h] = size, p = d.addPage([w, h]);
+    for (let l = 0; l < 25; l++) {
+      if (kind === 'two') { p.drawText('left column text line ' + l + ' abc', { x: 40, y: h - 40 - l * 20, size: 12, font: f }); p.drawText('right column text line ' + l + ' abc', { x: w / 2 + 40, y: h - 40 - l * 20, size: 12, font: f }); }
+      else if (kind === 'full') p.drawText('one full width text line number ' + l + ' that runs across the middle of the page for sure', { x: 40, y: h - 40 - l * 20, size: 12, font: f });
+      else if (kind === 'sparse' && l < 2) p.drawText('few', { x: 40, y: h - 40 - l * 20, size: 12, font: f });
+    }
+  }
+  return new Uint8Array(await d.save());
+}
+R.gutterTwoCols = await office.looksLikeSpread(await textPages('two'));
+R.gutterFullWidth = await office.looksLikeSpread(await textPages('full'));
+R.gutterSparse = await office.looksLikeSpread(await textPages('sparse'));          // too little text to judge
+R.gutterPortrait = await office.looksLikeSpread(await textPages('two', 3, [595, 842]));
+R.gutterMostly = await office.looksLikeSpread((await (async () => { const a = await textPages('two', 3), b = await textPages('full', 1); const d = await PDFDocument.load(a), e = await PDFDocument.load(b); d.addPage((await d.copyPages(e, [0]))[0]); return d.save(); })()));   // 3 of 4 judged pages (75%) have the gutter
+R.gutterHalf = await office.looksLikeSpread((await (async () => { const a = await textPages('two', 1), b = await textPages('full', 1); const d = await PDFDocument.load(a), e = await PDFDocument.load(b); d.addPage((await d.copyPages(e, [0]))[0]); return d.save(); })()));      // 1 of 2 (50%)
+R.hasLandscape = [await office.hasLandscapePages(await textPages('two', 1)), await office.hasLandscapePages(await make([[595, 842]]))];
+const splitText = await office.splitSpreads(await textPages('two', 1)); R.splitTextPages = (await info(splitText)).map(p => p.w + 'x' + p.h + ':' + p.text.slice(0, 11));
 R.before = await info(wide);
 const split = await office.splitSpreads(wide);
 R.header = String.fromCharCode(...split.slice(0, 5));
