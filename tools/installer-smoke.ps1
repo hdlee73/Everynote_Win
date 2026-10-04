@@ -6,6 +6,7 @@ param(
 )
 $ErrorActionPreference = 'Continue'
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
+$Out = (Resolve-Path $Out).Path   # absolute: installer/uninstaller processes may have another working directory
 function Esc([string]$s) { $s -replace '%','%25' -replace "`r",'%0D' -replace "`n",'%0A' }
 $script:fail = $false
 function Check([string]$name, [bool]$cond, [string]$extra = '') {
@@ -36,7 +37,11 @@ function Uninstall([string]$log, [string[]]$extra = @()) {
   if (-not (Test-Path $un)) { return -1 }
   $p = Start-Process -FilePath $un -ArgumentList (@('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$log`"") + $extra) -PassThru -Wait
   [void](Wait-Until { -not (Test-Path $exe) } 60)
-  if ($p.ExitCode -ne 0) { Dump-Log $log 'uninstall' }
+  if ($p.ExitCode -ne 0) {
+    Dump-Log $log 'uninstall'
+    Write-Host "::warning title=inno-dir::$(Esc ((Get-ChildItem $installDir -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name) $($_.Length)" }) -join '; '))"
+    try { $ev = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddMinutes(-3) } -MaxEvents 6 -ErrorAction Stop | ForEach-Object { "$($_.ProviderName): $($_.Message.Substring(0, [Math]::Min(300, $_.Message.Length)))" }; Write-Host "::warning title=inno-events::$(Esc ($ev -join ' || '))" } catch { }
+  }
   return $p.ExitCode
 }
 
