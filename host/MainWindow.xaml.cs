@@ -84,7 +84,7 @@ public partial class MainWindow : Window
             };
             core.DownloadStarting += OnDownloadStarting;
             core.ContainsFullScreenElementChanged += (s, e) => SetFullscreen(core.ContainsFullScreenElement);
-            core.DocumentTitleChanged += (s, e) => { var t = core.DocumentTitle; Title = string.IsNullOrWhiteSpace(t) ? "PDF Note" : t; };
+            core.DocumentTitleChanged += (s, e) => { var t = core.DocumentTitle; Title = string.IsNullOrWhiteSpace(t) ? "Everynote" : t; };
             core.ProcessFailed += OnProcessFailed;
             core.NavigationCompleted += (s, e) => Log.Write("navigation completed ok=" + e.IsSuccess + " status=" + e.WebErrorStatus + " url=" + core.Source);
 
@@ -131,7 +131,7 @@ public partial class MainWindow : Window
         Log.Write("WebView2 process failed: " + e.ProcessFailedKind + " " + e.Reason + " " + e.ExitCode);
         if (e.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited)
         {
-            MessageBox.Show(this, "웹 화면 엔진(WebView2)이 종료되었습니다. 앱을 다시 시작해 주세요.", "PDF Note", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(this, "웹 화면 엔진(WebView2)이 종료되었습니다. 앱을 다시 시작해 주세요.", "Everynote", MessageBoxButton.OK, MessageBoxImage.Warning);
             Close(); return;
         }
         if (e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited || e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessUnresponsive)

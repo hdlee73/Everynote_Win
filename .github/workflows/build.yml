@@ -2,7 +2,7 @@ name: Build & Release
 
 on:
   push:
-    branches: [main, host-dev]
+    branches: [main, host-dev, host-v3]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
@@ -88,14 +88,14 @@ jobs:
         id: ver
         shell: pwsh
         run: |
-          $v = '2.0.0'
+          $v = '3.0.0'
           if ("${{ github.ref }}" -like "refs/tags/v*") { $v = "${{ github.ref_name }}" -replace '^v\.?','' }
           "version=$v" >> $env:GITHUB_OUTPUT
 
       - name: Restore
         shell: pwsh
         run: |
-          dotnet restore host/PDFNote.csproj -r win-x64 2>&1 | Tee-Object -FilePath restore.log
+          dotnet restore host/Everynote.csproj -r win-x64 2>&1 | Tee-Object -FilePath restore.log
           if ($LASTEXITCODE -ne 0) {
             (Get-Content restore.log | Where-Object { $_ -match 'error' } | Select-Object -Unique -First 8) | ForEach-Object { Write-Host "::error title=restore::$($_.Trim() -replace '%','%25')" }
             exit 1
@@ -104,18 +104,18 @@ jobs:
       - name: Publish win-x64 (self-contained, single file)
         shell: pwsh
         run: |
-          dotnet publish host/PDFNote.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishReadyToRun=true -p:Version=${{ steps.ver.outputs.version }} -o out/x64 2>&1 | Tee-Object -FilePath build-x64.log
+          dotnet publish host/Everynote.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishReadyToRun=true -p:Version=${{ steps.ver.outputs.version }} -o out/x64 2>&1 | Tee-Object -FilePath build-x64.log
           if ($LASTEXITCODE -ne 0) {
             (Get-Content build-x64.log | Where-Object { $_ -match ': error ' } | ForEach-Object { $_.Trim() -replace '^.*?host[\\/]','' } | Select-Object -Unique -First 10) | ForEach-Object { Write-Host "::error title=build-x64::$($_ -replace '%','%25')" }
             exit 1
           }
-          Write-Host "::notice title=build-x64::exe $([int]((Get-Item out/x64/PDFNote.exe).Length/1MB)) MB"
+          Write-Host "::notice title=build-x64::exe $([int]((Get-Item out/x64/Everynote.exe).Length/1MB)) MB"
           (Get-Content build-x64.log | Where-Object { $_ -match ': warning ' } | ForEach-Object { $_.Trim() -replace '^.*?host[\\/]','' } | Select-Object -Unique -First 5) | ForEach-Object { Write-Host "::warning title=build-warn::$($_ -replace '%','%25')" }
 
       - name: Publish win-arm64 (self-contained, single file)
         shell: pwsh
         run: |
-          dotnet publish host/PDFNote.csproj -c Release -r win-arm64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishReadyToRun=true -p:Version=${{ steps.ver.outputs.version }} -o out/arm64 2>&1 | Tee-Object -FilePath build-arm64.log
+          dotnet publish host/Everynote.csproj -c Release -r win-arm64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishReadyToRun=true -p:Version=${{ steps.ver.outputs.version }} -o out/arm64 2>&1 | Tee-Object -FilePath build-arm64.log
           if ($LASTEXITCODE -ne 0) {
             (Get-Content build-arm64.log | Where-Object { $_ -match ': error ' } | ForEach-Object { $_.Trim() -replace '^.*?host[\\/]','' } | Select-Object -Unique -First 10) | ForEach-Object { Write-Host "::error title=build-arm64::$($_ -replace '%','%25')" }
             exit 1
@@ -133,7 +133,7 @@ jobs:
       - name: Smoke test (launch, open sample PDF, host protocol checks, screenshot)
         shell: pwsh
         run: |
-          ./tools/smoke.ps1 -Exe "$PWD\out\x64\PDFNote.exe" -Pdf "$PWD\dev\samples\sample-ko.pdf" -Out smoke -Docx "$env:SMOKE_DOCX" -Hwpx "$PWD\tools\sample.hwpx"
+          ./tools/smoke.ps1 -Exe "$PWD\out\x64\Everynote.exe" -Pdf "$PWD\dev\samples\sample-ko.pdf" -Out smoke -Docx "$env:SMOKE_DOCX" -Hwpx "$PWD\tools\sample.hwpx"
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -142,19 +142,60 @@ jobs:
           path: smoke/*
           if-no-files-found: ignore
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress 2>&1 | Select-Object -Last 4
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { $iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source }
+          if (-not $iscc -or -not (Test-Path $iscc)) { Write-Host "::error title=inno::ISCC.exe not found after choco install"; exit 1 }
+          "ISCC=$iscc" >> $env:GITHUB_ENV
+          Write-Host "::notice title=inno::$iscc $((Get-Item $iscc).VersionInfo.ProductVersion)"
+
+      - name: Compile installers (x64, arm64)
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}"
+          if (-not ("${{ github.ref }}" -like "refs/tags/*")) { $v = "dev" }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          foreach ($arch in 'x64', 'arm64') {
+            $log = "iscc-$arch.log"
+            & $env:ISCC "/DAppVersion=${{ steps.ver.outputs.version }}" "/DArch=$arch" "/DSourceExe=..\out\$arch\Everynote.exe" "/DOutputBase=Everynote-Setup-$v-$arch" "/DOutDir=..\dist" installer\Everynote.iss 2>&1 | Tee-Object -FilePath $log
+            if ($LASTEXITCODE -ne 0) {
+              (Get-Content $log | Where-Object { $_ -match 'Error|error' } | Select-Object -Unique -First 10) | ForEach-Object { Write-Host "::error title=iscc-$arch::$($_.Trim() -replace '%','%25')" }
+              exit 1
+            }
+            (Get-Content $log | Where-Object { $_ -match 'Warning' } | Select-Object -Unique -First 5) | ForEach-Object { Write-Host "::warning title=iscc-warn-$arch::$($_.Trim() -replace '%','%25')" }
+          }
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Installer smoke test (silent install, shortcuts, Apps & features, uninstall)
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}"
+          if (-not ("${{ github.ref }}" -like "refs/tags/*")) { $v = "dev" }
+          ./tools/installer-smoke.ps1 -Setup "$PWD\dist\Everynote-Setup-$v-x64.exe" -Out installer-smoke
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installer-smoke
+          path: installer-smoke/*
+          if-no-files-found: ignore
+
       - name: Collect release files
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $v = "${{ github.ref_name }}"
           if (-not ("${{ github.ref }}" -like "refs/tags/*")) { $v = "dev" }
-          Copy-Item out/x64/PDFNote.exe "dist/PDFNote-$v-win-x64.exe"
-          Copy-Item out/arm64/PDFNote.exe "dist/PDFNote-$v-win-arm64.exe"
+          Copy-Item out/x64/Everynote.exe "dist/Everynote-$v-win-x64.exe"
+          Copy-Item out/arm64/Everynote.exe "dist/Everynote-$v-win-arm64.exe"
           Get-ChildItem dist | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v4
         with:
-          name: PDFNote-windows
+          name: Everynote-windows
           path: dist/*
 
       - name: Publish GitHub Release
@@ -170,9 +211,9 @@ jobs:
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag @files --clobber
-            if (Test-Path $notes) { gh release edit $tag --notes-file $notes --title "PDF Note for Windows $tag" }
+            if (Test-Path $notes) { gh release edit $tag --notes-file $notes --title "Everynote $tag" }
           } elseif (Test-Path $notes) {
-            gh release create $tag @files --title "PDF Note for Windows $tag" --notes-file $notes --target $env:GITHUB_SHA
+            gh release create $tag @files --title "Everynote $tag" --notes-file $notes --target $env:GITHUB_SHA
           } else {
-            gh release create $tag @files --title "PDF Note for Windows $tag" --generate-notes --target $env:GITHUB_SHA
+            gh release create $tag @files --title "Everynote $tag" --generate-notes --target $env:GITHUB_SHA
           }
