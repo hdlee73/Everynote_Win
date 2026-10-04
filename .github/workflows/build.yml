@@ -77,6 +77,7 @@ jobs:
           "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
           "DO_RELEASE=$rel" >> $env:GITHUB_ENV
           Write-Host "::notice title=release-plan::tag=$tag release=$rel"
+          exit 0
 
       - name: Fetch HWP engine
         id: engine
