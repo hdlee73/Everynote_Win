@@ -9,8 +9,9 @@ New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $Out = (Resolve-Path $Out).Path   # absolute: installer/uninstaller processes may have another working directory
 function Esc([string]$s) { $s -replace '%','%25' -replace "`r",'%0D' -replace "`n",'%0A' }
 $script:fail = $false
+$script:passed = @()
 function Check([string]$name, [bool]$cond, [string]$extra = '') {
-  if ($cond) { Write-Host "::notice title=installer-ok::$name" }
+  if ($cond) { $script:passed += $name }   # one summary notice at the end (GitHub caps annotations per step)
   else { Write-Host "::error title=installer-FAILED::$name $(Esc $extra)"; $script:fail = $true }
 }
 
@@ -99,5 +100,6 @@ $code = Uninstall (Join-Path $Out 'uninstall2.log') @('/PURGEDATA')
 Check 'uninstall /PURGEDATA exit code 0' ($code -eq 0) "exit=$code"
 Check 'user data deleted with /PURGEDATA' (-not (Test-Path $dataDir)) $dataDir
 
+Write-Host "::notice title=installer-ok::$(Esc ($script:passed -join ' | '))"
 if ($script:fail) { exit 1 }
 Write-Host "::notice title=installer-smoke::all installer checks passed"
