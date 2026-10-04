@@ -123,10 +123,13 @@ export class Mark {
     this.boxW = 0; this.boxH = 0;
     /** Clockwise rotation in degrees (v1.29.0). */
     this.rot = 0;
+    /** Freehand highlight (v1.30.0): thickness as a fraction of the page height and the stroke path (x0,y0,x1,y1,… normalized); path == null is the straight band. */
+    this.thick = 0; this.path = null;
   }
   toJson() {
     return {
-      paper: i32(this.paper), fontSp: i32(this.fontSp), boxSize: i32(this.boxSize), boxW: f(this.boxW), boxH: f(this.boxH), rot: f(this.rot),
+      paper: i32(this.paper), fontSp: i32(this.fontSp), boxSize: i32(this.boxSize), boxW: f(this.boxW), boxH: f(this.boxH), rot: f(this.rot), thick: f(this.thick),
+      path: this.path ? Array.from(this.path, v => Math.round(f(f(v) * 10000)) / 10000) : null,
       page: i32(this.page), left: f(this.left), top: f(this.top), right: f(this.right), bottom: f(this.bottom),
       color: i32(this.color), note: this.note == null ? '' : this.note,
       noteOnly: !!this.noteOnly, visible: !!this.visible, minimized: !!this.minimized,
@@ -143,6 +146,9 @@ export class Mark {
     m.boxSize = Math.max(0, Math.min(2, optInt(o, 'boxSize', 1)));
     m.boxW = f(Math.max(0, Math.min(800, optFloat(o, 'boxW', 0)))); m.boxH = f(Math.max(0, Math.min(1200, optFloat(o, 'boxH', 0))));
     m.rot = optFloat(o, 'rot', 0);
+    m.thick = f(Math.max(0, Math.min(0.3, optDouble(o, 'thick', 0))));
+    const pa = optArray(o, 'path');
+    if (pa && pa.length >= 4) { m.path = new Array(pa.length - pa.length % 2); for (let i = 0; i < m.path.length; i++) m.path[i] = f(toDouble(pa[i]) ?? 0); }
     return m;
   }
 }

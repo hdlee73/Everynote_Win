@@ -202,6 +202,7 @@ export class PdfPageView {
     this.textSelectMode = false; this.showTextBounds = false;
     this.page = 0;
     this.highlightMode = false; this.memoMode = false; this.highlightColor = 0x66FFEB3B | 0;
+    this.highlightFree = false; this.highlightThick = 0.022; this.freePts = [];
     this.startX = 0; this.startY = 0; this.currentX = 0; this.currentY = 0; this.lastX = 0; this.lastY = 0;
     this.panX = 0; this.panY = 0;
     this.drawing = false; this.panning = false; this.gestureMoved = false; this.scalingOccurred = false;
@@ -394,6 +395,8 @@ export class PdfPageView {
   pageAspect() { if (!this.bitmap) return 1.414; const [w, h] = bitmapSize(this.bitmap); return w === 0 ? 1.414 : h / w; }
 
   // ---- tools -------------------------------------------------------------------------------------------------
+  /** Highlighter style: straight band or freehand stroke, and its thickness as a fraction of the page height (v1.30.0). */
+  setHighlightStyle(free, thickFraction) { this.highlightFree = !!free; this.highlightThick = Math.max(.006, Math.min(.08, +thickFraction || 0)); this.invalidate(); }
   setHighlightMode(enabled, color) {
     this.highlightMode = enabled;
     if (enabled) { this.setLassoMode(false); this.memoMode = false; this.outlineMode = false; }
@@ -421,6 +424,7 @@ export class PdfPageView {
   copyToolsFrom(other) {
     this.darkPage = other.darkPage; this._darkBitmap = null; this.applyBackground(); this.directTextSelection = other.directTextSelection;
     this.highlightMode = other.highlightMode; this.memoMode = other.memoMode; this.outlineMode = other.outlineMode; this.highlightColor = other.highlightColor;
+    this.highlightFree = other.highlightFree; this.highlightThick = other.highlightThick;
     this.inkMode = other.inkMode; this.inkColor = other.inkColor; this.inkWidth = other.inkWidth; this.inkPen = other.inkPen; this.fingerInk = other.fingerInk;
     this.pageSwipeEnabled = other.pageSwipeEnabled; this.verticalPageSwipe = other.verticalPageSwipe; this.lassoShape = other.lassoShape;
     if (this.lassoMode !== other.lassoMode) { this.lassoMode = other.lassoMode; this.clearLassoSelection(); }
@@ -467,7 +471,7 @@ export class PdfPageView {
   clearSearchHighlights() { this.searchPage = -1; this.searchBoxes = []; this.searchCurrent = null; this.invalidate(); }
 
   // ---- geometry ----------------------------------------------------------------------------------------------
-  highlightHeight(dest) { return Math.max(12, dest.height() * 0.022); }
+  highlightHeight(dest) { return Math.max(6, dest.height() * this.highlightThick); }
   /** Finds the paper colour and the content box (Java analyze()). Cached per bitmap. */
   analyze() {
     this.bounds.set(new RectF(0, 0, 1, 1)); this.crop.set(new RectF(0, 0, 1, 1)); this._paper = 0xFFFFFFFF | 0;
@@ -748,17 +752,16 @@ export class PdfPageView {
         fillCircle(ctx, dest.left + first.left * dw, dest.top + first.bottom * dh, handle, 0xFF007AFF);
         fillCircle(ctx, dest.left + last.right * dw, dest.top + last.bottom * dh, handle, 0xFF007AFF);
       }
-      if (this.marks) for (const m of this.marks) if (m.page === this.page && !m.noteOnly) {
-        ctx.fillStyle = argb(m.color);
-        ctx.fillRect(dest.left + m.left * dw, dest.top + m.top * dh, (m.right - m.left) * dw, (m.bottom - m.top) * dh);
-      }
+      if (this.marks) for (const m of this.marks) if (m.page === this.page && !m.noteOnly) AnnotationPainter.highlight(ctx, dest, m);
       if (this.strokes) for (const s of this.strokes) if (s.page === this.page) AnnotationPainter.stroke(ctx, dest, s);
       this.memoHitBoxes.clear();
       if (this.marks) for (const m of this.marks) if (m.page === this.page && m.visible && (m.noteOnly || (m.note != null && m.note.length > 0))) this._drawMemo(ctx, dest, m);
       this.noteHitBoxes.clear();
       if (this.translations) for (const n of this.translations) if (n.page === this.page && n.visible) this._drawTranslation(ctx, dest, n);
       this._drawMemoSelection(ctx);
-      if (!sup && this.drawing) {
+      if (!sup && this.drawing && this.highlightFree) {
+        if (this.freePts.length > 1) AnnotationPainter.freePath(ctx, dest, this.freePts, this.highlightHeight(dest), this.highlightColor | 0);
+      } else if (!sup && this.drawing) {
         ctx.fillStyle = argb(this.highlightColor);
         const centerY = (this.startY + this.currentY) / 2, half = this.highlightHeight(dest) / 2;
         const l = Math.min(this.startX, this.currentX), r = Math.max(this.startX, this.currentX);
@@ -1082,6 +1085,18 @@ export class PdfPageView {
     if (this.marks) for (let i = this.marks.length - 1; i >= 0; i--) {
       const m = this.marks[i]; if (m.page !== this.page || m.noteOnly) continue;
       const mx = 0.004;
+      if (m.path && m.path.length >= 4 && m.thick > 0) {
+        const hw = m.thick / 2 + mx; let hit = false;
+        for (let k = 0; k + 1 < m.path.length && !hit; k += 2) {
+          const ax = m.path[k], ay = m.path[k + 1], bx = k + 3 < m.path.length ? m.path[k + 2] : ax, by = k + 3 < m.path.length ? m.path[k + 3] : ay;
+          // distance in page-height units (x scaled by the aspect ratio)
+          const asp = dest.width() / dest.height(), px = x * asp, py = y, X0 = ax * asp, Y0 = ay, X1 = bx * asp, Y1 = by, vx = X1 - X0, vy = Y1 - Y0, L2 = vx * vx + vy * vy;
+          const t = L2 > 0 ? Math.max(0, Math.min(1, ((px - X0) * vx + (py - Y0) * vy) / L2)) : 0;
+          if (Math.hypot(px - (X0 + t * vx), py - (Y0 + t * vy)) <= hw) hit = true;
+        }
+        if (hit) { this.marks.splice(i, 1); this._L('onInkChanged'); this.invalidate(); return; }
+        continue;
+      }
       if (x >= m.left - mx && x <= m.right + mx && y >= m.top - mx && y <= m.bottom + mx) { this.marks.splice(i, 1); this._L('onInkChanged'); this.invalidate(); return; }
     }
   }
@@ -1318,6 +1333,7 @@ export class PdfPageView {
       this.gestureMoved = false; this.scalingOccurred = false;
       this.bodySwipeCandidate = this._swipeEligible(e) && this.scale <= 1;
       this.drawing = this.highlightMode && dest.contains(this.startX, this.startY);
+      if (this.drawing && this.highlightFree) this.freePts = [[this.startX, this.startY]];
       this.selectionStartRegion = (!this.drawing && !this.memoMode && !this.outlineMode && this.inkMode === 0) ? this.textRegionAt(this.startX, this.startY, dest) : null;
       this.selectionEndRegion = this.selectionStartRegion; this.selectionCandidate = this.selectionStartRegion != null; this.selectingText = false;
       if (this.selectionCandidate) this._beginTimer = setTimeout(() => this._beginTextSelection(), 420);
@@ -1379,7 +1395,14 @@ export class PdfPageView {
       }
       return true;
     }
-    if (am === MOVE && this.drawing) { this.currentX = e.x; this.currentY = e.y; this.invalidate(); return true; }
+    if (am === MOVE && this.drawing) {
+      this.currentX = e.x; this.currentY = e.y;
+      if (this.highlightFree) {
+        const fx = Math.max(dest.left, Math.min(dest.right, e.x)), fy = Math.max(dest.top, Math.min(dest.bottom, e.y)), lp = this.freePts[this.freePts.length - 1];
+        if (!lp || Math.hypot(fx - lp[0], fy - lp[1]) >= 3) this.freePts.push([fx, fy]);
+      }
+      this.invalidate(); return true;
+    }
     if (am === MOVE && this.panning && e.pointerCount === 1) {
       if (!this.gestureMoved && Math.hypot(e.x - this.startX, e.y - this.startY) <= this.touchSlop()) return true;
       const dx = e.x - this.lastX, dy = e.y - this.lastY;
@@ -1412,14 +1435,28 @@ export class PdfPageView {
       }
       if (this.drawing) {
         this.currentX = Math.max(dest.left, Math.min(dest.right, e.x)); this.currentY = Math.max(dest.top, Math.min(dest.bottom, e.y));
-        if (Math.abs(this.currentX - this.startX) > 12) {
+        if (this.highlightFree) {
+          if (this.freePts.length >= 2) {
+            const m = new Mark(); m.page = this.page; m.color = this.highlightColor; m.thick = this.highlightThick;
+            let pts = this.freePts; const cap = 600;
+            if (pts.length > cap) { const thin = []; for (let i = 0; i < cap; i++) thin.push(pts[Math.round(i * (pts.length - 1) / (cap - 1))]); pts = thin; }
+            m.path = []; let minX = 1, minY = 1, maxX = 0, maxY = 0;
+            for (const q of pts) {
+              const nx = (q[0] - dest.left) / dest.width(), ny = (q[1] - dest.top) / dest.height();
+              m.path.push(nx, ny); minX = Math.min(minX, nx); maxX = Math.max(maxX, nx); minY = Math.min(minY, ny); maxY = Math.max(maxY, ny);
+            }
+            const hx = this.highlightThick * dest.height() / 2 / dest.width(), hy = this.highlightThick / 2;
+            m.left = Math.max(0, minX - hx); m.right = Math.min(1, maxX + hx); m.top = Math.max(0, minY - hy); m.bottom = Math.min(1, maxY + hy);
+            this._L('onHighlightCreated', m);
+          }
+        } else if (Math.abs(this.currentX - this.startX) > 12) {
           const m = new Mark(); m.page = this.page;
           m.left = (Math.min(this.startX, this.currentX) - dest.left) / dest.width(); m.right = (Math.max(this.startX, this.currentX) - dest.left) / dest.width();
           const centerY = (this.startY + this.currentY) / 2, half = this.highlightHeight(dest) / 2;
           m.top = (Math.max(dest.top, centerY - half) - dest.top) / dest.height(); m.bottom = (Math.min(dest.bottom, centerY + half) - dest.top) / dest.height();
           m.color = this.highlightColor; this._L('onHighlightCreated', m);
         }
-        this.drawing = false; this.invalidate(); return true;
+        this.freePts = []; this.drawing = false; this.invalidate(); return true;
       }
       if (Math.hypot(e.x - this.startX, e.y - this.startY) < 20 && this.memoMode && dest.contains(e.x, e.y)) {
         this._L('onMemoPointRequested', this.page, (e.x - dest.left) / dest.width(), (e.y - dest.top) / dest.height()); return true;

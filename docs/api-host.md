@@ -60,6 +60,7 @@ const token = makeCancelToken();                       // token.cancel() aborts;
 const pdf = await convertHwp(bytes /*Uint8Array*/, text => setStatus(text), token);   // -> Uint8Array
 const { pdf: path } = await convertOffice(path, 'docx', text => setStatus(text), token);
 ```
+* `looksLikeSpread(pdfBytes)` / `splitSpreads(pdfBytes)` (v1.30.0, pdf-lib): the first <= 3 pages all landscape with width >= 1000pt and > 1.25 x height -> ask to split; `splitSpreads` cuts every unrotated landscape page at the middle into left/right pages (duplicated page dict + MediaBox/CropBox, text kept) and resolves to new bytes; `app.convertHwp` falls back to the unsplit PDF on error.
 * `convertHwp` runs rhwptopdf in a Blob-URL Worker (engine text + wasm fetched from `hwp/rhwptopdf.umd.js` / `_bg.wasm`; works even if the
   worker cannot fetch). Fonts read from `C:\Windows\Fonts` through `fs.url`: `batang.ttc`, `malgunbd.ttf`, `malgun.ttf` (+`gulim.ttc` when
   Batang or Malgun is missing); none readable -> `기기에서 변환용 글꼴을 읽지 못했습니다`. Limits like Android: 48 MiB input

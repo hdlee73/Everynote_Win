@@ -183,3 +183,40 @@ export async function convertHwp(bytes, onStatus = noop, cancelToken = null) {
     if (blobUrl) URL.revokeObjectURL(blobUrl);
   }
 }
+
+// ---------------------------------------------------------------- two-page spreads (Android v1.30.0 HwpConversion.looksLikeSpread / splitSpreads)
+const PDFLIB_URL = '../vendor/pdflib/pdf-lib.esm.min.js';
+const loadPdfLib = () => import(PDFLIB_URL);
+const effectiveSize = (page) => {
+  const box = page.getCropBox(), rot = ((page.getRotation().angle % 360) + 360) % 360;
+  return rot % 180 === 0 ? { w: box.width, h: box.height } : { w: box.height, h: box.width };
+};
+
+/** True when the first (up to) three pages are all very wide landscape pages (width >= 1000pt and > 1.25 x height), i.e. probably two printed pages side by side. Never throws. */
+export async function looksLikeSpread(pdfBytes) {
+  try {
+    const { PDFDocument } = await loadPdfLib();
+    const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true, updateMetadata: false, throwOnInvalidObject: false });
+    const n = Math.min(3, doc.getPageCount()); if (n === 0) return false;
+    for (let i = 0; i < n; i++) { const { w, h } = effectiveSize(doc.getPage(i)); if (!(w >= 1000 && w > h * 1.25)) return false; }
+    return true;
+  } catch (e) { return false; }
+}
+
+/** Cuts every unrotated landscape page in the middle into a left and a right page (same content stream, two media/crop boxes). Resolves to the new PDF bytes. */
+export async function splitSpreads(pdfBytes) {
+  const { PDFDocument, PDFPage } = await loadPdfLib();
+  const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true, updateMetadata: false });
+  const pages = doc.getPages();
+  for (const page of pages) {
+    const box = page.getCropBox();
+    if (page.getRotation().angle % 180 !== 0 || box.width <= box.height) continue;
+    const mid = box.x + box.width / 2, index = doc.getPages().indexOf(page);
+    const dup = page.node.clone(doc.context), ref = doc.context.register(dup);
+    const right = PDFPage.of(dup, ref, doc);
+    page.setMediaBox(box.x, box.y, mid - box.x, box.height); page.setCropBox(box.x, box.y, mid - box.x, box.height);
+    right.setMediaBox(mid, box.y, box.x + box.width - mid, box.height); right.setCropBox(mid, box.y, box.x + box.width - mid, box.height);
+    doc.insertPage(index + 1, right);
+  }
+  return await doc.save({ useObjectStreams: false });
+}

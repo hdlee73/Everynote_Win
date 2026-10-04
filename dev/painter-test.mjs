@@ -16,6 +16,12 @@ ok(done.v127.minG >= 170 && done.v127.minG <= 178, 'translucent loop is one flat
 ok(done.v3.diff === 0, 'text() == textBlock() with default options (refactor keeps pixels)');
 ok(done.v3.boxes === 3, 'check list: one tappable marker per line (' + done.v3.boxes + ')');
 ok(done.v3.stretch.stretchedTopRowInk > 20 && done.v3.stretch.letterboxedTopRowInk < 3, 'stretch fills the whole box, default keeps the ratio (' + JSON.stringify(done.v3.stretch) + ')');
+const v = done.v130, white = a => a.join() === '255,255,255', eq = (a, b) => a.every((x, i) => Math.abs(x - b[i]) <= 1);
+ok(!white(v.single) && eq(v.single, v.cross), 'freehand highlight: self-crossing is one flat tone ' + v.single + ' vs ' + v.cross);
+ok(!white(v.capEnd), 'freehand highlight: round cap past the first point ' + v.capEnd);
+ok(!white(v.dot), 'freehand highlight: one-point-ish path still paints a round dot ' + v.dot);
+ok(white(v.outside) && white(v.noteOnlyPx), 'freehand highlight: nothing outside the stroke, note-only marks draw no highlight');
+ok(!white(v.band), 'straight band still painted as a flat rectangle ' + v.band);
 fs.mkdirSync(path.join(root, 'dev/out'), { recursive: true });
-for (const id of ['all-light', 'all-dark', 'v127', 'v3text', 'v3text-dark']) await (await pg.$('#' + id)).screenshot({ path: path.join(root, `dev/out/painter-${id}.png`) });
+for (const id of ['all-light', 'all-dark', 'v127', 'v3text', 'v3text-dark', 'v130']) await (await pg.$('#' + id)).screenshot({ path: path.join(root, `dev/out/painter-${id}.png`) });
 await b.close(); srv.close(); if (bad) process.exitCode = 1;

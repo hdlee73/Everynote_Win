@@ -113,6 +113,51 @@ const hm = await ev(() => { const l = T.log.find(l => l.n === 'onHighlightCreate
 check('highlight rect', Math.abs(hm[0] - 0.15) < 0.01 && Math.abs(hm[2] - 0.6) < 0.01 && hm[3] - hm[1] > 0.015 && hm[3] - hm[1] < 0.03, JSON.stringify(hm.map(v => +v.toFixed(3))));
 await ev(() => T.view.setHighlightMode(false));
 
+// --- v1.30.0 freehand highlight + thickness ---------------------------------------------------------------
+await ev(() => { T.view.setHighlightStyle(false, 0.05); });
+check('setHighlightStyle clamps (.006..0.08)', await ev(() => { T.view.setHighlightStyle(true, 0.5); const hi = T.view.highlightThick; T.view.setHighlightStyle(true, 0.001); const lo = T.view.highlightThick; T.view.setHighlightStyle(false, 0.022); return hi === 0.08 && lo === 0.006; }));
+await ev(() => { T.view.setHighlightStyle(false, 0.05); T.view.setHighlightMode(true, 0x66FFEB3B | 0); }); await clearLog();
+await drag(line(px(0.15), py(0.25), px(0.6), py(0.25), 8), { type: 'touch', id: 7 });
+const th = await ev(() => { const m = T.log.filter(l => l.n === 'onHighlightCreated').pop().a[0]; return [m.top, m.bottom, m.path]; });
+check('straight band height follows thickness (max(6,h*thick))', Math.abs((th[1] - th[0]) - 0.05) < 0.004 && th[2] == null, JSON.stringify(th.slice(0, 2).map(v => +v.toFixed(3))));
+await ev(() => { T.view.setHighlightStyle(true, 0.03); }); await clearLog();
+const wave = Array.from({ length: 40 }, (_, i) => [px(0.2 + 0.5 * i / 39), py(0.35 + 0.05 * Math.sin(i / 39 * Math.PI * 4))]);
+await ev(() => { window.__freeStart = performance.now(); });
+await ptr('pointerdown', wave[0][0], wave[0][1], { type: 'touch', id: 8 });
+for (const q of wave.slice(1)) await ptr('pointermove', q[0], q[1], { type: 'touch', id: 8 });
+await ptr('pointermove', wave[39][0] + 1, wave[39][1], { type: 'touch', id: 8 });   // < 3 px from the last point: not added
+await shot('hl-free-live');
+check('live freehand stroke collects points >= 3px apart', await ev(() => T.view.freePts.length > 20 && T.view.freePts.length <= 41), String(await ev(() => T.view.freePts.length)));
+await ptr('pointerup', wave[39][0], wave[39][1], { type: 'touch', id: 8 });
+const fm = await ev(() => { const m = T.log.filter(l => l.n === 'onHighlightCreated').pop().a[0]; T.store.marks.push(m); T.view.invalidate(); return { path: m.path, thick: m.thick, l: m.left, t: m.top, r: m.right, b: m.bottom, color: m.color }; });
+check('freehand mark: thick + path (even count, normalized 0..1)', fm.thick === 0.03 && fm.path.length >= 4 && fm.path.length % 2 === 0 && fm.path.every(v => v >= 0 && v <= 1), `n=${fm.path.length / 2}`);
+const ys = fm.path.filter((_, i) => i % 2), xs = fm.path.filter((_, i) => i % 2 === 0);
+check('freehand bbox includes half thickness', Math.abs(fm.t - (Math.min(...ys) - 0.015)) < 1e-6 && Math.abs(fm.b - (Math.max(...ys) + 0.015)) < 1e-6 && fm.l < Math.min(...xs) && fm.r > Math.max(...xs));
+check('freehand stroke cleared after release', (await ev(() => T.view.freePts.length)) === 0);
+// long stroke thins to <= 600 points
+await clearLog();
+const big = Array.from({ length: 1500 }, (_, i) => [px(0.05 + 0.9 * (i % 750) / 750), py(0.55 + 0.002 * Math.floor(i / 750) + 0.2 * Math.sin(i / 60))]);
+await ptr('pointerdown', big[0][0], big[0][1], { type: 'touch', id: 9 });
+for (const q of big.slice(1)) await ptr('pointermove', q[0], q[1], { type: 'touch', id: 9 });
+await ptr('pointerup', big[1499][0], big[1499][1], { type: 'touch', id: 9 });
+check('long freehand stroke thinned to <= 600 points', await ev(() => { const m = T.log.filter(l => l.n === 'onHighlightCreated').pop()?.a[0]; return !!m && m.path.length <= 1200 && m.path.length >= 400; }));
+// tap without moving makes nothing
+await clearLog(); await drag([[px(0.5), py(0.9)], [px(0.5), py(0.9)]], { type: 'touch', id: 10 });
+check('freehand tap without movement creates no mark', (await logOf('onHighlightCreated')) === 0);
+await ev(() => { T.view.setHighlightMode(false); T.view.setHighlightStyle(false, 0.022); });
+await shot('hl-free-done');
+// eraser removes a freehand mark when touched on the stroke (and not on empty page area inside its bbox)
+const nMarks = await ev(() => T.store.marks.length);
+await ev(() => T.view.setInkTool(2, 0xFF1C1C1E | 0, 0.004)); await clearLog();
+await drag([[px(0.25), py(0.5) - 3], [px(0.25) + 1, py(0.5) - 3]], { type: 'pen' });   // inside the wave's bbox, far from its stroke
+check('eraser ignores empty area inside a freehand bbox', (await ev(() => T.store.marks.length)) === nMarks);
+const hit = fm.path.slice(20, 22);
+await drag([[px(hit[0]), py(hit[1])], [px(hit[0]) + 1, py(hit[1])]], { type: 'pen' });
+check('eraser removes the freehand highlight on its stroke', (await ev(() => T.store.marks.length)) === nMarks - 1 && (await logOf('onInkChanged')) >= 1);
+await ev(() => T.view.setInkTool(0, 0xFF1C1C1E | 0, 0.004));
+// copyToolsFrom carries style
+check('copyToolsFrom copies freehand style + thickness', await ev(() => { T.view.setHighlightStyle(true, 0.04); const o = new T.view.constructor(T.view.listener || {}); o.copyToolsFrom(T.view); const r = o.highlightFree === true && o.highlightThick === 0.04; T.view.setHighlightStyle(false, 0.022); return r; }));
+
 // --- memo + outline ---------------------------------------------------------------------------------------
 await ev(() => T.view.setMemoMode(true)); await clearLog();
 await drag([[px(0.3), py(0.5)], [px(0.3), py(0.5)]], { type: 'touch', id: 5 });

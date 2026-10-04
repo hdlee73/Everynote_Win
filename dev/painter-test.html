@@ -140,5 +140,19 @@ add2({ kind: 'text', rot: 40, text: 'text boxes do not rotate', left: .55, top: 
   const top = H * .5 + 3, belowFit = nonWhite(W * .05 + 3, top, W * .3 - 3, top + 6), belowStretch = nonWhite(W * .35 + 3, top, W * .6 - 3, top + 6);
   window.__v3 = { diff, boxes: bx.length, stretch: { letterboxedTopRowInk: belowFit, stretchedTopRowInk: belowStretch }, strike: !!s3.elements[2].strike };
 }
-window.__done = { fh, w: W, h: H, v127: window.__v127, v3: window.__v3 };
+{
+  // v1.30.0 freehand highlight: round caps, flat alpha when the stroke crosses itself, straight band unchanged
+  const s4 = new AnnotationStore(); const MK = (o) => { const m = new Mark(); Object.assign(m, { page: 0, left: 0, top: 0, right: 0, bottom: 0, color: 0x66FFEB3B | 0 }, o); s4.marks.push(m); return m; };
+  MK({ left: .05, top: .05, right: .6, bottom: .08 });                                           // straight band (v1.29 look)
+  MK({ path: [.1, .2, .5, .2, .3, .26, .3, .14, .3, .2], thick: .03, color: 0x80FF3B30 | 0 });    // self-crossing freehand (flat alpha)
+  MK({ path: [.1, .4, .2, .5, .35, .38, .5, .55, .7, .4], thick: .05, color: 0x6634C759 | 0 });   // thick curve
+  MK({ path: [.15, .7, .15, .7001], thick: .04, color: 0x66007AFF | 0 });                          // dot (round cap)
+  MK({ noteOnly: true, left: .9, top: .6, right: .99, bottom: .7, color: 0x66FF0000 | 0 });         // note-only draws nothing
+  const c = paper(false), g = c.getContext('2d'); AnnotationPainter.dark = false; AnnotationPainter.all(g, new RectF(0, 0, W, H), s4, 0);
+  const wrap = document.createElement('div'); wrap.id = 'v130'; wrap.append(Object.assign(document.createElement('div'), { textContent: 'v130 freehand highlights' }), c); out.append(wrap);
+  const rgb = (x, y) => Array.from(g.getImageData(Math.round(x), Math.round(y), 1, 1).data).slice(0, 3);
+  const single = rgb(W * .4, H * .2), cross = rgb(W * .3, H * .2), outside = rgb(W * .9, H * .9), capEnd = rgb(W * .1 - H * .012, H * .2);
+  window.__v130 = { single, cross, outside, capEnd, dot: rgb(W * .15, H * .7), noteOnlyPx: rgb(W * .95, H * .65), band: rgb(W * .3, H * .065) };
+}
+window.__done = { fh, w: W, h: H, v127: window.__v127, v3: window.__v3, v130: window.__v130 };
 </script>

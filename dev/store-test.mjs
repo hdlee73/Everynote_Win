@@ -17,6 +17,22 @@ const uuid = () => crypto.randomUUID();
 const el = (o = {}) => Object.assign(new PageElement(), o);
 const rt = e => PageElement.fromJson(JSON.parse(stringify(e.toJson())));
 
+// ------------------------------------------------------------------ v1.30.0 freehand highlight
+test('v1.30: Mark.thick / Mark.path JSON keys, rounding, clamps and validation like Android', () => {
+  const m = new Mark(); m.thick = 0.022; m.path = [0.123456, 0.5, 0.2, 0.30004, 1, 0];
+  const j = stringify(m.toJson());
+  assert.ok(j.includes('"rot":0,"thick":0.02199999988079071,"path":[0.1235,0.5,0.2,0.3,1,0],"page":0'), j);
+  const back = Mark.fromJson(JSON.parse(j)); near(back.thick, 0.022); assert.equal(back.path.length, 6); near(back.path[0], 0.1235);
+  assert.ok(!stringify(new Mark().toJson()).includes('"path"'));                        // straight band: no path key
+  assert.ok(stringify(new Mark().toJson()).includes('"thick":0,'));                      // thick is always written
+  assert.equal(Mark.fromJson({ thick: 0.9 }).thick, Math.fround(0.3)); assert.equal(Mark.fromJson({ thick: -1 }).thick, 0);
+  assert.equal(Mark.fromJson({ path: [0.1, 0.2, 0.3] }).path, null);                      // needs >= 4 values
+  assert.equal(Mark.fromJson({ path: [0.1, 0.2, 0.3, 0.4, 0.5] }).path.length, 4);        // odd trailing value dropped
+  assert.equal(Mark.fromJson({}).path, null); assert.equal(Mark.fromJson({}).thick, 0);
+  const s = new AnnotationStore(); s.marks.push(m);
+  const s2 = new AnnotationStore(); s2.importJson(s.exportJson('x', 'x.pdf'), 3); assert.equal(s2.marks[0].path.length, 6);
+});
+
 // ------------------------------------------------------------------ StickyStyleTest
 test('stickyStyleSurvivesSaveAndLoad', () => {
   const m = new Mark(); m.note = '메모'; m.noteOnly = true; m.paper = 0xFFCFE8FF | 0; m.fontSp = 20; m.boxSize = 2;
@@ -218,6 +234,7 @@ test('exportJson matches org.json toString(2) byte for byte', () => {
       "boxW": 0,
       "boxH": 0,
       "rot": 0,
+      "thick": 0,
       "page": 2,
       "left": 0.10000000149011612,
       "top": 0.25,
@@ -374,7 +391,7 @@ test('v1.27: element rot, stroke pen, memo boxW/boxH round-trip with Android key
   assert.equal(InkStroke.fromJson(st.toJson()).pen, 3);
   assert.equal(InkStroke.fromJson({ pen: 9 }).pen, 4); assert.equal(InkStroke.fromJson({ pen: -2 }).pen, 0); assert.equal(InkStroke.fromJson({}).pen, 0);
   const m = new Mark(); m.boxW = 180.5; m.boxH = 90;
-  assert.equal(stringify(m.toJson()).startsWith('{"paper":-3162,"fontSp":13,"boxSize":1,"boxW":180.5,"boxH":90,"rot":0,"page":0'), true);
+  assert.equal(stringify(m.toJson()).startsWith('{"paper":-3162,"fontSp":13,"boxSize":1,"boxW":180.5,"boxH":90,"rot":0,"thick":0,"page":0'), true);
   const back = Mark.fromJson(m.toJson()); assert.equal(back.boxW, 180.5); assert.equal(back.boxH, 90);
   const big = Mark.fromJson({ boxW: 5000, boxH: 5000 }); assert.equal(big.boxW, 800); assert.equal(big.boxH, 1200);
   const neg = Mark.fromJson({ boxW: -4, boxH: -4 }); assert.equal(neg.boxW, 0); assert.equal(neg.boxH, 0);
@@ -417,7 +434,7 @@ test('v1.29: plain-text list markers (kind, length, next, toggleCheck)', () => {
   assert.equal(e.toggleCheck(1), false); assert.equal(e.text, '\u2611 a\n\u2610 b'); assert.equal(e.toggleCheck(9), false);
 });
 test('v1.29: Mark.rot and TranslationNote boxW/boxH/rot keys and order', () => {
-  const m = new Mark(); m.rot = 30; assert.ok(stringify(m.toJson()).includes('"boxH":0,"rot":30,"page":0'));
+  const m = new Mark(); m.rot = 30; assert.ok(stringify(m.toJson()).includes('"boxH":0,"rot":30,"thick":0,"page":0'));
   assert.equal(Mark.fromJson(m.toJson()).rot, 30); assert.equal(Mark.fromJson({}).rot, 0);
   const n = new TranslationNote(); n.page = 1; n.boxW = 200; n.boxH = 80; n.rot = 90; n.source = 's'; n.translated = 't';
   assert.equal(stringify(n.toJson()), '{"boxW":200,"boxH":80,"rot":90,"page":1,"left":0,"top":0,"right":0,"bottom":0,"source":"s","translated":"t","visible":true,"minimized":false}');

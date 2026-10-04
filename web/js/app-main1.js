@@ -677,12 +677,22 @@ const methods = {
     AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
   },
   showHighlightMenu(anchor) {
+    const hlTint = '#' + ((this.selectedColor | 0) & 0xFFFFFF).toString(16).padStart(6, '0');
     const box = h('div', { class: 'm-menubox', style: { padding: '6px 2px 0' } });
     box.append(swatchesView(HIGHLIGHT_COLORS, () => this.selectedColor, c => {
       this.selectedColor = c | 0; this.pageView.setHighlightMode(this.highlightMode, this.selectedColor); this.syncOtherTools(); this.updateInkButton();
     }, 30, 2));
-    AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
+    // thickness slider (Android v1.30.0): "굵기 N", 0.008 + v * 0.0024, 31 steps
+    const label = h('div', { class: 'm-oplabel', dataset: { tag: 'highlight_thick_label' } }, '굵기 ' + Math.round(this.highlightThick * 1000));
+    const bar = h('input', { type: 'range', min: 0, max: 30, step: 1, class: 'm-opbar', 'aria-label': '굵기', title: '굵기', dataset: { tag: 'highlight_thick' } });
+    bar.value = Math.round((this.highlightThick - .008) / .0024);
+    bar.addEventListener('input', () => { const t = .008 + (+bar.value) * .0024; label.textContent = '굵기 ' + Math.round(t * 1000); this.highlightThick = t; this.applyHighlightStyle(); });
+    box.append(h('div', { class: 'm-opacity' }, label, bar));
+    AnchoredMenu.show(anchor, true, [Row.custom(box), Row.divider(),
+      new Row('직선', 'ic_line', () => { this.highlightFree = false; this.applyHighlightStyle(); }).selected(!this.highlightFree).tint(hlTint),
+      new Row('자유형', 'ic_ink', () => { this.highlightFree = true; this.applyHighlightStyle(); }).selected(this.highlightFree).tint(hlTint)], null);
   },
+  applyHighlightStyle() { this.pageView.setHighlightStyle(this.highlightFree, this.highlightThick); this.syncOtherTools(); },
 
   // ============================================================ menus
   showViewMenu(anchor) {
@@ -827,12 +837,21 @@ const methods = {
     }
     this.officeToken = null; status.textContent = '문서함에 저장하는 중';
     dialog.getButton(BUTTON_NEGATIVE).classList.add('m-dim-btn');
+    // Android v1.30.0: very wide landscape pages (A3/B4 and up) usually hold two printed pages side by side
+    let split = false;
+    if (await office.looksLikeSpread(pdf)) {
+      split = await new Promise(res => new AlertDialog.Builder().setTitle('두 쪽 보기 문서')
+        .setMessage('가로로 넓은 면에 두 쪽이 나란히 들어 있는 문서로 보입니다. 한 쪽씩 나누어 열까요?').setCancelable(false)
+        .setPositiveButton('한 쪽씩 나누기', () => res(true)).setNegativeButton('그대로 열기', () => res(false)).show());
+    }
+    status.textContent = '문서함에 저장하는 중';
+    if (split) { try { pdf = await office.splitSpreads(pdf); } catch (e) { split = false; } }   // fall back to the unsplit PDF
     let tmp = null;
     try {
       tmp = await this.tempFile('.pdf'); await host.writeBytes(tmp, pdf);
       const saved = await this.importConverted(tmp, name);
       this.officeConverting = false; dialog.dismiss();
-      await this.openPdf(saved); toast('문서함에 PDF로 변환해 저장했습니다');
+      await this.openPdf(saved); toast(split ? '두 쪽을 한 쪽씩 나누어 저장했습니다' : '문서함에 PDF로 변환해 저장했습니다');
     } catch (e) { this.officeConverting = false; dialog.dismiss(); toast('PDF 저장 실패: ' + (e && e.message || e)); }
     finally { if (tmp) host.delete(tmp).catch(() => {}); }
   },
@@ -1151,7 +1170,7 @@ const methods = {
     if (this.renderer == null) return;
     this.highlightMode = !this.highlightMode; this.memoMode = this.outlineMode = false; this.stopInk(); this.updateToolStates();
     this.pageView.setMemoMode(false); this.pageView.setOutlineMode(false); this.pageView.setHighlightMode(this.highlightMode, this.selectedColor);
-    toast(this.highlightMode ? '문장을 따라 좌우로 드래그하세요' : '하이라이트를 종료했습니다');
+    toast(this.highlightMode ? (this.highlightFree ? '원하는 모양대로 그리세요' : '문장을 따라 좌우로 드래그하세요') : '하이라이트를 종료했습니다');
   },
   toggleMemoMode() {
     this.placementKind = ''; if (this.renderer == null) return;

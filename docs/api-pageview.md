@@ -26,7 +26,7 @@ CSS: `css/pageview.css` (optional, all layout is also inline). The view paints i
 `showPage(canvas, pageNumber, marks, strokes, translations)` (the arrays are the store's live arrays; strokes are pushed/spliced in place), `clearPage()`,
 `setAnnotationStore(store)`, `selectElement(el|null)`, `selectedElement()`, `setSearchHighlights(page, others[RectF], current|null)`, `clearSearchHighlights()`,
 `setDarkPage(b)`, `isDarkPage()`, `setCrop(RectF|null)`, `focusOnPoint(x,y)`,
-`setHighlightMode(enabled, color)`, `setMemoMode(b)`, `setOutlineMode(b)`, `setInkTool(mode, color, width)` (mode 0 none, 1 pen, 2 eraser, 3 straight line),
+`setHighlightMode(enabled, color)`, `setHighlightStyle(free, thickFraction)` (v1.30.0: straight band or freehand stroke; thickness = fraction of page height, clamped .006..0.08, default 0.022; the straight band is `max(6, h*thick)` high; copied by `copyToolsFrom`), `setMemoMode(b)`, `setOutlineMode(b)`, `setInkTool(mode, color, width)` (mode 0 none, 1 pen, 2 eraser, 3 straight line),
 `setLassoMode(b)`, `isLassoMode()`, `setLassoShape(0|1|2)`, `getLassoShape()`, `clearLassoSelection()`, `captureLasso()` -> canvas|null, `lassoText()` -> string, `getLassoPoints()` (normalized copy),
 `setDirectTextSelection(b)`, `setTextRegions(regions, showBounds)`, `stopTextSelection()`, `clearTextSelectionOverlay()`,
 `setFingerInk(b)`, `setPageSwipeEnabled(b)`, `setVerticalPageSwipe(b)`, `setPageDrag(handler|null)`, `copyToolsFrom(otherView)`.
@@ -63,7 +63,8 @@ Everything else (highlight rects, per-segment pen strokes, stickies, selection/l
 * **Pen type**: `view.setInkPen(pen)` (0 ballpoint, 1 pencil, 2 fountain, 3 brush, 4 felt marker; clamped), copied by `copyToolsFrom`. New strokes get `stroke.pen`. `AnnotationPainter.PEN_NAMES = ['볼펜','연필','만년필','붓','사인펜']`. Call `setInkPen` after `setInkTool`; colour alpha (`inkColor >>> 24`) is the stroke opacity.
 * **Element rotation**: `AnnotationPainter.rotates(e)` (image/sticker/shape/table). Selected elements of those kinds show a stem + round `↻` knob 28 px above the top edge (hit radius 24); dragging turns `e.rot` (degrees clockwise, 15° snap within 4°), `onInkChanged` fires on release (cancel restores). Taps, corner handles and resize hit-test in the element's rotated frame. Extra: `view.elementContains(el, x, y)` and static `PdfPageView.unrotate(x, y, cx, cy, rot)`; `AnnotationPainter.rotateAround(ctx, deg, px, py)`.
 * **Memo resize**: first tap on an expanded memo selects it (`view.selectedMemo`, dashed frame + `↘` handle) and does NOT call `onMarkTapped`; tap again opens it (`onMarkTapped`). Dragging the handle sets `mark.boxW/boxH` (dp, min 90x48) and fires `onInkChanged`. Tapping elsewhere deselects. The UI must reset `boxW = boxH = 0` when the user picks a box size in the edit dialog (Java: `if (style[2] != origBox) mark.boxW = mark.boxH = 0`).
-* Eraser also deletes a highlight mark under the pointer (not note-only marks); strokes are drawn through `AnnotationPainter.stroke`.
+* Freehand highlight (v1.30.0): with `setHighlightStyle(true, t)` a highlight drag collects points (>= 3 px apart, clamped to the page), draws a live translucent stroke and on release thins to <= 600 points and emits `onHighlightCreated(mark)` with `mark.path`, `mark.thick = t` and a bbox that includes half the thickness. A single point creates nothing.
+* Eraser also deletes a highlight mark under the pointer (not note-only marks; for path marks it tests the distance to the stroke); strokes are drawn through `AnnotationPainter.stroke`.
 * Text recognition radius is 3 px (10 px with `directTextSelection`) instead of 16.
 
 ## v3.0.0 additions (Everynote)

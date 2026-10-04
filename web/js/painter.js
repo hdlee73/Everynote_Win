@@ -429,6 +429,40 @@ export class AnnotationPainter {
     c.save();
     try { c.globalAlpha *= Math.max(8, eff) / 255; c.imageSmoothingEnabled = true; c.drawImage(layer, 0, 0, lw, lh, L, T, lw / sx, lh / sy); } finally { c.restore(); }
   }
+  /** Freehand highlight (v1.30.0): round-capped stroke in the opaque colour, composited once with the colour's alpha so self-overlap is not darker.
+   *  pts = [[x,y],…] in canvas px, width in px. Returns false when nothing was drawn. */
+  static freePath(c, d, pts, width, color) {
+    if (!pts || pts.length < 2) return false;
+    const eff = Math.max(8, (color >>> 24) & 0xFF);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const q of pts) { if (q[0] < minX) minX = q[0]; if (q[0] > maxX) maxX = q[0]; if (q[1] < minY) minY = q[1]; if (q[1] > maxY) maxY = q[1]; }
+    const pad = width / 2 + 2;
+    const L = Math.max(d.left, minX - pad), T = Math.max(d.top, minY - pad), R = Math.min(d.right, maxX + pad), B = Math.min(d.bottom, maxY + pad);
+    if (R <= L || B <= T) return false;
+    const m = c.getTransform ? c.getTransform() : null;
+    const sx = Math.min(4, Math.max(.25, m ? Math.hypot(m.a, m.b) : 1)), sy = Math.min(4, Math.max(.25, m ? Math.hypot(m.c, m.d) : 1));
+    const lw = Math.max(1, Math.ceil((R - L) * sx)), lh = Math.max(1, Math.ceil((B - T) * sy));
+    const layer = AnnotationPainter._layer(lw, lh), g = layer.getContext('2d');
+    if (!g) return false;
+    g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, layer.width, layer.height);
+    g.setTransform(sx, 0, 0, sy, 0, 0);
+    g.strokeStyle = argb(color | 0xFF000000); g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = width;
+    g.beginPath(); g.moveTo(pts[0][0] - L, pts[0][1] - T);
+    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0] - L, pts[i][1] - T);
+    g.stroke();
+    c.save();
+    try { c.globalAlpha *= eff / 255; c.imageSmoothingEnabled = true; c.drawImage(layer, 0, 0, lw, lh, L, T, lw / sx, lh / sy); } finally { c.restore(); }
+    return true;
+  }
+  /** Paints one highlight mark: freehand path (thick > 0 and path set) or the straight band. Note-only marks draw nothing. */
+  static highlight(c, d0, m) {
+    if (m.noteOnly) return;
+    const d = RectF.from(d0), dw = d.width(), dh = d.height();
+    if (m.path && m.path.length >= 4 && m.thick > 0) {
+      const pts = []; for (let i = 0; i + 1 < m.path.length; i += 2) pts.push([d.left + m.path[i] * dw, d.top + m.path[i + 1] * dh]);
+      AnnotationPainter.freePath(c, d, pts, Math.max(2, m.thick * dh), m.color | 0);
+    } else { c.fillStyle = argb(m.color); c.fillRect(d.left + m.left * dw, d.top + m.top * dh, (m.right - m.left) * dw, (m.bottom - m.top) * dh); }
+  }
   static _layer(w, h) {
     const l = AnnotationPainter._layerCanvas || (AnnotationPainter._layerCanvas = (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(w, h) : document.createElement('canvas')));
     if (l.width < w || l.height < h) { l.width = Math.max(l.width, w); l.height = Math.max(l.height, h); }
@@ -443,7 +477,7 @@ export class AnnotationPainter {
     for (const m of store.marks) {
       if (m.page !== page) continue;
       const b = new RectF(d.left + m.left * dw, d.top + m.top * dh, d.left + m.right * dw, d.top + m.bottom * dh);
-      if (!m.noteOnly) { c.fillStyle = argb(m.color); c.fillRect(b.left, b.top, b.width(), b.height()); }
+      AnnotationPainter.highlight(c, d, m);
       if (m.visible && m.note != null && m.note !== '') {
         const note = new RectF(b.right, b.top, Math.min(d.right, b.right + dw * .35), Math.min(d.bottom, b.top + dh * .12));
         c.fillStyle = argb(0xFFFFF7D6); c.fillRect(note.left, note.top, note.width(), note.height());

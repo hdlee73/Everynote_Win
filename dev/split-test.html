@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>split test</title>
+<style>body{margin:0;background:#888;font:12px sans-serif;color:#fff}#out{display:flex;gap:8px;flex-wrap:wrap;padding:8px}canvas{background:#fff}</style></head>
+<body><div id="out"></div>
+<script type="module">
+import * as office from '/js/office.js';
+import * as pdfjs from '/vendor/pdfjs/pdf.min.mjs';
+import { PDFDocument, StandardFonts, rgb } from '/vendor/pdflib/pdf-lib.esm.min.js';
+pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs';
+
+async function make(sizes) {
+  const d = await PDFDocument.create(), f = await d.embedFont(StandardFonts.HelveticaBold);
+  sizes.forEach(([w, h, rot], i) => {
+    const p = d.addPage([w, h]); if (rot) p.setRotation({ type: 'degrees', angle: rot });
+    p.drawRectangle({ x: 0, y: 0, width: w / 2, height: h, color: rgb(.85, .93, 1) });
+    p.drawRectangle({ x: w / 2, y: 0, width: w / 2, height: h, color: rgb(1, .93, .8) });
+    p.drawText('LEFT-' + (i + 1), { x: 60, y: h - 120, size: 64, font: f });
+    p.drawText('RIGHT-' + (i + 1), { x: w / 2 + 60, y: h - 120, size: 64, font: f });
+    p.drawLine({ start: { x: w / 2, y: 0 }, end: { x: w / 2, y: h }, thickness: 3, color: rgb(1, 0, 0) });
+  });
+  return new Uint8Array(await d.save());
+}
+const info = async bytes => {
+  const doc = await pdfjs.getDocument({ data: bytes.slice() }).promise, pages = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const p = await doc.getPage(i), vp = p.getViewport({ scale: .3 }), c = document.createElement('canvas'); c.width = vp.width; c.height = vp.height;
+    await p.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise; document.getElementById('out').append(c);
+    const tc = await p.getTextContent(), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let blue = 0, orange = 0, redCol = 0;
+    for (let k = 0; k < d.length; k += 4) { if (d[k + 2] > 240 && d[k] < 230 && d[k] > 200) blue++; if (d[k] > 250 && d[k + 2] < 215 && d[k + 2] > 190) orange++; if (d[k] > 200 && d[k + 1] < 60) redCol++; }
+    pages.push({ w: Math.round(p.view[2] - p.view[0]), h: Math.round(p.view[3] - p.view[1]), text: tc.items.map(t => t.str).join(' '), blue, orange, red: redCol, cw: c.width, ch: c.height });
+  }
+  return pages;
+};
+const R = {};
+const wide = await make([[1200, 800], [1200, 800], [1200, 800], [595, 842]]);
+R.spreadWide = await office.looksLikeSpread(wide);
+R.spreadA4 = await office.looksLikeSpread(await make([[595, 842], [595, 842]]));
+R.spreadNarrowLandscape = await office.looksLikeSpread(await make([[900, 500], [900, 500]]));
+R.spreadMixed = await office.looksLikeSpread(await make([[1200, 800], [595, 842], [1200, 800]]));
+R.spreadSquarish = await office.looksLikeSpread(await make([[1100, 1000]]));           // 1100 > 1000 but < 1.25 x height
+R.spreadRotated = await office.looksLikeSpread(await make([[800, 1200, 90]]));           // rotated portrait == wide landscape
+R.spreadGarbage = await office.looksLikeSpread(new Uint8Array([1, 2, 3]));
+R.before = await info(wide);
+const split = await office.splitSpreads(wide);
+R.header = String.fromCharCode(...split.slice(0, 5));
+R.after = await info(split);
+R.rotatedKept = (await info(await office.splitSpreads(await make([[800, 1200, 90]])))).length;
+let threw = false; try { await office.splitSpreads(new Uint8Array([1, 2, 3])); } catch (e) { threw = true; } R.garbageThrows = threw;
+window.__R = R;
+</script></body></html>

@@ -156,6 +156,7 @@ check('help: 14 chapters, 55 items, left aligned, tall card', help.heads.length 
 const helpText = await ev(() => document.querySelector('.m3-help').textContent);
 check('help: Everynote name, offline section lists internet-needed + offline features', await ev(() => document.querySelector('.m3-help-title').textContent) === 'Everynote 사용법' && !/PDF Note/.test(helpText)
   && ['구글 번역', '사전 웹 검색', 'YouTube', 'WebView2', 'LibreOffice', 'Windows OCR 언어팩', '인쇄', '문서함'].every(k => helpText.includes(k)));
+check('help ch.6: 색·모양·굵기 wording of Android v1.30.0 (old wording gone)', helpText.includes('색·모양·굵기') && helpText.includes('색, 굵기 막대, 모양(직선 / 자유형)을 고를 수 있습니다') && helpText.includes('자유형은 손가락이나 펜으로 원하는 모양대로 그립니다') && !helpText.includes('색을 고를 수 있고, 무지개 칩'));
 await page.evaluate(() => document.querySelector('.m3-help-body').scrollTo(0, 99999)); await shot('21b-help-end');
 await page.click('.m3-help-ok'); await page.waitForTimeout(300);
 check('help closed', (await page.locator('.m3-help').count()) === 0);

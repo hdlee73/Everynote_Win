@@ -29,6 +29,7 @@ export class MainActivity {
     this.pageView = null; this.firstPageView = null; this.secondPageView = null;
     this.twoPage = false;
     this.selectedColor = 0x66FFDE59;
+    this.highlightFree = false; this.highlightThick = 0.022;
     this.highlightMode = false; this.memoMode = false; this.outlineMode = false; this.fullscreen = false;
     this.verticalPageSwipe = false; this.fingerInk = false; this.swipeEnabled = true;
     this.inkMode = 0; this.inkColor = 0xFF1C1C1E; this.inkWidth = 0.004;
