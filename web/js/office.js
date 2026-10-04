@@ -17,7 +17,7 @@ export const HWP_TIMEOUT_MS = 180000;
 export const OFFICE_TIMEOUT_MS = 600000;
 export const OFFICE_INSTALL_GUIDANCE =
   'Microsoft Office(Word·Excel·PowerPoint) 또는 무료 LibreOffice(libreoffice.org)를 설치하면 PDF로 자동 변환할 수 있습니다. ' +
-  '설치하지 않았다면 해당 앱에서 PDF로 내보낸 뒤 PDF Note에서 가져오세요.';
+  '설치하지 않았다면 해당 앱에서 PDF로 내보낸 뒤 Everynote에서 가져오세요.';
 
 const FONT_DIR = 'C:\\Windows\\Fonts\\';
 const OFFICE_EXT = ['hwp', 'hwpx', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'];

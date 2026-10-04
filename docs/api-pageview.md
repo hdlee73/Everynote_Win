@@ -65,3 +65,43 @@ Everything else (highlight rects, per-segment pen strokes, stickies, selection/l
 * **Memo resize**: first tap on an expanded memo selects it (`view.selectedMemo`, dashed frame + `↘` handle) and does NOT call `onMarkTapped`; tap again opens it (`onMarkTapped`). Dragging the handle sets `mark.boxW/boxH` (dp, min 90x48) and fires `onInkChanged`. Tapping elsewhere deselects. The UI must reset `boxW = boxH = 0` when the user picks a box size in the edit dialog (Java: `if (style[2] != origBox) mark.boxW = mark.boxH = 0`).
 * Eraser also deletes a highlight mark under the pointer (not note-only marks); strokes are drawn through `AnnotationPainter.stroke`.
 * Text recognition radius is 3 px (10 px with `directTextSelection`) instead of 16.
+
+## v3.0.0 additions (Everynote)
+Tests: `node dev/pageview-test.mjs` (screenshots `dev/out/12-*` backdrop, `13..16` handles, `17/18` text formats).
+
+### Zoom API (requirement 11)
+| member | meaning |
+|---|---|
+| `getZoom()` | current zoom = `view.scale`; **1 = whole page fitted ("100%")**, max 4 (`PdfPageView.ZOOM_MIN/ZOOM_MAX`) |
+| `setZoom(z, fx?, fy?)` | clamps to 1..4, keeps the view point (fx, fy) fixed (default: view centre), returns the new zoom |
+| `zoomBy(f, fx?, fy?)` | `setZoom(zoom * f)` — use 1.25 / 0.8 for the +/- buttons |
+| `resetZoom()` | zoom 1, pan 0 ("100%" button) |
+| `listener.onZoomChanged(z)` | fires after **any** change: buttons, pinch, Ctrl+wheel / trackpad pinch, `focusOnPoint`, `showPage`/`clearPage` reset (checked synchronously by the API calls and once per repaint for direct `view.scale = …` writes). Not fired when the value does not change. `onZoomGestureStarted` is unchanged (finger pinch only) |
+
+### Backdrop vs paper (requirement 4)
+* The view is now the *backdrop* and the page is a sheet on it: `view.pagePadding` (default 12 px, public field) keeps a margin around the page at zoom 1, the sheet has a soft shadow and a 1 px hairline border.
+  `pageRect()`/`contentRect()`/`toPage()` all include the padding, so callers using them need no change. Zoom 1 = "fit inside the padding".
+* Colours come from CSS custom properties on `.pdf-page-view` (css/pageview.css): `--pv-backdrop` (#D9DADF), `--pv-paper-border`, `--pv-paper-shadow`; variants for `[data-dark-page="true"]` (#2B2C31) and `:root[data-theme="dark"]`.
+  The root element's own CSS `background` is the backdrop and the canvas is transparent over it. `view.refreshTheme()` re-reads the variables (call it after switching `data-theme`); `setDarkPage()` does it automatically; `theme()` returns `{backdrop,border,shadow}`.
+* `snapshot()` (curl textures, export of the view) now paints the backdrop colour around the sheet instead of the paper colour, so the curl matches what is on screen. Pass `view.snapshot(dark, scale)` as before.
+* `applyBackground()` now only sets `data-dark-page` + refreshes the theme (the page itself is never filled with the detected paper colour any more).
+
+### Element selection: 8 handles, delete, rotation
+* Selected image / sticker / video / youtube / shape / table / **text box** (text is now selectable: `PdfPageView.selectable(e)` includes `'text'`; `resizable(e)` = everything except audio/hyperlink) show: 4 corner handles (circles), 4 edge handles (squares; hidden on sides shorter than 44 px), the rotation knob (image/sticker/shape/table, unchanged) and a red ✕ delete button 28 px above the top-right corner (below the bottom-right corner when there is no room above).
+* Works with **mouse, pen and finger** (hit radius mouse 14 / pen 18 / touch 24 px; edge handles 75 %). With a writing tool active (ink/highlight/lasso/outline/memo) a mouse or pen only grabs handles, never the element body, so writing over a selected element keeps working.
+* Corner of a locked-aspect kind (image, sticker, video, youtube) keeps the aspect ratio. Edge handles of locked kinds scale uniformly (opposite edge fixed, other axis grows symmetrically) because their box would otherwise just letterbox; all other kinds resize freely on the edge axis. Minimum size 0.04 x 0.03 of the page. Rotated elements resize in their own frame.
+* A resize/move/rotate fires `onInkChanged()` on release (cancel restores). A tap on the **body of an already selected** element fires `onElementTapped(e)` (first tap selects, also for text boxes — *change from v2 where a tap on text fired `onElementTapped` immediately*). Taps on handles no longer fire `onElementTapped`.
+* `listener.onElementDeleted(e)`: the ✕ button (also `view.deleteSelectedElement()` for a Delete-key binding) **removes the element from `annotationStore.elements` itself**, clears the selection and then calls `onElementDeleted(e)`; the host should persist (`store.save()`) and clean up assets (e.g. video file). If the listener has no `onElementDeleted`, `onInkChanged()` is called instead.
+* `listener.onElementSelected(e|null)` (optional): fires whenever the selection changes (taps, delete, `selectElement`, page change) — use it to show the text-format toolbar.
+
+### Text formatting (requirement 7) — checkable lists
+`PageElement` text boxes carry `align`, `underline`, `list`, `checked[]` (see api-store.md). The view paints them through `AnnotationPainter` (same layout the inline editor must use, spec in api-store.md → "Text layout").
+* **Check boxes are clickable**: a tap (no movement) on a check box of a `list === 'check'` text box toggles `checked[line]` (hit area box + up to 10 px), repaints and fires `listener.onCheckToggled(e, lineIndex, checked)` then `listener.onInkChanged()` (persist). It does not select the element. Works for mouse, pen (not in a writing tool) and finger.
+
+### Mouse page turning (requirement 2)
+* Wheel (no Ctrl) at zoom 1: `listener.onPageSwipe(+1)` (down/right) or `-1` (up/left) once per ≥ 40 px of wheel travel, debounced (450 ms lock + inertia swallowing, accumulator resets after 250 ms idle). Zoomed in: the wheel pans. `view.setWheelPageTurn(false)` disables it. Ignored while a pointer is down.
+* Ctrl+wheel / trackpad pinch: `setZoom` around the cursor (+ `onZoomChanged`).
+* Mouse drag in read mode: the mouse now counts as a swipe pointer, so a left-button drag on blank paper at zoom 1 behaves exactly like a finger drag: `PageDrag.start/move/end` (curl) when `setPageDrag` is set, otherwise `onPageSwipe(±1)` on release. `view.setMouseReadDrag(bool)` (default **true**; `isMouseReadDrag()`); requires `setPageSwipeEnabled(true)` like finger swipes. The mouse never turns pages when a writing tool is active (`inkMode !== 0`, highlight, lasso, memo, outline, direct text selection), so mouse writing is untouched; call `setMouseReadDrag(false)` as well in write mode if you also want to be explicit. A drag that starts on a word still selects text; zoomed in, a drag pans (no edge-swipe for the mouse). Pen never turns pages.
+
+### Other
+`PdfPageView.ZOOM_MIN/ZOOM_MAX`, `pagePadding`, `mouseReadDrag`, `wheelPageTurn` public fields; listener additions `onZoomChanged`, `onElementDeleted`, `onElementSelected`, `onCheckToggled` (all optional).

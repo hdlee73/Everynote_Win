@@ -13,6 +13,9 @@ let bad = 0; const ok = (c, m) => { if (!c) { bad++; console.log('FAIL', m); } e
 ok(done.v127.rotates.join() === 'true,true,true,true,false', 'rotates() only image/sticker/shape/table');
 ok(done.v127.names.length === 5, 'five pen names');
 ok(done.v127.minG >= 170 && done.v127.minG <= 178, 'translucent loop is one flat tone where it overlaps itself (darkest G=' + done.v127.minG + ', flat core 174)');
+ok(done.v3.diff === 0, 'text() == textBlock() with default options (refactor keeps pixels)');
+ok(done.v3.boxes === 3, 'check list: one check box per line (' + done.v3.boxes + ')');
+ok(done.v3.filled[0] > done.v3.filled[1] * 2 && done.v3.filled[2] > done.v3.filled[1] * 2, 'checked boxes are filled, the open one is not (' + done.v3.filled.join('/') + ')');
 fs.mkdirSync(path.join(root, 'dev/out'), { recursive: true });
-for (const id of ['all-light', 'all-dark', 'v127']) await (await pg.$('#' + id)).screenshot({ path: path.join(root, `dev/out/painter-${id}.png`) });
+for (const id of ['all-light', 'all-dark', 'v127', 'v3text', 'v3text-dark']) await (await pg.$('#' + id)).screenshot({ path: path.join(root, `dev/out/painter-${id}.png`) });
 await b.close(); srv.close(); if (bad) process.exitCode = 1;

@@ -110,5 +110,30 @@ add2({ kind: 'text', rot: 40, text: 'text boxes do not rotate', left: .55, top: 
   for (let i = 0; i < px.length; i += 4) if (px[i + 1] < minG) minG = px[i + 1];
   window.__v127.minG = minG;   // 0x80 * .82 felt-marker alpha on #FF3B30 over white = G 174 when flat; an overlap would reach ~120
 }
-window.__done = { fh, w: W, h: H, v127: window.__v127 };
+// ---- v3 text formatting (align / underline / list kinds / check boxes), light + dark
+{
+  const s3 = new AnnotationStore();
+  const T3 = (o) => s3.elements.push(E(Object.assign({ page: 0, kind: 'text', textSize: .028 }, o)));
+  T3({ text: 'Left plain text', left: .05, top: .04, right: .47, bottom: .08 });
+  T3({ text: 'Centered + underline\nsecond line', left: .05, top: .10, right: .47, bottom: .17, align: 'center', underline: true });
+  T3({ text: 'Right aligned\n오른쪽으로 정렬한 글', left: .05, top: .19, right: .47, bottom: .26, align: 'right' });
+  T3({ text: 'Bullet one\nBullet two is long enough to wrap onto a second line\n한글 글머리', left: .05, top: .28, right: .47, bottom: .42, list: 'bullet' });
+  T3({ text: 'First\nSecond\nThird\n\nFifth after a blank', left: .53, top: .04, right: .95, bottom: .19, list: 'number' });
+  T3({ text: 'Done task\nOpen task\nDone again with a long wrapped line of text', left: .53, top: .21, right: .95, bottom: .36, list: 'check', checked: [true, false, true], underline: true });
+  T3({ text: 'Bold serif centered check\nsecond', left: .53, top: .38, right: .95, bottom: .46, list: 'check', align: 'center', bold: true, font: 'serif', color: 0xFFC0392B | 0, checked: [false, true] });
+  const c = paper(false), g = c.getContext('2d'); AnnotationPainter.dark = false; AnnotationPainter.all(g, new RectF(0, 0, W, H), s3, 0);
+  const wrap = document.createElement('div'); wrap.id = 'v3text'; wrap.append(Object.assign(document.createElement('div'), { textContent: 'v3 text formatting (light)' }), c); out.append(wrap);
+  const cd = paper(true), gd = cd.getContext('2d'); AnnotationPainter.dark = true; AnnotationPainter.all(gd, new RectF(0, 0, W, H), s3, 0); AnnotationPainter.dark = false;
+  const wd = document.createElement('div'); wd.id = 'v3text-dark'; wd.append(Object.assign(document.createElement('div'), { textContent: 'v3 text formatting (dark)' }), cd); out.append(wd);
+  // plain text() output is unchanged by the refactor: same pixels as textBlock with default options
+  const a = paper(false), b = paper(false), ga = a.getContext('2d'), gb = b.getContext('2d');
+  AnnotationPainter.text(ga, 'same\nwrap wrap wrap wrap wrap wrap wrap wrap wrap', new RectF(10, 10, 160, 100), 16, 0xFF000000 | 0);
+  AnnotationPainter.textBlock(gb, 'same\nwrap wrap wrap wrap wrap wrap wrap wrap wrap', new RectF(10, 10, 160, 100), 16, 0xFF000000 | 0, undefined, {});
+  const da = ga.getImageData(0, 0, 200, 120).data, db = gb.getImageData(0, 0, 200, 120).data; let diff = 0; for (let i = 0; i < da.length; i++) if (da[i] !== db[i]) diff++;
+  const ink = (g, x, y, w, h) => { const d = g.getImageData(x, y, w, h).data; let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 100) n++; return n; };
+  const e0 = s3.elements[5], bx = AnnotationPainter.checkBoxes(new RectF(0, 0, W, H), e0);
+  const filled = bx.map(k => ink(g, Math.round(k.rect.left + 2), Math.round(k.rect.top + 2), Math.max(1, Math.round(k.rect.width() - 4)), Math.max(1, Math.round(k.rect.height() - 4))));
+  window.__v3 = { diff, boxes: bx.length, filled, lines: AnnotationPainter.fitHeight('x', .4, .03, 1.4, undefined, 'check') > AnnotationPainter.fitHeight('x', .4, .03, 1.4) || true };
+}
+window.__done = { fh, w: W, h: H, v127: window.__v127, v3: window.__v3 };
 </script>

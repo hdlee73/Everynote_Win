@@ -40,3 +40,26 @@
 .m3-help-line{height:1px;background:#E5E5EA;margin-top:10px;transform:scaleY(.5);flex:none}
 .m3-help-ok{flex:none;height:50px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#007AFF;cursor:pointer}
 .m3-help-ok:hover{background:rgba(0,0,0,.035)}
+
+/* ---- v3: icon-only lasso shapes ---- */
+.m3-lchip{width:40px;justify-content:center;padding:0}
+.m3-lchip:hover{background:rgba(0,0,0,.05)}
+
+/* ---- v3: typing toolbar (two icon rows) + list markers ---- */
+.m3-inline-bar{width:min(380px,calc(100% - 16px))}
+.m3-inline-row{flex-wrap:nowrap}
+.m3-inline-row2{height:36px;padding-bottom:2px}
+.m3-tbtn{flex:none;width:34px;height:32px;margin:0 1px;padding:0;border:0;border-radius:16px;background:transparent;color:#3A3A3C;display:flex;align-items:center;justify-content:center;cursor:pointer;
+  font:700 14px/1 inherit;-webkit-user-select:none;user-select:none}
+.m3-tbtn:hover{background:rgba(0,0,0,.06)}
+.m3-tbtn.on{background:#E5F0FF;color:#007AFF;box-shadow:inset 0 0 0 1.5px #007AFF}
+.m3-tbtn:focus{outline:none}
+.m3-tbtn:focus-visible{outline:2px solid rgba(0,122,255,.55);outline-offset:1px}
+.m3-aa{width:38px;margin-right:4px;background:#F2F2F7;font-family:inherit;font-weight:700;font-size:14px}
+.m3-sep{flex:none;width:1px;height:20px;margin:0 5px;background:#E0E0E6}
+.m3-inline-size{width:44px}
+.m3-inline-marks{position:absolute;z-index:41;width:0;height:0;overflow:visible;pointer-events:none}
+.m3-mk{position:absolute;box-sizing:border-box;pointer-events:none}
+.m3-mk-num{text-align:right;white-space:nowrap}
+.m3-chk{border-style:solid;pointer-events:auto;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.m3-chk .ico{margin:0}

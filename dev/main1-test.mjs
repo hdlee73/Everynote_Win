@@ -25,6 +25,7 @@ await page.goto(`http://localhost:${port}/`);
 await page.waitForFunction(() => window.app && window.app.library, null, { timeout: 30000 }).catch(() => {});
 await page.waitForTimeout(1500);
 await shot('00-boot');
+check('welcome: product name Everynote (title, header, card)', await page.evaluate(() => document.title === 'Everynote' && app.titleView.textContent === 'Everynote' && document.querySelector('.m-welcome-name').textContent === 'Everynote' && getComputedStyle(document.querySelector('.m-welcome')).display !== 'none' && getComputedStyle(app.zoomPill).display === 'none' && getComputedStyle(app.addPageButton).display === 'none'));
 const b64 = fs.readFileSync(path.join(here, 'samples/sample-ko.pdf')).toString('base64');
 const p = await page.evaluate(async b => { const { host } = await import('/js/host.js'); const bytes = Uint8Array.from(atob(b), c => c.charCodeAt(0)); const path = app.library.root + '\\sample-ko.pdf'; host._fake.put(path, bytes); await app.openPdf(path, false, 0, true); return path; }, b64);
 await page.waitForTimeout(1500);
@@ -53,15 +54,26 @@ const bars = await page.evaluate(() => ({ readHasText: !!app.readBar.querySelect
   order: [...app.readBar.querySelectorAll('.m-tb')].map(b => b.getAttribute('aria-label')).join('|') }));
 check('typing button moved to reading bar next to pen', bars.readHasText && !bars.writeHasText && /필기 모드\|타이핑/.test(bars.order), bars.order);
 await page.evaluate(() => { app.setWriteMode(true); app.showPenMenu(app.penButton); }); await page.waitForTimeout(300);
-const pen = await page.evaluate(() => ({ chips: [...document.querySelectorAll('.amenu .m-seg')].map(r => [...r.children].map(c => c.textContent).join(',')),
+const pen = await page.evaluate(() => ({ chips: [...document.querySelectorAll('.amenu .m-iseg[data-tag^="pen_"]:not(.m-opts)')].map(r => [...r.children].map(c => c.getAttribute('aria-label')).join(',')),
+  texts: [...document.querySelectorAll('.amenu .m-iseg .m-ibtn')].map(b => b.textContent.trim()).join(''), titles: [...document.querySelectorAll('.amenu .m-iseg .m-ibtn')].every(b => b.title && b.querySelector('svg')),
+  opts: [...document.querySelectorAll('.amenu .m-opts .m-ibtn')].map(b => b.getAttribute('aria-label')).join('|'), rows: document.querySelectorAll('.amenu .amenu-row').length,
   dots: document.querySelectorAll('.amenu .m-sw .dot').length, more: document.querySelectorAll('.amenu [data-tag="color_more"]').length, op: !!document.querySelector('.amenu [data-tag="opacity_bar"]') }));
-check('pen menu: width + 5 pen types', pen.chips.length === 2 && pen.chips[1] === '볼펜,연필,만년필,붓,사인펜', JSON.stringify(pen.chips));
+check('pen menu: 5 pen types + 4 widths are icon buttons (no text, tooltips)', pen.chips.length === 2 && pen.chips[0] === '볼펜,연필,만년필,붓,사인펜' && pen.chips[1] === '굵기 · 얇게,굵기 · 보통,굵기 · 굵게,굵기 · 최대' && pen.texts === '' && pen.titles, JSON.stringify(pen));
+check('pen menu: 직선 + 손가락 필기 are icon toggles; no text rows left', /^직선.*\|손가락 필기$/.test(pen.opts) && pen.rows === 0, pen.opts + ' rows=' + pen.rows);
 check('pen menu: 2 swatch rows (8+8+rainbow chip) + opacity bar', pen.dots === 17 && pen.more === 1 && pen.op, JSON.stringify(pen));
 await shot('07-pen-menu');
-await page.locator('.amenu .m-seg').nth(1).locator('.chip').nth(3).click();
+await page.locator('.amenu [data-tag="pen_types"] .m-ibtn').nth(3).click();
 check('pen type 붓 -> inkPen 3 + pref + pageView', await page.evaluate(() => app.inkPen === 3 && app.pageView.inkPen === 3 && app.recentPrefs.getInt('ink_pen', 0) === 3));
 await page.evaluate(() => { const b = document.querySelector('.amenu [data-tag="opacity_bar"]'); b.value = 40; b.dispatchEvent(new Event('input', { bubbles: true })); });
 check('opacity 40% -> alpha 102 and colour kept', await page.evaluate(() => (app.inkColor >>> 24) === 102 && (app.inkColor & 0xFFFFFF) === 0x1C1C1E), await page.evaluate(() => (app.inkColor >>> 0).toString(16)));
+check('width icon -> inkWidth', await (async () => { await page.locator('.amenu [data-tag="pen_widths"] .m-ibtn').nth(2).click(); return page.evaluate(() => Math.abs(app.inkWidth - 0.0065) < 1e-9 && app.pageView.inkWidth === app.inkWidth); })());
+check('pen button shows the chosen pen icon', await page.evaluate(() => app.penButton.querySelector('.ico').dataset.icon === 'ic_pen_brush'));
+await page.locator('.amenu [data-tag="pen_line"]').click();
+check('straight line toggle -> inkMode 3 (menu stays open) and back', await page.evaluate(() => app.inkMode === 3) && (await page.locator('.amenu').count()) === 1 && (await page.locator('.amenu [data-tag="pen_line"]').getAttribute('aria-pressed')) === 'true');
+await page.locator('.amenu [data-tag="pen_line"]').click();
+check('straight line toggle off -> pen', await page.evaluate(() => app.inkMode === 1));
+await page.locator('.amenu [data-tag="pen_finger"]').click();
+check('finger writing toggle', await page.evaluate(() => app.fingerInk === true)); await page.locator('.amenu [data-tag="pen_finger"]').click();
 await page.locator('.amenu .m-sw').nth(0).locator('.dot').nth(2).click();
 check('picking a preset keeps alpha', await page.evaluate(() => (app.inkColor >>> 24) === 102 && (app.inkColor & 0xFFFFFF) === 0x007AFF));
 await page.click('.amenu [data-tag="color_more"]'); await page.waitForSelector('[data-tag="color_picker"]'); await shot('08-colorpicker');
@@ -84,6 +96,96 @@ check('selection popup registered', await page.evaluate(() => !!app.selectionPop
 await shot('06-selpop');
 await page.mouse.click(5, 400); await page.waitForTimeout(250);
 check('dismissing the popup clears the selection overlay', (await page.evaluate(() => window.__cleared)) >= 1 && (await page.evaluate(() => app.selectionPopup)) === null);
+
+// ================= v3.0: zoom pill, add page, mouse/keyboard page turning, menu entries, element delete hook
+await page.evaluate(() => { app.setInkMode(0); app.setWriteMode(false); app.showPage(2); }); await page.waitForTimeout(900);
+const hasCoreZoom = await page.evaluate(() => typeof app.firstPageView.setZoom === 'function');
+console.log('CORE zoom API present:', hasCoreZoom);
+const zoomBox = await page.evaluate(() => { const r = e => e.getBoundingClientRect(), z = r(app.zoomPill), v = r(app.viewportLayer), a = r(app.previousOverlay), f = r(app.addPageButton);
+  return { visible: getComputedStyle(app.zoomPill).display !== 'none', leftEdge: z.left - v.left < 24, vertical: z.height > z.width * 2, labels: [...app.zoomPill.querySelectorAll('button')].map(b => b.getAttribute('aria-label')).join('|'), text: app.zoomLabel.textContent,
+    noOverlapArrow: z.bottom <= a.top + 1, fabRight: v.right - f.right < 24 && v.bottom - f.bottom < 24, fabText: app.addPageButton.textContent.trim() }; });
+check('zoom pill: left edge, vertical, + / 100% / - , clear of the prev arrow', zoomBox.visible && zoomBox.leftEdge && zoomBox.vertical && zoomBox.labels === '확대|100%로 되돌리기|축소' && zoomBox.text === '100%' && zoomBox.noOverlapArrow, JSON.stringify(zoomBox));
+check('floating 페이지 추가 button at the bottom right', zoomBox.fabRight && zoomBox.fabText === '페이지 추가', JSON.stringify(zoomBox));
+await shot('10-zoom-pill');
+await page.click('[data-tag="zoom_in"]'); await page.waitForTimeout(200);
+let zs = await page.evaluate(() => ({ z: app.pageView.scale, label: app.zoomLabel.textContent, g: app.getZoomOf(app.pageView) }));
+check('zoom + -> 125%', Math.abs(zs.z - 1.25) < .01 && zs.label === '125%', JSON.stringify(zs));
+await page.click('[data-tag="zoom_in"]'); await page.click('[data-tag="zoom_in"]'); await page.waitForTimeout(200);
+await shot('11-zoomed');
+zs = await page.evaluate(() => ({ z: app.pageView.scale, label: app.zoomLabel.textContent }));
+check('zoom + x3 -> 195%', zs.z > 1.9 && zs.label === Math.round(zs.z * 100) + '%', JSON.stringify(zs));
+await page.click('[data-tag="zoom_out"]'); await page.waitForTimeout(150);
+check('zoom - lowers', await page.evaluate(() => app.pageView.scale < 1.7 && app.pageView.scale > 1.4));
+await page.click('[data-tag="zoom_reset"]'); await page.waitForTimeout(150);
+check('click % -> 100%', await page.evaluate(() => app.pageView.scale === 1 && app.zoomLabel.textContent === '100%'));
+await page.evaluate(() => app.pageView.setZoom ? app.pageView.setZoom(2.5) : (app.pageView.scale = 2.5, app.pageView.invalidate())); await page.waitForTimeout(250);
+check('label follows view zoom (pinch/wheel path -> onZoomChanged)', await page.evaluate(() => app.zoomLabel.textContent === '250%'), await page.evaluate(() => app.zoomLabel.textContent));
+await page.keyboard.press('Control+0'); await page.waitForTimeout(150);
+check('Ctrl+0 resets zoom', await page.evaluate(() => app.pageView.scale === 1 && app.zoomLabel.textContent === '100%'));
+await page.evaluate(() => { app.showPage(2); }); await page.waitForTimeout(600);
+check('page change resets label', await page.evaluate(() => app.zoomLabel.textContent === '100%'));
+// add page button
+await page.evaluate(() => { window.__ins = []; app.choosePageToInsert = i => window.__ins.push(i); });
+await page.click('[data-tag="add_page_fab"]');
+check('페이지 추가 -> choosePageToInsert(current page)', await page.evaluate(() => window.__ins.join() === String(app.currentPage)), await page.evaluate(() => window.__ins.join()));
+// page turning: keyboard, arrow buttons, onPageSwipe
+await page.evaluate(() => { app.recentPrefs.putInt('page_anim_style', 2); app.showPage(3); }); await page.waitForTimeout(600);
+const at = () => page.evaluate(() => app.currentPage);
+await page.keyboard.press('ArrowRight'); await page.waitForTimeout(500); check('ArrowRight -> next page', (await at()) === 4);
+await page.keyboard.press('ArrowLeft'); await page.waitForTimeout(500); check('ArrowLeft -> previous page', (await at()) === 3);
+await page.keyboard.press('PageDown'); await page.waitForTimeout(500); check('PageDown -> next page', (await at()) === 4);
+await page.keyboard.press('PageUp'); await page.waitForTimeout(500); check('PageUp -> previous page', (await at()) === 3);
+await page.keyboard.press('ArrowDown'); await page.waitForTimeout(500); check('ArrowDown -> next page', (await at()) === 4);
+await page.keyboard.press('End'); await page.waitForTimeout(700); check('End -> last page', (await at()) === 11);
+await page.keyboard.press('Home'); await page.waitForTimeout(700); check('Home -> first page', (await at()) === 0);
+await page.click('.m-arrow.next'); await page.waitForTimeout(500); check('edge arrow button -> next page', (await at()) === 1);
+await page.click('.m-arrow.prev'); await page.waitForTimeout(500); check('edge arrow button -> previous page', (await at()) === 0);
+await page.evaluate(() => app.pageView.listener ? app.pageView.listener.onPageSwipe(1) : null); await page.waitForTimeout(500);
+check('listener.onPageSwipe(+1) (mouse wheel path) -> next page', (await at()) === 1);
+await page.mouse.move(500, 360); await page.mouse.wheel(0, 400); await page.waitForTimeout(900);
+console.log('wheel at fit zoom -> page', await at(), '(CORE debounced onPageSwipe)');
+// mouse read drag follows write mode
+await page.evaluate(() => { window.__mrd = []; for (const v of [app.firstPageView, app.secondPageView]) { const orig = v.setMouseReadDrag; v.setMouseReadDrag = function (b) { window.__mrd.push(b); return orig && orig.call(this, b); }; } });
+await page.evaluate(() => app.setWriteMode(true));
+check('write mode -> setMouseReadDrag(false) on both views', await page.evaluate(() => window.__mrd.length >= 2 && window.__mrd.every(x => x === false)), await page.evaluate(() => JSON.stringify(window.__mrd)));
+await page.evaluate(() => { window.__mrd.length = 0; app.setWriteMode(false); });
+check('read mode -> setMouseReadDrag(true)', await page.evaluate(() => window.__mrd.length >= 2 && window.__mrd.every(x => x === true)));
+check('arrows keep working while writing (keyboard)', await (async () => { await page.evaluate(() => app.setWriteMode(true)); const b = await at(); await page.keyboard.press('ArrowRight'); await page.waitForTimeout(500); const a = await at(); await page.evaluate(() => app.setWriteMode(false)); return a === b + 1; })());
+// main menu entries (UI2 methods stubbed)
+await page.evaluate(() => { window.__ui2 = []; for (const n of ['printDocument', 'showSyncSettings', 'showAboutOffline']) app[n] = () => window.__ui2.push(n); app.showMainMenu(document.querySelector('.m-ib:last-child'), false); });
+await page.waitForTimeout(250); await shot('12-main-menu');
+const mm = await page.evaluate(() => [...document.querySelectorAll('.amenu .amenu-row')].map(r => r.getAttribute('aria-label')));
+check('main menu has 인쇄 / 구글 드라이브 동기화 / 오프라인 사용 안내', ['인쇄', '구글 드라이브 동기화', '오프라인 사용 안내'].every(x => mm.includes(x)), mm.join());
+for (const n of ['인쇄', '구글 드라이브 동기화', '오프라인 사용 안내']) {
+  await page.locator('.amenu .amenu-row[aria-label="' + n + '"]').click(); await page.waitForTimeout(200);
+  await page.evaluate(() => app.showMainMenu(document.querySelector('.m-ib:last-child'), false)); await page.waitForTimeout(200);
+}
+check('menu entries call printDocument / showSyncSettings / showAboutOffline', (await page.evaluate(() => window.__ui2.join())) === 'printDocument,showSyncSettings,showAboutOffline', await page.evaluate(() => window.__ui2.join()));
+await page.keyboard.press('Escape'); await page.mouse.click(5, 400); await page.waitForTimeout(200);
+await page.evaluate(() => { window.__ui2.length = 0; });
+await page.keyboard.press('Control+p'); await page.waitForTimeout(150);
+check('Ctrl+P -> printDocument', (await page.evaluate(() => window.__ui2.join())) === 'printDocument');
+// element delete: listener.onElementDeleted and the Delete key
+const del = await page.evaluate(async () => {
+  const { AnnotationStore } = await import('/js/store.js'); const out = {};
+  const mk = () => { const e = new AnnotationStore.PageElement(); e.page = app.currentPage; e.kind = 'shape'; e.left = .3; e.top = .3; e.right = .6; e.bottom = .5; return e; };
+  const e1 = mk(); app.store.elements.push(e1); app.redrawPages();
+  app.pageView.listener.onElementDeleted(e1); out.hook = !app.store.elements.includes(e1);
+  const e2 = mk(); app.store.elements.push(e2); app.pageView.selectElement(e2); out.sel = app.selectedPageElement() === e2;
+  return out;
+});
+check('listener.onElementDeleted removes the element from the store', del.hook, JSON.stringify(del));
+await page.keyboard.press('Delete'); await page.waitForTimeout(200);
+check('Delete key deletes the selected element', del.sel && await page.evaluate(() => app.store.elements.filter(e => e.kind === 'shape').length === 0 && !app.selectedPageElement()));
+await page.evaluate(async () => { const { AnnotationStore } = await import('/js/store.js'); const e = new AnnotationStore.PageElement(); e.page = app.currentPage; e.kind = 'shape'; e.left = .3; e.top = .3; e.right = .6; e.bottom = .5; app.store.elements.push(e); app.pageView.selectElement(e); app.redrawPages(); });
+await shot('13-element-selected');
+await page.keyboard.press('Escape'); await page.waitForTimeout(150);
+check('Esc deselects the element', await page.evaluate(() => !app.selectedPageElement()));
+await page.evaluate(() => { app.store.elements.length = 0; app.redrawPages(); });
+// write mode screenshot (icon toolbar)
+await page.evaluate(() => { app.setWriteMode(true); app.showPenMenu(app.penButton); }); await page.waitForTimeout(300); await shot('14-write-pen-menu');
+await page.keyboard.press('Escape'); await page.mouse.click(5, 400); await page.waitForTimeout(200);
+await page.evaluate(() => { app.setWriteMode(false); });
 check('no console errors', errors === 0, 'errors=' + errors);
 await browser.close(); server.close();
 console.log(fails ? fails + ' FAILED' : 'ALL PASS'); process.exit(fails ? 1 : 0);

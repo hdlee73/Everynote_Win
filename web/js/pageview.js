@@ -14,6 +14,12 @@ import { Mark, InkStroke, InkPoint } from './store.js';
 const DP = 1;
 const FONT_SANS = 'Roboto, "Noto Sans KR", "Malgun Gothic", "Segoe UI", sans-serif';
 const DEFAULT_PAPER = 0xFFDDDDDD | 0;
+const ZOOM_MIN = 1, ZOOM_MAX = 4;
+/** Fallback theme (css/pageview.css custom properties override these). */
+const THEME_LIGHT = { backdrop: '#D9DADF', border: 'rgba(0,0,0,0.20)', shadow: 'rgba(20,22,30,0.30)' };
+const THEME_DARK = { backdrop: '#2B2C31', border: 'rgba(255,255,255,0.16)', shadow: 'rgba(0,0,0,0.70)' };
+// handle ids of the selected element (elementDrag): 1 move, 2..5 corners TL TR BL BR, 6 rotate, 7..10 edges T B L R, 11 delete
+const H_MOVE = 1, H_ROT = 6, H_T = 7, H_B = 8, H_L = 9, H_R = 10, H_DEL = 11;
 
 // Action codes (MotionEvent.ACTION_*)
 const DOWN = 0, UP = 1, MOVE = 2, CANCEL = 3, POINTER_DOWN = 5, POINTER_UP = 6;
@@ -178,7 +184,6 @@ export class PdfPageView {
     const el = this.el = document.createElement('div');
     el.className = 'pdf-page-view';
     el.style.cssText = 'flex:1 1 0;position:relative;overflow:hidden;min-width:0;touch-action:none;user-select:none;-webkit-user-select:none;outline:none;';
-    el.style.background = argb(DEFAULT_PAPER);
     const cv = this.canvas = document.createElement('canvas');
     cv.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;display:block;pointer-events:none;';
     el.appendChild(cv);
@@ -215,6 +220,14 @@ export class PdfPageView {
     this._beginTimer = 0; this._blankTimer = 0;
     this._ptrs = []; this._dirty = false; this._raf = 0;
     this._cw = 0; this._ch = 0;
+    /** CSS px kept free around the page at zoom 1 so the backdrop shows around the paper (requirement 4). */
+    this.pagePadding = 12;
+    /** Mouse drag in read mode turns pages like a finger swipe (setMouseReadDrag). */
+    this.mouseReadDrag = true;
+    /** Mouse wheel at zoom 1 turns pages (setWheelPageTurn). */
+    this.wheelPageTurn = true;
+    this._wheelAcc = 0; this._wheelLast = 0; this._wheelLock = 0;
+    this._lastZoom = 1; this._theme = null;
 
     this.scaleDetector = new ScaleDetector({
       onScaleBegin: () => {
@@ -235,12 +248,13 @@ export class PdfPageView {
         const fx = d.focusX, fy = d.focusY;
         const nx = before.width() === 0 ? 0.5 : (fx - before.left) / before.width();
         const ny = before.height() === 0 ? 0.5 : (fy - before.top) / before.height();
-        this.scale = Math.max(1, Math.min(4, this.scale * d.getScaleFactor()));
+        this.scale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, this.scale * d.getScaleFactor()));
         const size = this.contentSize();
         this.panX = fx - nx * size[0] - this.baseLeft(size);
         this.panY = fy - ny * size[1] - this.baseTop(size);
         this.clampPan();
         this.invalidate();
+        this._checkZoom();
         return true;
       },
       onScaleEnd: () => { this.clampPan(); },
@@ -297,18 +311,37 @@ export class PdfPageView {
     this._dirty = false;
     if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
     const dpr = this._syncCanvas(), ctx = this._ctx;
+    if (!this._theme && this.el.isConnected) this.refreshTheme();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this._paintAll(ctx, this.el.clientWidth, this.el.clientHeight);
+    ctx.clearRect(0, 0, this.el.clientWidth, this.el.clientHeight);       // the backdrop is the CSS background of el
+    this._paintAll(ctx, this.el.clientWidth, this.el.clientHeight, false);
+    this._checkZoom();
   }
-  _paintAll(ctx, W, H) {
+  /** opaque: also paint the backdrop (snapshots); the live canvas is transparent over the CSS backdrop. */
+  _paintAll(ctx, W, H, opaque = true) {
     ctx.save();
-    ctx.fillStyle = this.darkPage ? '#000' : argb(this._paper);
-    ctx.fillRect(0, 0, W, H);
+    if (opaque) { ctx.fillStyle = this.theme().backdrop; ctx.fillRect(0, 0, W, H); }
     ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
     this.onDraw(ctx);
     ctx.restore();
   }
-  applyBackground() { this.el.style.background = this.darkPage ? '#000' : argb(this._paper); }
+  /** Re-reads the backdrop / paper border / shadow colours (css/pageview.css custom properties); call after a theme change. */
+  refreshTheme() {
+    const base = this.darkPage ? THEME_DARK : THEME_LIGHT, t = { ...base };
+    try {
+      const cs = getComputedStyle(this.el);
+      const g = n => cs.getPropertyValue(n).trim();
+      t.backdrop = g('--pv-backdrop') || t.backdrop; t.border = g('--pv-paper-border') || t.border; t.shadow = g('--pv-paper-shadow') || t.shadow;
+    } catch (_) { /* keep the fallback */ }
+    this._theme = t; this.el.style.background = t.backdrop; this.invalidate();
+    return t;
+  }
+  theme() { return this._theme || (this.darkPage ? THEME_DARK : THEME_LIGHT); }
+  /** The root only carries data-dark-page; css/pageview.css turns it into the backdrop / shadow variables. */
+  applyBackground() {
+    this.el.dataset.darkPage = this.darkPage ? 'true' : 'false'; this._theme = null;
+    if (this.el.isConnected) this.refreshTheme(); else this.el.style.background = this.theme().backdrop;
+  }
 
   /** What View.draw(canvas) gives: the visible view on a white (black when dark) underlay. Returns an HTMLCanvasElement of
    *  width*scale x height*scale pixels (scale defaults to devicePixelRatio, stored as canvas.scale). */
@@ -318,7 +351,9 @@ export class PdfPageView {
     const ctx = c.getContext('2d');
     ctx.fillStyle = dark ? '#000' : '#fff'; ctx.fillRect(0, 0, c.width, c.height);
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
-    this._paintAll(ctx, W, H);
+    const keep = this.darkPage, kt = this._theme;
+    if (dark !== keep) { this.darkPage = dark; this._theme = null; }
+    try { this._paintAll(ctx, W, H, true); } finally { this.darkPage = keep; this._theme = kt; }
     return c;
   }
 
@@ -326,7 +361,7 @@ export class PdfPageView {
   showPage(pageBitmap, pageNumber, allMarks, allStrokes, allTranslations) {
     this.clearLassoSelection();
     this.stopTextSelection();
-    this.noteHitBoxes.clear(); this.memoHitBoxes.clear(); this._selectedElement = null; this.elementDrag = 0; this.selectedMemo = null; this.memoDrag = 0;
+    this.noteHitBoxes.clear(); this.memoHitBoxes.clear(); this._setSelected(null); this.selectedMemo = null; this.memoDrag = 0;
     if (this.bitmap !== pageBitmap) this._darkBitmap = null;
     this.bitmap = pageBitmap;
     this.page = pageNumber;
@@ -335,6 +370,7 @@ export class PdfPageView {
     this.scale = 1; this.panX = this.panY = 0;
     this.analyze();
     this.invalidate();
+    this._checkZoom();
   }
   clearPage() {
     this.clearLassoSelection();
@@ -345,6 +381,7 @@ export class PdfPageView {
     this.marks = null; this.strokes = null; this.translations = null; this.textRegions = []; this.selectedTextRegions.length = 0; this.textSelectMode = false;
     this.scale = 1; this.panX = this.panY = 0;
     this.invalidate();
+    this._checkZoom();
   }
   getPageNumber() { return this.page; }
   /** Copy of the page bitmap (canvas) or null. */
@@ -453,7 +490,8 @@ export class PdfPageView {
   contentSize() {
     if (!this.bitmap) return [0, 0];
     const [bw, bh] = bitmapSize(this.bitmap);
-    const base = Math.min(this.width / (bw * this.crop.width()), this.height / (bh * this.crop.height()));
+    const pad = this.pagePadding, aw = Math.max(1, this.width - 2 * pad), ah = Math.max(1, this.height - 2 * pad);
+    const base = Math.min(aw / (bw * this.crop.width()), ah / (bh * this.crop.height()));
     return [bw * base * this.scale, bh * base * this.scale];
   }
   baseLeft(size) { return (this.width - size[0]) / 2 - (this.crop.centerX() - 0.5) * size[0]; }
@@ -461,7 +499,8 @@ export class PdfPageView {
   clampPan() {
     if (!this.bitmap) return;
     const size = this.contentSize();
-    const maxX = Math.max(0, (size[0] * this.crop.width() - this.width) / 2), maxY = Math.max(0, (size[1] * this.crop.height() - this.height) / 2);
+    const pad2 = 2 * this.pagePadding;
+    const maxX = Math.max(0, (size[0] * this.crop.width() + pad2 - this.width) / 2), maxY = Math.max(0, (size[1] * this.crop.height() + pad2 - this.height) / 2);
     this.panX = Math.max(-maxX, Math.min(maxX, this.panX)); this.panY = Math.max(-maxY, Math.min(maxY, this.panY));
     if (this.scale <= 1) this.panX = this.panY = 0;
   }
@@ -485,34 +524,91 @@ export class PdfPageView {
     const size = this.contentSize();
     this.panX = this.width / 2 - (this.baseLeft(size) + x * size[0]);
     this.panY = this.height / 2 - (this.baseTop(size) + y * size[1]);
-    this.clampPan(); this.invalidate();
+    this.clampPan(); this.invalidate(); this._checkZoom();
+  }
+
+  // ---- zoom (v3) ---------------------------------------------------------------------------------------------
+  static get ZOOM_MIN() { return ZOOM_MIN; }
+  static get ZOOM_MAX() { return ZOOM_MAX; }
+  /** Current zoom: 1 = whole page fitted in the view ("100%"), max 4. */
+  getZoom() { return this.scale; }
+  /** Sets the zoom (clamped 1..4) keeping the view point (fx, fy) (default: view centre) fixed. Fires onZoomChanged. */
+  setZoom(z, fx = this.width / 2, fy = this.height / 2) {
+    z = Number(z); if (!Number.isFinite(z)) return this.scale;
+    z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    if (!this.bitmap) { this.scale = z; this._checkZoom(); return z; }
+    const before = this.contentRect();
+    const nx = before.width() === 0 ? 0.5 : (fx - before.left) / before.width(), ny = before.height() === 0 ? 0.5 : (fy - before.top) / before.height();
+    this.scale = z;
+    const size = this.contentSize();
+    this.panX = fx - nx * size[0] - this.baseLeft(size); this.panY = fy - ny * size[1] - this.baseTop(size);
+    this.clampPan(); this.invalidate(); this._checkZoom();
+    return this.scale;
+  }
+  /** Multiplies the zoom by f (e.g. 1.25 / 0.8 for the +/- buttons). */
+  zoomBy(f, fx, fy) { return this.setZoom(this.scale * f, fx, fy); }
+  /** Back to zoom 1 (fit) and centred. */
+  resetZoom() { this.scale = 1; this.panX = this.panY = 0; this.invalidate(); this._checkZoom(); return 1; }
+  _checkZoom() {
+    if (Math.abs(this.scale - this._lastZoom) < 1e-6) return;
+    this._lastZoom = this.scale; this._L('onZoomChanged', this.scale);
   }
 
   // ---- element selection -------------------------------------------------------------------------------------
-  selectElement(element) { this._selectedElement = element; this.invalidate(); }
+  selectElement(element) { this._setSelected(element || null); this.invalidate(); }
   selectedElement() { return this._selectedElement; }
-  static resizable(e) { return !!e && e.kind !== 'text' && e.kind !== 'audio'; }
-  static selectable(e) { return e.kind === 'image' || e.kind === 'sticker' || e.kind === 'video' || e.kind === 'shape' || e.kind === 'table' || e.kind === 'youtube'; }
+  _setSelected(el) {
+    if (this._selectedElement === el) return;
+    this._selectedElement = el; this.elementDrag = 0;
+    this._L('onElementSelected', el);
+  }
+  static resizable(e) { return !!e && e.kind !== 'audio' && e.kind !== 'hyperlink'; }
+  static selectable(e) { return e.kind === 'image' || e.kind === 'sticker' || e.kind === 'video' || e.kind === 'shape' || e.kind === 'table' || e.kind === 'youtube' || e.kind === 'text'; }
   static aspectLocked(e) { return e.kind === 'image' || e.kind === 'sticker' || e.kind === 'video' || e.kind === 'youtube'; }
 
+  /** Removes the selected element from the store and reports it (listener.onElementDeleted(e); onInkChanged when absent). */
+  deleteSelectedElement() {
+    const e = this._selectedElement; if (!e) return false;
+    const els = this.annotationStore && this.annotationStore.elements;
+    if (els) { const i = els.indexOf(e); if (i >= 0) els.splice(i, 1); }
+    this.elementDrag = 0; this._setSelected(null); this.invalidate();
+    if (this.listener && typeof this.listener.onElementDeleted === 'function') this._L('onElementDeleted', e); else this._L('onInkChanged');
+    return true;
+  }
+
+  /** Handle spots of the selected element in its own (unrotated) frame: [{id, x, y, r, kind}]. Same list for drawing and hit tests. */
+  _handleSpots(se, b, dest) {
+    const turns = AnnotationPainter.rotates(se), out = [];
+    out.push({ id: 2, x: b.left, y: b.top, kind: 'c' }, { id: 3, x: b.right, y: b.top, kind: 'c' }, { id: 4, x: b.left, y: b.bottom, kind: 'c' }, { id: 5, x: b.right, y: b.bottom, kind: 'c' });
+    if (b.width() >= 44) out.push({ id: H_T, x: b.centerX(), y: b.top, kind: 'e' }, { id: H_B, x: b.centerX(), y: b.bottom, kind: 'e' });
+    if (b.height() >= 44) out.push({ id: H_L, x: b.left, y: b.centerY(), kind: 'e' }, { id: H_R, x: b.right, y: b.centerY(), kind: 'e' });
+    if (turns) out.push({ id: H_ROT, x: b.centerX(), y: b.top - 28 * DP, kind: 'r' });
+    const flip = !(turns && se.rot) && (dest.top + se.top * dest.height() - 42 * DP) < 0;
+    out.push({ id: H_DEL, x: b.right, y: flip ? b.bottom + 28 * DP : b.top - 28 * DP, kind: 'd' });
+    return out;
+  }
   _drawElementHandles(ctx, dest) {
     const se = this._selectedElement;
     if (!se || se.page !== this.page || !this.annotationStore || !this.annotationStore.elements.includes(se) || dest.width() <= 0) return;
-    const d = DP, b = boxOf(dest, se), turns = AnnotationPainter.rotates(se);
+    const d = DP, b = boxOf(dest, se), turns = AnnotationPainter.rotates(se), BLUE = argb(0xFF007AFF);
     ctx.save();
     if (turns && se.rot) AnnotationPainter.rotateAround(ctx, se.rot, b.centerX(), b.centerY());
-    ctx.lineWidth = 2 * d; ctx.strokeStyle = argb(0xFF007AFF); ctx.strokeRect(b.left, b.top, b.width(), b.height());
-    if (turns) {
-      // rotation handle: a stem above the top edge ending in a round ↻ knob
-      ctx.beginPath(); ctx.moveTo(b.centerX(), b.top); ctx.lineTo(b.centerX(), b.top - 24 * d); ctx.stroke();
-      ctx.beginPath(); ctx.arc(b.centerX(), b.top - 28 * d, 10 * d, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
-      ctx.fillStyle = argb(0xFF007AFF); ctx.font = `${13 * d}px ${FONT_SANS}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText('↻', b.centerX(), b.top - 23.5 * d); ctx.textAlign = 'left';
-    }
-    const corners = [[b.left, b.top], [b.right, b.top], [b.left, b.bottom], [b.right, b.bottom]];
-    for (const c of corners) {
-      ctx.beginPath(); ctx.arc(c[0], c[1], 9 * d, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill();
-      ctx.beginPath(); ctx.arc(c[0], c[1], 9 * d, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 2 * d; ctx.strokeStyle = BLUE; ctx.strokeRect(b.left, b.top, b.width(), b.height());
+    if (turns) { ctx.beginPath(); ctx.moveTo(b.centerX(), b.top); ctx.lineTo(b.centerX(), b.top - 24 * d); ctx.stroke(); }
+    for (const h of this._handleSpots(se, b, dest)) {
+      if (h.kind === 'c') { ctx.beginPath(); ctx.arc(h.x, h.y, 8 * d, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); }
+      else if (h.kind === 'e') { roundRectPath(ctx, h.x - 7 * d, h.y - 7 * d, h.x + 7 * d, h.y + 7 * d, 3 * d, 3 * d); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); }
+      else if (h.kind === 'r') {
+        ctx.beginPath(); ctx.arc(h.x, h.y, 10 * d, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
+        ctx.fillStyle = BLUE; ctx.font = `${13 * d}px ${FONT_SANS}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+        ctx.fillText('↻', h.x, h.y + 4.5 * d); ctx.textAlign = 'left';
+      } else {
+        ctx.beginPath(); ctx.arc(h.x, h.y, 12 * d, 0, Math.PI * 2); ctx.fillStyle = '#E5372E'; ctx.fill();
+        ctx.lineWidth = 1.5 * d; ctx.strokeStyle = '#fff'; ctx.stroke();
+        ctx.lineWidth = 2.2 * d; ctx.lineCap = 'round'; const k = 4.2 * d;
+        ctx.beginPath(); ctx.moveTo(h.x - k, h.y - k); ctx.lineTo(h.x + k, h.y + k); ctx.moveTo(h.x + k, h.y - k); ctx.lineTo(h.x - k, h.y + k); ctx.stroke();
+        ctx.lineCap = 'butt'; ctx.lineWidth = 2 * d; ctx.strokeStyle = BLUE;
+      }
     }
     ctx.restore();
   }
@@ -529,62 +625,91 @@ export class PdfPageView {
     return b.contains(tx, ty);
   }
 
+  _toolActive() { return this.inkMode !== 0 || this.highlightMode || this.memoMode || this.outlineMode || this.lassoMode; }
   _handleElementGesture(e, dest) {
     const se = this._selectedElement;
     if (!se || !this.annotationStore || dest.width() <= 0) return false;
-    if (se.page !== this.page || !this.annotationStore.elements.includes(se)) { this._selectedElement = null; return false; }
+    if (se.page !== this.page || !this.annotationStore.elements.includes(se)) { this._setSelected(null); return false; }
     const action = e.action, density = DP;
-    if (action === DOWN && e.pointerCount === 1 && !this.isStylus(e)) {
-      const b = boxOf(dest, se), reach = 24 * density; let hit = 0;
-      let tx = e.x, ty = e.y; const turns = AnnotationPainter.rotates(se);
-      if (turns && se.rot) [tx, ty] = PdfPageView.unrotate(tx, ty, b.centerX(), b.centerY(), se.rot);
-      if (turns && Math.hypot(tx - b.centerX(), ty - (b.top - 28 * density)) <= reach) hit = 6;
-      else if (Math.hypot(tx - b.left, ty - b.top) <= reach) hit = 2; else if (Math.hypot(tx - b.right, ty - b.top) <= reach) hit = 3;
-      else if (Math.hypot(tx - b.left, ty - b.bottom) <= reach) hit = 4; else if (Math.hypot(tx - b.right, ty - b.bottom) <= reach) hit = 5;
-      else if (b.contains(tx, ty)) hit = 1;
-      if (hit === 0) { this._selectedElement = null; this.invalidate(); return false; }
-      if (hit > 1 && hit < 6 && !PdfPageView.resizable(se)) hit = 1;
+    if (action === DOWN && e.pointerCount === 1) {
+      const touch = !this.isStylus(e), mouse = e.toolType === 'mouse';
+      const b = boxOf(dest, se); let hit = 0, best = Infinity;
+      let tx = e.x, ty = e.y;
+      if (AnnotationPainter.rotates(se) && se.rot) [tx, ty] = PdfPageView.unrotate(tx, ty, b.centerX(), b.centerY(), se.rot);
+      const reach = (touch ? 24 : mouse ? 14 : 18) * density;
+      for (const h of this._handleSpots(se, b, dest)) {
+        const dist = Math.hypot(tx - h.x, ty - h.y) - (h.kind === 'd' || h.kind === 'r' ? 4 : 0);   // delete / rotate win ties
+        if (dist <= (h.kind === 'e' ? reach * 0.75 : reach) && dist < best) { best = dist; hit = h.id; }
+      }
+      if (hit === 0 && b.contains(tx, ty) && (touch || !this._toolActive())) hit = H_MOVE;
+      if (hit === 0) { if (touch || !this._toolActive()) this._setSelected(null); this.invalidate(); return false; }
+      if (hit !== H_MOVE && hit !== H_ROT && hit !== H_DEL && !PdfPageView.resizable(se)) hit = H_MOVE;
       this._L('onSelectionAdjustStarted'); this.elementDrag = hit; this.elementMoved = false; this.elementStartX = e.x; this.elementStartY = e.y;
       this.elementOrigin.set(new RectF(se.left, se.top, se.right, se.bottom)); this.elementRot0 = se.rot || 0;
       return true;
     }
     if (this.elementDrag === 0) return false;
+    if (this.elementDrag === H_DEL) {
+      if (action === UP) this.deleteSelectedElement(); else if (action === CANCEL) this.elementDrag = 0;
+      return true;
+    }
     if (action === MOVE) {
       const dx = (e.x - this.elementStartX) / dest.width(), dy = (e.y - this.elementStartY) / dest.height();
       if (!this.elementMoved && Math.hypot(e.x - this.elementStartX, e.y - this.elementStartY) < 8 * density) return true;
       this.elementMoved = true; const el = se, o = this.elementOrigin, w = o.width(), h = o.height();
-      if (this.elementDrag === 6) {
+      if (this.elementDrag === H_ROT) {
         const cx = dest.left + (o.left + o.right) / 2 * dest.width(), cy = dest.top + (o.top + o.bottom) / 2 * dest.height();
         let deg = Math.atan2(e.x - cx, -(e.y - cy)) * 180 / Math.PI; if (deg < 0) deg += 360;
         const snap = Math.round(deg / 15) * 15; if (Math.abs(snap - deg) < 4) deg = snap % 360;
         el.rot = Math.fround(deg); this.invalidate(); return true;
       }
-      if (this.elementDrag === 1) {
+      if (this.elementDrag === H_MOVE) {
         const left = Math.max(0, Math.min(1 - w, o.left + dx)), top = Math.max(0, Math.min(1 - h, o.top + dy));
         el.left = left; el.top = top; el.right = left + w; el.bottom = top + h;
       } else {
-        const leftCorner = this.elementDrag === 2 || this.elementDrag === 4, topCorner = this.elementDrag === 2 || this.elementDrag === 3;
-        const fx = leftCorner ? o.right : o.left, fy = topCorner ? o.bottom : o.top;
         let px = e.x, py = e.y;
         if (el.rot && AnnotationPainter.rotates(el)) {
           const ocx = dest.left + (o.left + o.right) / 2 * dest.width(), ocy = dest.top + (o.top + o.bottom) / 2 * dest.height();
           [px, py] = PdfPageView.unrotate(px, py, ocx, ocy, el.rot);
         }
         const nx = Math.max(0, Math.min(1, (px - dest.left) / dest.width())), ny = Math.max(0, Math.min(1, (py - dest.top) / dest.height()));
-        let nw = Math.max(0.04, leftCorner ? fx - nx : nx - fx), nh = Math.max(0.03, topCorner ? fy - ny : ny - fy);
-        if (PdfPageView.aspectLocked(el)) {
-          const ratio = (w * dest.width()) / (h * dest.height()); nh = nw * dest.width() / (ratio * dest.height());
-          const room = topCorner ? fy : 1 - fy; if (nh > room) { nh = room; nw = nh * ratio * dest.height() / dest.width(); }
-          const roomX = leftCorner ? fx : 1 - fx; if (nw > roomX) { nw = roomX; nh = nw * dest.width() / (ratio * dest.height()); }
+        const id = this.elementDrag, MINW = 0.04, MINH = 0.03, locked = PdfPageView.aspectLocked(el);
+        if (id >= 2 && id <= 5) {
+          const leftCorner = id === 2 || id === 4, topCorner = id === 2 || id === 3;
+          const fx = leftCorner ? o.right : o.left, fy = topCorner ? o.bottom : o.top;
+          let nw = Math.max(MINW, leftCorner ? fx - nx : nx - fx), nh = Math.max(MINH, topCorner ? fy - ny : ny - fy);
+          if (locked) {
+            const ratio = (w * dest.width()) / (h * dest.height()); nh = nw * dest.width() / (ratio * dest.height());
+            const room = topCorner ? fy : 1 - fy; if (nh > room) { nh = room; nw = nh * ratio * dest.height() / dest.width(); }
+            const roomX = leftCorner ? fx : 1 - fx; if (nw > roomX) { nw = roomX; nh = nw * dest.width() / (ratio * dest.height()); }
+          }
+          el.left = leftCorner ? fx - nw : fx; el.right = leftCorner ? fx : fx + nw; el.top = topCorner ? fy - nh : fy; el.bottom = topCorner ? fy : fy + nh;
+        } else {   // edge handles: one side moves; aspect-locked kinds scale uniformly about the opposite edge / centre line
+          const horiz = id === H_L || id === H_R;
+          if (!locked) {
+            if (id === H_L) { el.left = Math.min(nx, o.right - MINW); el.right = o.right; el.top = o.top; el.bottom = o.bottom; }
+            else if (id === H_R) { el.left = o.left; el.right = Math.max(nx, o.left + MINW); el.top = o.top; el.bottom = o.bottom; }
+            else if (id === H_T) { el.top = Math.min(ny, o.bottom - MINH); el.bottom = o.bottom; el.left = o.left; el.right = o.right; }
+            else { el.top = o.top; el.bottom = Math.max(ny, o.top + MINH); el.left = o.left; el.right = o.right; }
+          } else {
+            const cx = (o.left + o.right) / 2, cy = (o.top + o.bottom) / 2;
+            let k = horiz ? (id === H_L ? o.right - nx : nx - o.left) / w : (id === H_T ? o.bottom - ny : ny - o.top) / h;
+            const kmin = Math.max(MINW / w, MINH / h);
+            // the dragged side may go as far as the page edge; the perpendicular axis grows symmetrically
+            const kmax = horiz ? Math.min((id === H_L ? o.right : 1 - o.left) / w, 2 * Math.min(cy, 1 - cy) / h) : Math.min((id === H_T ? o.bottom : 1 - o.top) / h, 2 * Math.min(cx, 1 - cx) / w);
+            k = Math.max(kmin, Math.min(Math.max(kmin, kmax), k));
+            const nw = w * k, nh = h * k;
+            if (horiz) { el.left = id === H_L ? o.right - nw : o.left; el.right = id === H_L ? o.right : o.left + nw; el.top = cy - nh / 2; el.bottom = cy + nh / 2; }
+            else { el.top = id === H_T ? o.bottom - nh : o.top; el.bottom = id === H_T ? o.bottom : o.top + nh; el.left = cx - nw / 2; el.right = cx + nw / 2; }
+          }
         }
-        el.left = leftCorner ? fx - nw : fx; el.right = leftCorner ? fx : fx + nw; el.top = topCorner ? fy - nh : fy; el.bottom = topCorner ? fy : fy + nh;
       }
       this.invalidate(); return true;
     }
     if (action === UP || action === CANCEL) {
-      const moved = this.elementMoved; this.elementDrag = 0; this.elementMoved = false;
+      const moved = this.elementMoved, id = this.elementDrag; this.elementDrag = 0; this.elementMoved = false;
       if (action === CANCEL) { const o = this.elementOrigin; se.rot = this.elementRot0; se.left = o.left; se.top = o.top; se.right = o.right; se.bottom = o.bottom; this.invalidate(); }
-      else if (moved) this._L('onInkChanged'); else this._L('onElementTapped', se);
+      else if (moved) this._L('onInkChanged'); else if (id === H_MOVE) this._L('onElementTapped', se);
       return true;
     }
     return true;
@@ -602,10 +727,17 @@ export class PdfPageView {
   onDraw(ctx) {
     if (!this.bitmap) return;
     const dest = this.contentRect(), dw = dest.width(), dh = dest.height();
+    const th = this.theme();
+    ctx.save();                                  // paper: soft shadow under a solid sheet
+    ctx.shadowColor = th.shadow; ctx.shadowBlur = 16; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 3;
     ctx.fillStyle = this.darkPage ? '#000' : '#fff';
     ctx.fillRect(dest.left, dest.top, dw, dh);
+    ctx.restore();
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(this._pageImage(), dest.left, dest.top, dw, dh);
+    ctx.save();                                  // hairline paper border (outside the sheet)
+    ctx.lineWidth = 1; ctx.strokeStyle = th.border; ctx.strokeRect(dest.left - 0.5, dest.top - 0.5, dw + 1, dh + 1);
+    ctx.restore();
     AnnotationPainter.dark = this.darkPage;
     const sup = this.suppressSelection;
     try {
@@ -904,6 +1036,18 @@ export class PdfPageView {
     }
   }
 
+  /** May this pointer start a page-turning swipe? Fingers (not while finger-inking) and, in read mode, the mouse (setMouseReadDrag). */
+  _swipeEligible(e) {
+    if (!this.pageSwipeEnabled || this.directTextSelection || this.lassoMode || this.highlightMode || this.memoMode || this.outlineMode) return false;
+    if (e.toolType === 'mouse') return this.mouseReadDrag && this.inkMode === 0;
+    return !this.isStylus(e) && !(this.inkMode !== 0 && this.fingerInk);
+  }
+  /** Mouse drag on the page turns pages in read mode (default true). It never applies while a writing tool is active. */
+  setMouseReadDrag(enabled) { this.mouseReadDrag = !!enabled; }
+  isMouseReadDrag() { return this.mouseReadDrag; }
+  /** Mouse wheel at zoom 1 turns pages through listener.onPageSwipe(+1|-1) (default true). */
+  setWheelPageTurn(enabled) { this.wheelPageTurn = !!enabled; }
+
   touchSlop() { return Math.max(14 * DP, 8 * 1.5); }
   swipeDistance() { return Math.max(48 * DP, Math.min((this.verticalPageSwipe ? this.height : this.width) * 0.1, 100 * DP)); }
 
@@ -972,21 +1116,28 @@ export class PdfPageView {
     };
     try { this.onTouchEvent(e); } catch (err) { console.error('PdfPageView.onTouchEvent', err); }
   }
+  /** Wheel: Ctrl/pinch = zoom around the pointer; zoomed = pan; at zoom 1 = page turn (onPageSwipe(+1|-1), debounced). */
   _onWheel(we) {
     if (!this.bitmap) return;
     we.preventDefault();
     const r = this.el.getBoundingClientRect(); const fx = we.clientX - r.left, fy = we.clientY - r.top;
     const unit = we.deltaMode === 1 ? 16 : we.deltaMode === 2 ? this.height : 1;
     if (we.ctrlKey) { // zoom around the pointer (also trackpad pinch)
-      const before = this.contentRect();
-      const nx = before.width() === 0 ? 0.5 : (fx - before.left) / before.width(), ny = before.height() === 0 ? 0.5 : (fy - before.top) / before.height();
-      this.scale = Math.max(1, Math.min(4, this.scale * Math.exp(-we.deltaY * unit * 0.0025)));
-      const size = this.contentSize();
-      this.panX = fx - nx * size[0] - this.baseLeft(size); this.panY = fy - ny * size[1] - this.baseTop(size);
-      this.clampPan(); this.invalidate();
-    } else if (this.scale > 1) {
+      this.setZoom(this.scale * Math.exp(-we.deltaY * unit * 0.0025), fx, fy);
+    } else if (this.scale > 1.001) {
       let dx = we.deltaX * unit, dy = we.deltaY * unit; if (we.shiftKey && dx === 0) { dx = dy; dy = 0; }
       this.panX -= dx; this.panY -= dy; this.clampPan(); this.invalidate();
+    } else if (this.wheelPageTurn && this._ptrs.length === 0) {
+      const now = performance.now();
+      if (now < this._wheelLock) { this._wheelLock = Math.max(this._wheelLock, now + 120); return; }   // inertia of the last turn
+      if (now - this._wheelLast > 250) this._wheelAcc = 0;
+      this._wheelLast = now;
+      let d = we.deltaY * unit; if (Math.abs(we.deltaX) > Math.abs(we.deltaY)) d = we.deltaX * unit;
+      this._wheelAcc += d;
+      if (Math.abs(this._wheelAcc) >= 40) {
+        const dir = this._wheelAcc > 0 ? 1 : -1; this._wheelAcc = 0; this._wheelLock = now + 450;
+        this._L('onPageSwipe', dir);
+      }
     }
   }
   _onContextMenu(ce) {
@@ -1015,9 +1166,9 @@ export class PdfPageView {
     if (am === DOWN) {
       this._L('onSelectionAdjustStarted');
       const edge = 72 * DP;
-      const eligible = this.pageSwipeEnabled && !stylus && !this.directTextSelection && !this.lassoMode && !this.highlightMode && !this.memoMode && !this.outlineMode && !(this.inkMode !== 0 && this.fingerInk);
+      const eligible = this._swipeEligible(e);
       this.bodySwipeCandidate = eligible && this.scale <= 1; this.edgeStartTime = e.time;
-      this.edgeSwipe = eligible && this.scale > 1 && (this.verticalPageSwipe ? (e.y < edge || e.y > this.height - edge) : (e.x < edge || e.x > this.width - edge));
+      this.edgeSwipe = eligible && e.toolType !== 'mouse' && this.scale > 1 && (this.verticalPageSwipe ? (e.y < edge || e.y > this.height - edge) : (e.x < edge || e.x > this.width - edge));
       if (this.edgeSwipe) { this.startX = e.x; this.startY = e.y; this.edgeStartTime = e.time; this._cancelBeginTextSelection(); return true; }
     }
     if (am === POINTER_DOWN) {
@@ -1115,7 +1266,7 @@ export class PdfPageView {
       }
       this.startX = this.currentX = e.x; this.startY = this.currentY = e.y; this.lastX = this.startX; this.lastY = this.startY;
       this.gestureMoved = false; this.scalingOccurred = false;
-      this.bodySwipeCandidate = this.pageSwipeEnabled && !stylus && !this.directTextSelection && !this.lassoMode && !this.highlightMode && !this.memoMode && !this.outlineMode && !(this.inkMode !== 0 && this.fingerInk) && this.scale <= 1;
+      this.bodySwipeCandidate = this._swipeEligible(e) && this.scale <= 1;
       this.drawing = this.highlightMode && dest.contains(this.startX, this.startY);
       this.selectionStartRegion = (!this.drawing && !this.memoMode && !this.outlineMode && this.inkMode === 0) ? this.textRegionAt(this.startX, this.startY, dest) : null;
       this.selectionEndRegion = this.selectionStartRegion; this.selectionCandidate = this.selectionStartRegion != null; this.selectingText = false;
@@ -1231,7 +1382,12 @@ export class PdfPageView {
         if (this.annotationStore) for (let i = this.annotationStore.elements.length - 1; i >= 0; i--) {
           const el = this.annotationStore.elements[i];
           if (el.page === this.page && this.elementContains(el, e.x, e.y, dest)) {
-            if (PdfPageView.selectable(el)) { if (el === this._selectedElement) this._L('onElementTapped', el); else { this._selectedElement = el; this.invalidate(); } }
+            if (el.kind === 'text' && el.list === 'check') {   // clickable check boxes toggle `checked`
+              const pad = Math.max(4, Math.min(10, dest.width() * el.textSize * 0.3));
+              const hit = AnnotationPainter.checkBoxes(dest, el).find(c => e.x >= c.rect.left - pad && e.x <= c.rect.right + pad && e.y >= c.rect.top - pad && e.y <= c.rect.bottom + pad);
+              if (hit) { el.toggleChecked ? el.toggleChecked(hit.index) : (el.checked = el.checked || [], el.checked[hit.index] = !el.checked[hit.index]); this.invalidate(); this._L('onCheckToggled', el, hit.index, !!el.checked[hit.index]); this._L('onInkChanged'); return true; }
+            }
+            if (PdfPageView.selectable(el)) { if (el === this._selectedElement) this._L('onElementTapped', el); else { this._setSelected(el); this.invalidate(); } }
             else this._L('onElementTapped', el);
             return true;
           }

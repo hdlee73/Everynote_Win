@@ -98,3 +98,27 @@ parseColor(hex), drawShape(c,b,spec,pageWidth), drawTable(c,b,text,pageWidth)`; 
 * painter.js: `AnnotationPainter.stroke(c, d, stroke)` (one stroke in its pen style; translucent colours are drawn opaque on a layer and composited once, so self-overlaps do not darken), `strokes()` uses it, `rotates(e)`, `rotateAround(c, deg, px, py)`, `PEN_NAMES`. `elements()` rotates image/sticker/shape/table around the box centre. Pen look: 1 pencil (.78 alpha, thinner), 2 fountain (width follows direction, 45° nib), 3 brush (taper at both ends, .92 alpha), 4 marker (square caps, constant 1.5x width, .82 alpha).
 * shapes.js is unchanged (rotation is applied by the painter).
 * `ui/colorpicker.js`: `ColorPicker.PALETTE` (32 ARGB ints, 4 rows of 8), `ColorPicker.show(context, title, initialArgb, alpha, onPick)` (context ignored; returns the AlertDialog; `onPick(argbInt)`, opacity 255 when `alpha` is false), plus `ColorPicker.colorToHSV/HSVToColor`. Styles in `css/colorpicker.css` (linked in index.html).
+
+## v3.0.0 additions (Everynote)
+### PageElement text formatting (typing boxes, requirement 7) — additive JSON, Android ignores the keys
+| field | values | JSON |
+|---|---|---|
+| `align` | `'left'` (default) \| `'center'` \| `'right'` (`PageElement.ALIGNS`) | `"align"` written only when not `left` |
+| `underline` | bool | `"underline":true` only when true |
+| `list` | `'none'` (default) \| `'bullet'` \| `'number'` \| `'check'` (`PageElement.LISTS`) | `"list"` only when not `none` |
+| `checked` | `bool[]`; `checked[i]` = state of the i-th `'\n'`-separated line (only meaningful for `list === 'check'`) | `"checked":[…]` only when any is true, trailing `false`s trimmed |
+
+Keys come after `italic`; elements without formatting serialize exactly as v2 (byte identical). Reading: unknown `align`/`list` -> default, `underline` via optBoolean, `checked` not an array -> `[]`, entries coerced to bool (max 5000). Helpers: `e.isChecked(i)`, `e.setChecked(i, v)`, `e.toggleChecked(i)` (returns the new state). Bold/italic/font/size/colour keep their existing fields; `bold`+`underline`+`align`+`list` combine freely. Export/import JSON and `cloneAnnotations` carry the fields.
+Deleting/inserting lines in the editor is the editor's job: keep `checked` index-aligned with the lines (`text.split('\n')`).
+
+### Text layout (the contract between painter and the inline editor)
+`AnnotationPainter.layoutText(measure, text, widthPx, sizePx, {align, list})` -> `{markerW, textW, pitch, lines:[{para, first, text, x, y, w}], height}` (x = left offset of the line from the box left, y = baseline offset from the box top, w = width without trailing blanks).
+* font: the element's typeface at `sizePx = max(9, pageWidthPx * textSize)`; line pitch `1.35 * size`, first baseline `size`; wrapping is by characters (as v2), so lines never exceed `textW`.
+* list kinds reserve a marker column on the left: `1.6 * size` (`2.1 * size` for a number list of 10+ lines); `textW = boxWidth - markerW`. The marker belongs to the first wrapped line of each `'\n'` line; continuation lines start at the same x (hanging indent). An empty line keeps its marker/number and one pitch.
+  * bullet: filled circle, radius `0.13 size`, centre `x = markerW - 0.45 size`, `y = baseline - 0.33 size`.
+  * number: `"<n>."` (n = line index + 1, blank lines count) right-aligned to `markerW - 0.35 size`, same font/colour.
+  * check: rounded square `0.8 size`, right edge at `markerW - 0.35 size`, bottom `0.03 size` below the baseline (`AnnotationPainter.checkBoxRect(mr, baseline, size)`), 1 px+ outline in the text colour; checked = filled with a contrasting tick and the line's text/underline drawn at 50 % opacity.
+* alignment applies inside the text area (`markerW .. markerW+textW`) per wrapped line; trailing blanks are ignored for centre/right.
+* underline: rectangle `y = baseline + 0.12 size`, thickness `max(1, 0.065 size)`, spanning the line's text width (`w`).
+* CSS equivalent for a DOM editor: one block per line with `padding-left: 1.6em` (2.1em), `text-align`, `line-height: 1.35`, `text-decoration: underline; text-underline-offset: .12em`, marker as an absolutely positioned `::before` at `left: .25em`.
+Other painter API: `AnnotationPainter.textBlock(c, text, box, size, color, face, {align, underline, list, checked})` (`text()` = `textBlock()` with defaults, pixel identical), `textOpts(e)`, `checkBoxes(pageRect, e)` -> `[{index, rect}]` page-px rects of the boxes (used for hit testing, e.g. by the editor), `checkBoxRect`, `fitHeight(text, widthFraction, sizeFraction, pageAspect, face, list='none')` (new optional 6th arg: the marker column narrows the text area). `AnnotationPainter.elements()` / `all()` (export, print, thumbnails) paint the formatting for every `kind:'text'` element.

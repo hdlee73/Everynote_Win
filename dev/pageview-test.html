@@ -13,7 +13,7 @@ const log = [];
 const L = n => (...a) => { log.push({ n, a }); };
 const store = new AnnotationStore();
 const listener = {};
-for (const n of ['onHighlightCreated','onMarkTapped','onMemoPointRequested','onZoomGestureStarted','onPageSwipe','onOutlinePointRequested','onInkChanged','onTextSelectionFinished','onTranslationTapped','onSelectionAdjustStarted','onLassoSelectionFinished','onElementTapped','onBlankLongPress']) listener[n] = L(n);
+for (const n of ['onHighlightCreated','onMarkTapped','onMemoPointRequested','onZoomGestureStarted','onPageSwipe','onOutlinePointRequested','onInkChanged','onTextSelectionFinished','onTranslationTapped','onSelectionAdjustStarted','onLassoSelectionFinished','onElementTapped','onBlankLongPress','onZoomChanged','onElementDeleted','onElementSelected','onCheckToggled']) listener[n] = L(n);
 const view = new PdfPageView(listener);
 document.getElementById('root').appendChild(view.el);
 view.setAnnotationStore(store);

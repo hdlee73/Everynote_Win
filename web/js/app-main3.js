@@ -37,7 +37,7 @@ export function section(title, tiles = [], custom = null) { return { title, tile
 
 /** ImageButton made by icon(): transparent, glyph centred at 24px, padding as given. */
 function iconButton(name, label, tint, onClick, w, hgt, pad = 12) {
-  const b = h('button', { class: 'm3-ib', type: 'button', 'aria-label': label, style: { width: w + 'px', height: hgt + 'px', padding: pad + 'px' } }, icon(name, 24, css(tint)));
+  const b = h('button', { class: 'm3-ib', type: 'button', 'aria-label': label, title: label, style: { width: w + 'px', height: hgt + 'px', padding: pad + 'px' } }, icon(name, 24, css(tint)));
   b.dataset.tint = String(tint);
   if (onClick) b.addEventListener('click', onClick);
   return b;
@@ -96,6 +96,7 @@ const methods = {
         break;
       default:
         t.push(tile('PDF 내보내기', 'ic_folder_open', run('exportPdf')));
+        t.push(tile('인쇄', 'ic_print', () => this.callUi2('printDocument')));
         t.push(tile('노트·발췌 내보내기', 'ic_copy', run('exportStudy')));
         t.push(tile('주석 백업', 'ic_copy', run('exportAnnotations')));
         t.push(tile('주석 백업 복원', 'ic_undo', run('importSidecar')));
@@ -113,7 +114,11 @@ const methods = {
     sections.push(section('읽기 편의', [tile('화면 켜 둠', 'ic_clock', () => {
       prefs.putBoolean('keep_awake', !awake); this.applyKeepAwake(); this.toast(!awake ? '읽는 동안 화면이 꺼지지 않습니다' : '화면 자동 꺼짐을 따릅니다');
     }, { selected: awake })]));
-    sections.push(section('도움말', [tile('사용법', 'ic_outline', () => this.showHelp())]));
+    sections.push(section('동기화·인쇄', [
+      tile('구글 드라이브 동기화', 'ic_cloud_sync', () => this.callUi2('showSyncSettings')),
+      tile('인쇄', 'ic_print', () => this.callUi2('printDocument'))]));
+    sections.push(section('도움말', [tile('사용법', 'ic_outline', () => this.showHelp()),
+      tile('오프라인 사용 안내', 'ic_wifi_off', () => this.callUi2('showAboutOffline'))]));
     return this.showSheet('메뉴', sections);
   },
   // ================================================================== lasso shape bar
@@ -121,8 +126,8 @@ const methods = {
     const bar = this.lassoBar = h('div', { class: 'm3-lasso', dataset: { tag: 'lasso_bar' }, style: { display: 'none' } });
     const icons = ['ic_lasso', 'ic_rect', 'ic_circle'], names = ['자유', '네모', '원'];
     for (let i = 0; i < 3; i++) {
-      const chip = h('div', { class: 'm3-lchip', role: 'button', 'aria-label': '올가미 ' + names[i], dataset: { tag: 'lasso_shape_' + i } },
-        icon(icons[i], 20, css(NAVY)), h('span', { class: 'm3-llabel' }, names[i]));
+      const chip = h('div', { class: 'm3-lchip', role: 'button', 'aria-label': '올가미 ' + names[i], title: '올가미 · ' + names[i], dataset: { tag: 'lasso_shape_' + i } },
+        icon(icons[i], 22, 'currentColor'));
       chip.addEventListener('click', () => this.chooseLassoShape(i));
       bar.append(chip);
     }
@@ -197,7 +202,7 @@ const methods = {
   /** Resizes the box height so the whole text is visible with the element's own width, size and typeface. */
   fitTextElement(e) {
     const view = this.viewForPage(e.page); const aspect = view ? view.pageAspect() : 1.414;
-    let height = AnnotationPainter.fitHeight(e.text, e.right - e.left, e.textSize, aspect, AnnotationPainter.typeface(e.font, e.bold, e.italic));
+    let height = AnnotationPainter.fitHeight(e.text, e.right - e.left, e.textSize, aspect, AnnotationPainter.typeface(e.font, e.bold, e.italic), e.list || 'none');
     height = Math.min(.98, height);
     if (e.top + height > .99) e.top = Math.max(0, .99 - height);
     e.bottom = e.top + height;
@@ -223,8 +228,9 @@ const methods = {
     edit.value = e.text || '';
     edit.style.setProperty('--ph', `rgba(${(e.color >> 16) & 255},${(e.color >> 8) & 255},${e.color & 255},.4)`);
     edit.style.width = '120px';
-    edit.addEventListener('input', () => { e.text = edit.value; this._inlineDirty = true; });
+    edit.addEventListener('input', () => { e.text = edit.value; this._inlineDirty = true; this._inlineMarksDirty = true; });
     layer.append(edit);
+    this.inlineMarks = h('div', { class: 'm3-inline-marks', dataset: { tag: 'inline_marks' } }); layer.append(this.inlineMarks);
     this.inlineMove = this.inlineHandle('✥', '글상자 이동', (dx, dy, page) => {
       const w = e.right - e.left, hh = e.bottom - e.top;
       const nx = Math.max(0, Math.min(1 - w, e.left + dx / page.width())), ny = Math.max(0, Math.min(1 - hh, e.top + dy / page.height()));
@@ -267,11 +273,19 @@ const methods = {
     const px = Math.max(9, page.width() * e.textSize);
     let changed = false;
     if (Math.abs((this._inlinePx || 0) - px) > .4) { this._inlinePx = px; edit.style.fontSize = px + 'px'; edit.style.lineHeight = (px * 1.35) + 'px'; changed = true; }
+    const kind = e.list || 'none', nLines = (edit.value.match(/\n/g) || []).length + 1;
+    const padL = (3 + (kind === 'none' ? 0 : (kind === 'number' && nLines >= 10 ? 2.1 : 1.6) * px)).toFixed(1) + 'px';
+    if (edit.style.paddingLeft !== padL) { edit.style.paddingLeft = padL; changed = true; }
     if (edit.style.left !== left + 'px') edit.style.left = left + 'px';
     if (edit.style.top !== top + 'px') edit.style.top = top + 'px';
     if (edit.style.width !== width + 'px') { edit.style.width = width + 'px'; changed = true; }
     if (changed || this._inlineDirty) { this._inlineDirty = false; edit.style.height = 'auto'; edit.style.height = edit.scrollHeight + 2 + 'px'; }
     const height = edit.offsetHeight;
+    if (this.inlineMarks) {
+      const ms = this.inlineMarks.style;
+      if (ms.left !== left + 'px') ms.left = left + 'px'; if (ms.top !== top + 'px') ms.top = top + 'px';
+      if (changed || this._inlineMarksDirty !== false) { this._inlineMarksDirty = false; this.updateInlineMarkers(); }
+    }
     const editBottom = top + Math.max(18, height);
     this.placeHandle(this.inlineMove, left - 8, top - 34);
     this.placeHandle(this.inlineDelete, left + width - 22, top - 34);
@@ -305,15 +319,53 @@ const methods = {
     const tf = AnnotationPainter.typeface(e.font, e.bold, e.italic);
     edit.style.fontFamily = tf.family; edit.style.fontWeight = tf.getStyle() & 1 ? '700' : '400'; edit.style.fontStyle = tf.getStyle() & 2 ? 'italic' : 'normal';
     edit.style.color = css(e.color | 0xFF000000);
+    edit.style.textAlign = e.align || 'left'; edit.style.textDecoration = e.underline ? 'underline' : 'none';
+    this._inlineMarksDirty = true;
+    if (this._inlineSync) this._inlineSync();
     if (this.inlineSize) this.inlineSize.textContent = this.pointsOf(e) + 'pt';
     this._inlineDirty = true; this.positionInlineText();
+  },
+  /** List markers (bullet / number / check box) of the typing box being edited, laid out with the same AnnotationPainter.layoutText the page painter uses. */
+  updateInlineMarkers() {
+    const m = this.inlineMarks, e = this.inlineElement, edit = this.inlineEdit; if (!m || !e || !edit) return;
+    m.textContent = '';
+    const list = e.list || 'none', px = this._inlinePx || 0; if (list === 'none' || px <= 0) return;
+    const ctx = this._measureCtx || (this._measureCtx = document.createElement('canvas').getContext('2d'));
+    ctx.font = AnnotationPainter.typeface(e.font, e.bold, e.italic).css(px);
+    const boxW = Math.max(px, edit.clientWidth - 6);
+    const L = AnnotationPainter.layoutText(s => ctx.measureText(s).width, edit.value, boxW, px, { list, align: e.align || 'left' });
+    const color = css(e.color | 0xFF000000), ox = 4, oy = 3;      // textarea border (1) + padding (3 / 2)
+    const mr = ox + L.markerW - px * .35;
+    for (const ln of L.lines) {
+      if (!ln.first) continue;
+      const base = oy + ln.y;
+      if (list === 'bullet') {
+        const d = px * .26;
+        m.append(h('div', { class: 'm3-mk', style: { left: (mr - px * .3 - d / 2) + 'px', top: (base - px * .33 - d / 2) + 'px', width: d + 'px', height: d + 'px', borderRadius: '50%', background: color } }));
+      } else if (list === 'number') {
+        m.append(h('div', { class: 'm3-mk m3-mk-num', style: { left: '0', width: mr + 'px', top: (base - px) + 'px', fontSize: px + 'px', lineHeight: (px * 1.35) + 'px', color, fontFamily: edit.style.fontFamily, fontWeight: edit.style.fontWeight } }, (ln.para + 1) + '.'));
+      } else {
+        const r = AnnotationPainter.checkBoxRect(mr, base, px), on = e.isChecked ? e.isChecked(ln.para) : !!(e.checked && e.checked[ln.para]), para = ln.para;
+        const box = h('div', { class: 'm3-mk m3-chk' + (on ? ' on' : ''), role: 'checkbox', 'aria-checked': String(on), 'aria-label': (para + 1) + '번째 줄 완료 표시', dataset: { tag: 'inline_check', line: para },
+          style: { left: r.left + 'px', top: r.top + 'px', width: r.width() + 'px', height: r.height() + 'px', borderColor: color, background: on ? color : 'transparent', borderRadius: (px * .14) + 'px', borderWidth: Math.max(1, px * .08) + 'px' } },
+        on ? icon('ic_check_bold', Math.max(8, r.width() * .85), '#fff') : null);
+        box.addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); });
+        box.addEventListener('click', ev => {
+          ev.preventDefault(); ev.stopPropagation();
+          if (e.setChecked) e.setChecked(para, !on); else { if (!Array.isArray(e.checked)) e.checked = []; while (e.checked.length <= para) e.checked.push(false); e.checked[para] = !on; }
+          this._inlineMarksDirty = true; this.updateInlineMarkers();
+        });
+        m.append(box);
+      }
+    }
   },
   changeInlineSize(delta) {
     if (!this.inlineElement) return;
     const points = Math.max(8, Math.min(72, this.pointsOf(this.inlineElement) + delta));
     this.inlineElement.textSize = points / TEXT_PAGE_POINTS; this.applyInlineStyle();
   },
-  /** Slim one-row toolbar (Aa · B · I · size · delete · done); the font and colour rows open only when "Aa" is tapped. */
+  /** Typing toolbar (icon buttons, Samsung Notes style): row 1 Aa . B I U . size . delete . done; row 2 align L/C/R . bullet / number / check list.
+   *  The font and colour rows open only when "Aa" is tapped. */
   buildInlineBar(e) {
     const card = h('div', { class: 'm3-inline-bar', dataset: { tag: 'inline_style_bar' } });
     const panel = h('div', { class: 'm3-inline-panel', style: { display: 'none' } });
@@ -321,38 +373,47 @@ const methods = {
     faces.dataset.tag = 'text_fonts'; faces.style.padding = '2px 0'; faces.style.height = '40px'; panel.append(faces);
     const palette = this.swatches(TEXT_COLORS, () => e.color | 0xFF000000, c => { e.color = c | 0xFF000000; this.applyInlineStyle(); }, 26, 1);
     palette.dataset.tag = 'text_colors'; palette.style.padding = '2px 0'; palette.style.height = '34px'; panel.append(palette);
-    const row = h('div', { class: 'm3-inline-row' });
-    const bold = [!!e.bold], italic = [!!e.italic];
-    const style = this.stepButton('Aa', '글꼴·색 펼치기'); style.dataset.tag = 'text_style_toggle';
-    Object.assign(style.style, { width: '38px', height: '32px', margin: '0 6px 0 2px', fontSize: '14px', fontWeight: '700' });
-    style.addEventListener('click', () => {
-      const open = panel.style.display === 'none'; panel.style.display = open ? '' : 'none';
-      style.style.background = open ? '#D6E6FF' : '#F2F2F7';
+    const tbtn = (content, label, tag, onClick) => {
+      const b = h('button', { class: 'm3-tbtn', type: 'button', 'aria-label': label, title: label, 'aria-pressed': 'false', dataset: { tag } }, content);
+      b.addEventListener('mousedown', ev => ev.preventDefault());     // keep the caret in the text box
+      b.addEventListener('click', onClick); return b;
+    };
+    const row = h('div', { class: 'm3-inline-row' }), row2 = h('div', { class: 'm3-inline-row m3-inline-row2' });
+    const style = tbtn('Aa', '글꼴·색 펼치기', 'text_style_toggle', () => {
+      const open = panel.style.display === 'none'; panel.style.display = open ? '' : 'none'; style.classList.toggle('on', open);
     });
-    row.append(style);
-    const boldChip = this.toggleChip('B', 1, bold, () => { e.bold = bold[0]; this.applyInlineStyle(); }); boldChip.dataset.tag = 'text_bold';
-    const italicChip = this.toggleChip('I', 2, italic, () => { e.italic = italic[0]; this.applyInlineStyle(); }); italicChip.dataset.tag = 'text_italic';
-    Object.assign(boldChip.style, { width: '32px', height: '32px', margin: '0 2px' });
-    Object.assign(italicChip.style, { width: '32px', height: '32px', margin: '0 6px 0 2px' });
-    row.append(boldChip, italicChip);
-    const minus = this.stepButton('−', '글자 작게'); minus.style.cssText += 'width:30px;height:32px;'; minus.addEventListener('click', () => this.changeInlineSize(-1));
+    style.classList.add('m3-aa');
+    const bold = tbtn(icon('ic_bold', 20, 'currentColor'), '굵게', 'text_bold', () => { e.bold = !e.bold; this.applyInlineStyle(); });
+    const italic = tbtn(icon('ic_italic', 20, 'currentColor'), '기울임', 'text_italic', () => { e.italic = !e.italic; this.applyInlineStyle(); });
+    const underline = tbtn(icon('ic_underline', 20, 'currentColor'), '밑줄', 'text_underline', () => { e.underline = !e.underline; this.applyInlineStyle(); });
+    const minus = tbtn(icon('ic_minus', 18, 'currentColor'), '글자 작게', 'text_smaller', () => this.changeInlineSize(-1));
+    const plus = tbtn(icon('ic_plus', 18, 'currentColor'), '글자 크게', 'text_bigger', () => this.changeInlineSize(1));
     this.inlineSize = h('div', { class: 'm3-inline-size', dataset: { tag: 'text_size' } });
-    const plus = this.stepButton('＋', '글자 크게'); plus.style.cssText += 'width:30px;height:32px;'; plus.addEventListener('click', () => this.changeInlineSize(1));
-    row.append(minus, this.inlineSize, plus, h('div', { style: { flex: '1' } }));
+    row.append(style, bold, italic, underline, h('div', { class: 'm3-sep' }), minus, this.inlineSize, plus, h('div', { style: { flex: '1' } }));
     row.append(iconButton('ic_delete', '글상자 삭제', DANGER, () => this.deleteInlineText(), 34, 34, 7));
     const done = iconButton('ic_check', '입력 완료', 0xFFFFFFFF | 0, () => this.commitInlineText(), 34, 34, 7);
     done.dataset.tag = 'text_done'; done.style.background = css(ACCENT); done.style.borderRadius = '17px'; done.style.marginLeft = '4px';
     row.append(done);
-    card.append(row, panel);
+    const aligns = [['left', '왼쪽 정렬', 'ic_align_left'], ['center', '가운데 정렬', 'ic_align_center'], ['right', '오른쪽 정렬', 'ic_align_right']]
+      .map(([v, label, ic]) => ({ v, b: tbtn(icon(ic, 20, 'currentColor'), label, 'text_align_' + v, () => { e.align = v; this.applyInlineStyle(); }) }));
+    const lists = [['bullet', '글머리 기호', 'ic_list_bullet'], ['number', '번호 목록', 'ic_list_number'], ['check', '체크리스트', 'ic_list_check']]
+      .map(([v, label, ic]) => ({ v, b: tbtn(icon(ic, 20, 'currentColor'), label, 'text_list_' + v, () => { e.list = e.list === v ? 'none' : v; this.applyInlineStyle(); }) }));
+    row2.append(...aligns.map(a => a.b), h('div', { class: 'm3-sep' }), ...lists.map(l => l.b));
+    const mark = (b, on) => { b.classList.toggle('on', !!on); b.setAttribute('aria-pressed', String(!!on)); };
+    this._inlineSync = () => {
+      mark(bold, e.bold); mark(italic, e.italic); mark(underline, e.underline);
+      aligns.forEach(a => mark(a.b, (e.align || 'left') === a.v)); lists.forEach(l => mark(l.b, e.list === l.v));
+    };
+    card.append(row, row2, panel);
     this.inlineBar = card;
     this.viewportLayer.append(card);
   },
   removeInlineViews() {
     AnnotationPainter.skip = null;
     if (this._inlineRaf) cancelAnimationFrame(this._inlineRaf); this._inlineRaf = 0;
-    for (const v of [this.inlineEdit, this.inlineMove, this.inlineResize, this.inlineDelete, this.inlineBar]) if (v) v.remove();
+    for (const v of [this.inlineEdit, this.inlineMarks, this.inlineMove, this.inlineResize, this.inlineDelete, this.inlineBar]) if (v) v.remove();
     if (this.inlineEdit && document.activeElement === this.inlineEdit) this.inlineEdit.blur();
-    this.inlineEdit = null; this.inlineMove = this.inlineResize = this.inlineDelete = null; this.inlineBar = null; this.inlineSize = null;
+    this.inlineEdit = null; this.inlineMarks = null; this._inlineSync = null; this.inlineMove = this.inlineResize = this.inlineDelete = null; this.inlineBar = null; this.inlineSize = null;
     this.inlineElement = null; this.inlineStore = null; this.inlineView = null; this._inlinePx = 0;
   },
   /** Saves the text being typed (an empty new box is dropped; emptying an old box deletes it). */
@@ -363,7 +424,9 @@ const methods = {
     this.removeInlineViews();
     if (text === '') { if (!fresh && target) { const i = target.elements.indexOf(e); if (i >= 0) target.elements.splice(i, 1); target.save(); } }
     else {
-      e.text = text; this.fitTextElement(e);
+      e.text = text;
+      if (e.list !== 'check') e.checked = []; else if (Array.isArray(e.checked)) e.checked.length = Math.min(e.checked.length, text.split('\n').length);
+      this.fitTextElement(e);
       if (fresh && target && !target.elements.includes(e)) target.elements.push(e);
       if (target) target.save();
       this.saveTextStyle(e);
@@ -524,7 +587,7 @@ const methods = {
   /** Large, left aligned help card: sections by principle and by menu (13 chapters), scrolls inside the card. */
   showHelp() {
     const card = h('div', { class: 'm3-help', dataset: { tag: 'help_card' } });
-    card.append(h('div', { class: 'm3-help-title' }, 'PDF Note 사용법'), h('div', { class: 'm3-help-ver' }, '버전 ' + this.appVersion()));
+    card.append(h('div', { class: 'm3-help-title' }, 'Everynote 사용법'), h('div', { class: 'm3-help-ver' }, '버전 ' + this.appVersion()));
     const body = h('div', { class: 'm3-help-body' });
     for (const sec of HELP) {
       body.append(h('div', { class: 'm3-help-h' }, sec[0]));
@@ -585,7 +648,7 @@ export function initMain3(app) {
   // only fill what part 1/2 have not set up already
   const dflt = (k, v) => { if (app[k] === undefined) app[k] = v; };
   for (const k of ['inlineEdit', 'inlineElement', 'inlineStore', 'inlineView', 'inlineMove', 'inlineResize', 'inlineDelete', 'inlineBar', 'inlineSize',
-    'recorder', 'recordingFile', 'recordingStore', 'recorderBar', 'recorderTime', 'lassoBar']) dflt(k, null);
+    'recorder', 'recordingFile', 'recordingStore', 'recorderBar', 'recorderTime', 'lassoBar', 'inlineMarks']) dflt(k, null);
   dflt('inlineFresh', false); dflt('recordingStarted', 0); dflt('recordingPage', 0);
   app.lassoShape = prefs.getInt('lasso_shape', 0);
   app._appVersion = ''; app._destroyed = false;
@@ -602,10 +665,12 @@ const HELP = [
     "여러 문서|상단 탭으로 문서를 전환하고 × 로 닫습니다. 기록은 문서마다 따로 저장됩니다."],
   ["2. 화면 구성",
     "상단 줄|문서함, 문서 이름, 페이지 미리보기, 검색, 전체 화면, 더보기(⋮) 메뉴가 있습니다.",
-    "하단 도구 줄|읽기 · 펜 · 하이라이트 · 지우개 · 올가미 · 텍스트 · 메모 · 삽입 · 실행 취소 · 다시 실행 순서입니다. 선택한 도구는 배경이 진하게 표시되고, 선택된 도구를 한 번 더 누르면 굵기·색 같은 세부 설정이 열립니다.",
+    "하단 도구 줄|읽기 · 펜 · 하이라이트 · 지우개 · 올가미 · 텍스트 · 메모 · 삽입 · 실행 취소 · 다시 실행 순서이며 모두 아이콘입니다(마우스를 올리면 이름이 보입니다). 선택한 도구는 배경이 진하게 표시되고, 선택된 도구를 한 번 더 누르면 굵기·색 같은 세부 설정이 열립니다.",
+    "확대 · 축소 · 페이지 추가|화면 왼쪽의 알약 버튼으로 확대(＋) · 축소(－)하고, 가운데 % 표시를 누르면 100%로 돌아옵니다(Ctrl + 휠 · Ctrl + ＋/－/0도 됩니다). 화면 오른쪽 아래의 ‘페이지 추가’ 버튼은 현재 페이지 뒤에 새 페이지를 넣습니다.",
     "왼쪽 패널|검색 · 페이지 미리보기 · 개요 · 음성 녹음 탭이 있습니다. 개요 아이콘으로 열고 × 로 닫습니다.",
     "반투명 화살표|본문 양옆의 화살표를 누르면 이전·다음 페이지로 이동합니다."],
   ["3. 읽기와 이동",
+    "마우스·키보드로 넘기기|읽기 모드에서 마우스 휠, 본문 좌우 가장자리의 화살표 버튼, 키보드 ← → ↑ ↓ · PageUp/PageDown(Home/End는 처음/마지막 페이지)으로 넘기고, 마우스로 페이지를 끌어도 손가락처럼 책장이 넘어갑니다. 필기 모드에서는 마우스가 펜처럼 글씨를 쓰므로 끌어서는 넘어가지 않습니다(휠 · 화살표 · 키보드는 사용 가능).",
     "페이지 넘기기|본문을 좌우로 쓸어 넘깁니다. 손가락을 따라 책장이 접히며, 아래쪽을 잡으면 아래 모서리부터, 위쪽을 잡으면 위쪽부터 넘어갑니다. 더보기 메뉴의 ‘넘김 효과’에서 책장 넘김 · 슬라이드 · 효과 없음 중에서 고를 수 있습니다.",
     "확대·이동|두 손가락으로 확대하고, 확대한 상태에서는 드래그로 화면을 옮깁니다. 확대 중에는 화면 가장자리에서 쓸어야 페이지가 넘어갑니다.",
     "전체 화면|상단의 전체 화면 버튼을 누르면 메뉴가 숨겨집니다. 화면 아래에서 위로 쓸어올리면 도구 모음이 다시 나타납니다.",
@@ -617,17 +682,19 @@ const HELP = [
     "단어장 연결|‘단어장 찾기’ 후 사전 앱의 ‘PDF로 돌아가기’ 버튼으로 돌아옵니다."],
   ["5. 필기 (펜)",
     "펜 선택|하단의 연필 아이콘을 눌러 필기 모드로 들어갑니다. S펜은 바로 쓰이고, 손가락 필기는 펜 메뉴의 ‘손가락 필기’를 켜야 합니다.",
+    "펜 메뉴|펜 아이콘을 한 번 더 누르면 펜 종류(볼펜 · 연필 · 만년필 · 붓 · 사인펜), 굵기(선 4단계), 색, 투명도, 직선 · 손가락 필기 스위치가 아이콘으로 나타납니다.",
     "펜 종류|펜 메뉴에서 볼펜 · 연필 · 만년필 · 붓 · 사인펜을 고릅니다. 연필은 가늘고 살짝 흐리며, 만년필은 펜촉 각도에 따라 굵기가 변하고, 붓은 시작과 끝이 가늘어지며, 사인펜은 일정한 굵기로 쓰입니다.",
-    "굵기·색·투명도|굵기는 얇게~최대 4단계, 색은 기본 팔레트 또는 무지개 칩으로 원하는 색을 만들고, 투명도 막대로 흐리게 할 수 있습니다.",
-    "직선|펜 메뉴의 ‘직선’을 켜면 시작점과 끝점을 잇는 반듯한 선을 긋습니다.",
+    "굵기·색·투명도|굵기는 선 아이콘 4단계(얇게~최대), 색은 기본 팔레트 또는 무지개 칩으로 원하는 색을 만들고, 투명도 막대로 흐리게 할 수 있습니다.",
+    "직선|펜 메뉴의 직선(／) 아이콘을 켜면 시작점과 끝점을 잇는 반듯한 선을 긋습니다.",
     "지우개|지우개 아이콘으로 필기와 하이라이트를 지웁니다. 지울 부분을 문지르거나 눌러서 한 획(하이라이트는 한 덩어리)씩 지워집니다. 실행 취소·다시 실행도 사용할 수 있습니다.",
-    "올가미|영역을 그려 필기를 선택하고 옮기거나 지웁니다. 올가미 모양은 도구에서 바꿀 수 있습니다."],
+    "올가미|영역을 그려 필기를 선택하고 옮기거나 지웁니다. 올가미 모양(자유 · 네모 · 원)은 위쪽 아이콘 막대에서 바꿀 수 있습니다."],
   ["6. 하이라이트",
     "만드는 법|하이라이트 아이콘을 켜고 글자를 드래그하거나, 글자를 선택한 뒤 팝업의 ‘하이라이트’를 누릅니다.",
     "색·투명도|하이라이트 아이콘을 한 번 더 누르면 색을 고를 수 있고, 무지개 칩에서 투명도까지 조절합니다.",
     "삭제|지우개로 문지르면 지워집니다. 하이라이트는 개요 목록에 나타나지 않습니다(메모가 붙은 것만 ‘메모’ 목록에 표시됩니다)."],
   ["7. 텍스트 상자",
-    "넣기|하단의 T 아이콘을 누르고 문서를 탭하면 입력할 수 있습니다. 입력 중에는 글꼴 · 굵게/기울임 · 크기 · 색을 바꾸는 카드가 글상자 위나 아래에 나타나 입력 내용을 가리지 않습니다.",
+    "넣기|하단의 T 아이콘을 누르고 문서를 탭하면 입력할 수 있습니다. 입력 중에는 글꼴 · 굵게 · 기울임 · 밑줄 · 크기 · 색과 정렬 · 목록을 바꾸는 카드가 글상자 위나 아래에 나타나 입력 내용을 가리지 않습니다.",
+    "정렬 · 목록 · 밑줄|카드의 둘째 줄에서 왼쪽 · 가운데 · 오른쪽 정렬과 글머리 기호(●) · 번호 목록(1. 2. 3.) · 체크리스트(☑)를 고릅니다. 체크리스트는 입력 중이나 입력을 마친 뒤에도 네모 칸을 눌러 완료 표시를 할 수 있습니다. ‘Aa’를 누르면 글꼴과 색 줄이 펼쳐집니다.",
     "이동·크기·삭제|입력 중 상자 위의 핸들로 이동하고, 모서리 핸들로 너비를 조절하며, 빨간 휴지통 또는 상자 위의 × 로 삭제합니다. ✓ 버튼으로 입력을 마칩니다."],
   ["8. 메모 포스트잇",
     "만들기|하단의 메모 아이콘을 누르고 문서를 탭해 내용을 입력합니다. 글자를 선택한 뒤 팝업의 ‘메모’로도 만들 수 있습니다.",
@@ -636,7 +703,8 @@ const HELP = [
     "숨기기·최소화|메모와 번역 포스트잇은 펼치기 · 최소화 · 숨기기로 관리합니다."],
   ["9. 삽입: 사진 · 스티커 · 도형 · 표 · 링크",
     "삽입 메뉴|하단의 + 상자 아이콘을 누르거나 문서의 빈 곳을 길게 눌러 열고, 넣을 종류를 고릅니다. 사진·동영상·유튜브 주소는 끌어다 놓거나 붙여넣기(Ctrl+V)도 됩니다.",
-    "선택·이동·크기|넣은 개체를 한 번 탭하면 테두리와 모서리 핸들이 보입니다. 안쪽을 끌어 옮기고 모서리를 끌어 크기를 바꿉니다.",
+    "선택·이동·크기|넣은 개체를 한 번 탭하면 테두리와 8개의 핸들이 보입니다. 안쪽을 끌어 옮기고, 핸들을 끌어 크기를 바꿉니다(사진은 모서리 핸들이 가로세로 비율을 유지합니다). 마우스와 터치 모두 됩니다.",
+    "삭제|선택한 개체의 ✕ 버튼을 누르거나 키보드 Delete 키를 누르면 지워집니다. 이미 선택된 개체를 한 번 더 탭하면 위치·크기 입력이나 색 설정 같은 세부 메뉴가 열립니다.",
     "회전|사진·스티커·도형·표는 선택하면 위쪽에 ↻ 핸들이 나타납니다. 끌면 돌아가고 15° 단위 근처에서 자석처럼 맞춰집니다. 도형은 모양 수정 창의 ‘회전’ 막대로 각도를 정할 수도 있습니다.",
     "도형·표|선 색, 채우기 색, 선 굵기를 정하고, 색마다 무지개 칩으로 원하는 색과 투명도를 고릅니다. 표는 행·열 수, 머리글 색, 칸 내용을 편집할 수 있습니다.",
     "하이퍼링크|글자를 선택한 뒤 팝업의 ‘링크’를 눌러 웹 주소, 현재 문서의 다른 페이지, 다른 문서로 연결합니다. 링크 글자는 파란 밑줄과 작은 화살표 배지로 표시되고, 탭하면 이동합니다."],
@@ -653,4 +721,10 @@ const HELP = [
     "번역·읽어주기|글자를 선택한 뒤 팝업에서 번역 또는 읽어주기를 고릅니다. 번역은 번역 창에서 Google 번역으로 열거나 직접 붙여넣어 사용합니다(기기 내 번역은 지원하지 않습니다)."],
   ["13. 문서 변환 · 내보내기",
     "Office·한글 문서|HWP · HWPX · DOC · DOCX · PPT · PPTX · XLS · XLSX는 PDF로 변환해 문서함에 가져와 엽니다. 서식은 변환 엔진과 글꼴에 따라 달라질 수 있고, HWP·DOC의 본문 미리보기는 글자만 표시합니다.",
-    "내보내기·백업|더보기 메뉴에서 기록이 포함된 PDF를 내보내거나 기록을 파일로 백업·복원합니다."]];
+    "내보내기·백업|더보기 메뉴에서 기록이 포함된 PDF를 내보내거나 기록을 파일로 백업·복원합니다.",
+    "인쇄|더보기 메뉴의 ‘인쇄’(Ctrl + P)로 필기가 포함된 문서를 프린터나 PDF로 인쇄합니다.",
+    "구글 드라이브 동기화|더보기 메뉴의 ‘구글 드라이브 동기화’에서 구글 계정으로 로그인하면 모바일 앱과 필기·문서를 맞출 수 있습니다. 직접 켠 경우에만 동작하며 계정별로 따로 설정됩니다."],
+  ["14. 인터넷 연결이 없을 때",
+    "인터넷이 필요한 기능|번역(구글 번역 열기) · 사전 웹 검색 · 구글 드라이브 동기화 · YouTube 링크 미리보기와 온라인 이미지 끌어오기, 그리고 WebView2 런타임을 처음 설치할 때 인터넷이 필요합니다. 연결이 없으면 해당 기능만 실패하고 나머지는 그대로 사용할 수 있습니다.",
+    "인터넷 없이 되는 기능|PDF 열기 · 필기(펜·하이라이트·메모·도형) · 검색 · HWP·Office 문서 변환(PC에 Office 또는 LibreOffice가 설치되어 있어야 합니다) · OCR(글자 인식, Windows OCR 언어팩이 설치되어 있어야 합니다) · 내보내기 · 인쇄 · 문서함은 인터넷 없이 모두 동작합니다.",
+    "회사 내부망에서|인터넷이 막힌 회사 내부망에서도 PDF를 열어 읽고 필기하고 인쇄하는 데는 지장이 없습니다. 번역이나 동기화는 외부 접속이 가능한 곳에서 사용하세요. 더보기 메뉴의 ‘오프라인 사용 안내’에서 같은 내용을 다시 볼 수 있습니다."]];

@@ -32,6 +32,7 @@ await ev(() => app.showTools()); await shot('01-tools');
 check('tools sheet tiles', (await page.locator('.m2-tile').count()) >= 35, String(await page.locator('.m2-tile').count()));
 await page.click('.m2-tile[aria-label="올가미·영역 캡처"]'); await page.waitForTimeout(250);
 check('lasso on + bar visible', await ev(() => app.pageView.isLassoMode() && app.lassoBar.style.display !== 'none'));
+check('lasso shapes are icon-only buttons with tooltips', await ev(() => [...app.lassoBar.querySelectorAll('.m3-lchip')].every(c => c.textContent.trim() === '' && c.title && c.querySelector('svg'))));
 await shot('02-lasso');
 await page.click('[data-tag="lasso_shape_1"]'); await shot('03-lasso-rect');
 check('lasso shape rect', (await ev(() => app.lassoShape)) === 1);
@@ -49,13 +50,32 @@ await shot('04-inline');
 check('inline textarea has focus + text', await ev(() => app.inlineEdit.value.includes('두번째') && app.inlineElement.text.includes('안녕')));
 // v1.27: slim one-row bar, above the box, font/colour rows only after "Aa"
 const geo = await ev(() => { const b = app.inlineBar.getBoundingClientRect(), t = app.inlineEdit.getBoundingClientRect(), l = app.viewportLayer.getBoundingClientRect(); return { barBottom: b.bottom, boxTop: t.top, barH: b.height, panelShown: getComputedStyle(app.inlineBar.querySelector('.m3-inline-panel')).display !== 'none', barL: b.left - l.left, barR: b.right - l.left, w: l.width }; });
-check('style bar is one slim row, hidden font/colour panel', geo.barH < 50 && !geo.panelShown, JSON.stringify(geo));
+check('style bar = two compact icon rows, hidden font/colour panel', geo.barH < 90 && !geo.panelShown, JSON.stringify(geo));
 check('style bar sits above the box (clear of the text)', geo.barBottom <= geo.boxTop, JSON.stringify(geo));
 await shot('04b-inline-bar-above');
 await page.click('[data-tag="text_bold"]'); await page.click('[aria-label="글자 크게"]'); await page.click('[aria-label="글자 크게"]');
 await page.click('[data-tag="text_style_toggle"]'); await page.waitForTimeout(150);
 check('Aa opens font + colour rows (+ rainbow chip)', await ev(() => getComputedStyle(app.inlineBar.querySelector('.m3-inline-panel')).display !== 'none') && (await page.locator('[data-tag="text_colors"] [data-tag="color_more"]').count()) === 1);
 await shot('04c-inline-bar-open');
+// v3 toolbar: icon-only formatting buttons (tooltips + aria-labels)
+const tb = await ev(() => { const b = [...app.inlineBar.querySelectorAll('.m3-tbtn,.m3-ib')].filter(x => x.dataset.tag !== 'text_style_toggle'); return { n: b.length, textless: b.every(x => x.textContent.trim() === '' && x.querySelector('svg') && x.title && x.getAttribute('aria-label')) }; });
+check('typing toolbar: align/list/underline/B/I are icon buttons with tooltips', tb.n >= 13 && tb.textless, JSON.stringify(tb));
+check('bold/size from toolbar applied to element', await ev(() => app.inlineElement.bold === true && app.inlineBar.querySelector('[data-tag="text_bold"]').classList.contains('on')));
+await page.click('[data-tag="text_underline"]'); await page.click('[data-tag="text_align_center"]');
+check('underline + center set on element', await ev(() => app.inlineElement.underline === true && app.inlineElement.align === 'center' && app.inlineEdit.style.textAlign === 'center' && app.inlineEdit.style.textDecoration.includes('underline')));
+await page.click('[data-tag="text_list_bullet"]');
+check('bullet list: markers per line', await ev(() => app.inlineElement.list === 'bullet' && app.inlineMarks.querySelectorAll('.m3-mk').length === 2), await ev(() => app.inlineMarks.children.length));
+await shot('04d-inline-bullet');
+await page.click('[data-tag="text_list_number"]');
+check('numbered list: 1. 2.', await ev(() => [...app.inlineMarks.querySelectorAll('.m3-mk-num')].map(x => x.textContent).join() === '1.,2.'));
+await page.click('[data-tag="text_list_check"]');
+check('check list: boxes', await ev(() => app.inlineElement.list === 'check' && app.inlineMarks.querySelectorAll('.m3-chk').length === 2));
+await page.locator('[data-tag="inline_check"]').nth(1).click();
+check('tapping a check box stores checked[1]', await ev(() => app.inlineElement.checked[1] === true && !app.inlineElement.checked[0]));
+await shot('04e-inline-check');
+await page.click('[data-tag="text_list_check"]');
+check('list button toggles off', await ev(() => app.inlineElement.list === 'none' && app.inlineMarks.children.length === 0));
+await page.click('[data-tag="text_list_bullet"]'); await page.click('[data-tag="text_align_left"]'); await page.click('[data-tag="text_underline"]');
 await page.click('[data-tag="text_fonts"] .m2-seg-chip:nth-child(2)'); await page.click('[data-tag="text_colors"] .m2-dot:nth-child(3)');
 await shot('05-inline-styled');
 check('size 18pt', (await ev(() => app.inlineSize.textContent)) === '18pt', await ev(() => app.inlineSize.textContent));
@@ -75,6 +95,7 @@ await page.mouse.move(mb.x + 15, mb.y + 15); await page.mouse.down(); await page
 check('move handle moved element', (await ev(() => app.inlineElement.left)) > before);
 await page.click('[data-tag="text_done"]');
 check('committed into store', await ev(() => app.store.elements.length === 1 && app.store.elements[0].kind === 'text' && app.store.elements[0].bold && app.store.elements[0].font === 'serif' && !app.inlineEdit && window.AP.skip === null), '');
+check('align/underline/list persisted in element JSON (additive)', await ev(() => { const o = app.store.elements[0].toJSON ? app.store.elements[0].toJSON() : app.store.elements[0]; return app.store.elements[0].list === 'bullet' && app.store.elements[0].align === 'left' && app.store.elements[0].underline === false && o.list === 'bullet'; }));
 await shot('06-after-commit');
 const h0 = await ev(() => { const e = app.store.elements[0]; return [e.bottom - e.top, e.textSize]; });
 check('box fitted to content', h0[0] > .03, JSON.stringify(h0));
@@ -119,10 +140,17 @@ check('onStop/flushAll ok', true);
 // ---- help
 await ev(() => app.showHelp()); await shot('21-help');
 const help = await ev(() => { const c = document.querySelector('.m3-help'), r = c.getBoundingClientRect(); return { heads: [...c.querySelectorAll('.m3-help-h')].map(x => x.textContent), items: c.querySelectorAll('.m3-help-item').length, align: getComputedStyle(c).textAlign, titleAlign: getComputedStyle(c.querySelector('.m3-help-title')).textAlign, w: r.width, h: r.height, win: innerHeight }; });
-check('help: 13 chapters, 46 items, left aligned, tall card', help.heads.length === 13 && help.items === 46 && help.align === 'left' && help.h > help.win * .85 && help.heads[0] === '1. 기본 원리' && help.heads[12].startsWith('13.'), JSON.stringify({ ...help, heads: help.heads.length }));
+check('help: 14 chapters, 56 items, left aligned, tall card', help.heads.length === 14 && help.items === 56 && help.align === 'left' && help.h > help.win * .85 && help.heads[0] === '1. 기본 원리' && help.heads[13] === '14. 인터넷 연결이 없을 때', JSON.stringify({ ...help, heads: help.heads.length }));
+const helpText = await ev(() => document.querySelector('.m3-help').textContent);
+check('help: Everynote name, offline section lists internet-needed + offline features', await ev(() => document.querySelector('.m3-help-title').textContent) === 'Everynote 사용법' && !/PDF Note/.test(helpText)
+  && ['구글 번역', '사전 웹 검색', '구글 드라이브 동기화', 'YouTube', 'WebView2', 'LibreOffice', 'Windows OCR 언어팩', '인쇄', '문서함'].every(k => helpText.includes(k)));
 await page.evaluate(() => document.querySelector('.m3-help-body').scrollTo(0, 99999)); await shot('21b-help-end');
 await page.click('.m3-help-ok'); await page.waitForTimeout(300);
 check('help closed', (await page.locator('.m3-help').count()) === 0);
+await ev(() => { window.__ui2 = []; for (const n of ['printDocument', 'showSyncSettings', 'showAboutOffline']) app[n] = () => window.__ui2.push(n); app.showTools(); }); await page.waitForTimeout(300);
+for (const n of ['인쇄', '구글 드라이브 동기화', '오프라인 사용 안내']) { await page.locator('.m2-tile[aria-label="' + n + '"]').first().click(); await page.waitForTimeout(250); await ev(() => app.showTools()); await page.waitForTimeout(250); }
+check('tools sheet: print / drive sync / offline guide call UI2 methods', (await ev(() => window.__ui2.join())) === 'printDocument,showSyncSettings,showAboutOffline', await ev(() => window.__ui2.join()));
+await page.click('.m2-bs-head [aria-label=닫기]'); await page.waitForTimeout(300);
 await ev(() => app.showTools()); await page.waitForTimeout(300);
 check('export tiles: 원본 파일 내보내기 present, 본문 미리보기 저장 removed', (await page.locator('.m2-tile[aria-label="원본 파일 내보내기"]').count()) === 1 && (await page.locator('.m2-tile[aria-label="본문 미리보기 저장"]').count()) === 0);
 await page.click('.m2-bs-head [aria-label=닫기]'); await page.waitForTimeout(300);

@@ -213,6 +213,8 @@ export class PageElement {
   static DEFAULT_TEXT_COLOR = 0xFF1C1C1E | 0;
   /** sans=고딕, serif=명조, mono=고정폭, hand=손글씨체 */
   static FONTS = ['sans', 'serif', 'mono', 'hand'];
+  static ALIGNS = ['left', 'center', 'right'];
+  static LISTS = ['none', 'bullet', 'number', 'check'];
   constructor() {
     this.page = 0; this.kind = 'text'; this.text = ''; this.asset = '';
     this.left = f(.1); this.top = f(.1); this.right = f(.8); this.bottom = f(.3);
@@ -221,11 +223,27 @@ export class PageElement {
     this.font = 'sans'; this.bold = false; this.italic = false;
     /** Clockwise rotation in degrees around the box centre (pictures, stickers, shapes and tables). */
     this.rot = 0;
+    /** v3 text formatting (typing boxes only; additive, Android ignores the keys): 'left'|'center'|'right', underline, list kind, per-line check state. */
+    this.align = 'left'; this.underline = false; this.list = 'none';
+    /** checked[i] = state of the i-th '\n'-separated line when list === 'check'. */
+    this.checked = [];
   }
+  isChecked(i) { return !!(this.checked && this.checked[i]); }
+  setChecked(i, v) { if (!Array.isArray(this.checked)) this.checked = []; while (this.checked.length <= i) this.checked.push(false); this.checked[i] = !!v; }
+  toggleChecked(i) { this.setChecked(i, !this.isChecked(i)); return this.isChecked(i); }
   toJson() {
-    return { rot: f(this.rot), page: i32(this.page), kind: this.kind, text: this.text, asset: this.asset,
+    const o = { rot: f(this.rot), page: i32(this.page), kind: this.kind, text: this.text, asset: this.asset,
       left: f(this.left), top: f(this.top), right: f(this.right), bottom: f(this.bottom),
       textSize: f(this.textSize), color: i32(this.color), font: this.font, bold: !!this.bold, italic: !!this.italic };
+    // v3 keys are written only when they differ from the defaults so v2 data round-trips byte for byte
+    if (this.align && this.align !== 'left' && PageElement.ALIGNS.includes(this.align)) o.align = this.align;
+    if (this.underline) o.underline = true;
+    if (this.list && this.list !== 'none' && PageElement.LISTS.includes(this.list)) o.list = this.list;
+    if (Array.isArray(this.checked) && this.checked.some(Boolean)) {
+      let n = this.checked.length; while (n > 0 && !this.checked[n - 1]) n--;
+      o.checked = this.checked.slice(0, n).map(Boolean);
+    }
+    return o;
   }
   /** Same checks as Java (throws JSONException '잘못된 노트 요소'). */
   static fromJson(o) {
@@ -239,6 +257,11 @@ export class PageElement {
     e.font = optString(o, 'font', 'sans');
     if (!PageElement.FONTS.includes(e.font)) e.font = 'sans';
     e.bold = optBoolean(o, 'bold', false); e.italic = optBoolean(o, 'italic', false);
+    e.align = optString(o, 'align', 'left'); if (!PageElement.ALIGNS.includes(e.align)) e.align = 'left';
+    e.underline = optBoolean(o, 'underline', false);
+    e.list = optString(o, 'list', 'none'); if (!PageElement.LISTS.includes(e.list)) e.list = 'none';
+    const ck = optArray(o, 'checked');
+    e.checked = ck ? ck.slice(0, 5000).map(v => v === true || v === 'true') : [];
     if (!PageElement.valid(e)) throw new JSONException('잘못된 노트 요소');
     if (!Number.isFinite(e.textSize) || e.textSize < f(.004) || e.textSize > f(.3)) e.textSize = PageElement.DEFAULT_TEXT_SIZE;
     return e;

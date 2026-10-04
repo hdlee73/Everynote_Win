@@ -16,6 +16,8 @@ import { NotebookFiles, samePath } from './library.js';
 import { LibraryDialog, PaperChoiceView, ProgressDialog, rebindButton, inputField } from './library-dialog.js';
 import * as Search from './search.js';
 import { ColorPicker } from './ui/colorpicker.js';
+import { printDocument } from './print.js';
+import { showSyncSettings, showAboutOffline, initSyncAuto } from './sync-ui.js';
 
 // ------------------------------------------------------------------------------------------------------------------ constants
 export const NAVY = '#1C1C1E', ACCENT = '#007AFF', ACTIVE_BG = '#E5F0FF', ACTIVE_FG = '#007AFF', GRAY = '#8E8E93', RED = '#FF3B30';
@@ -572,6 +574,38 @@ M.writeCapture = async function (image, action, title, page) {
   } catch (e) { toast('캡처 실패: ' + errMsg(e)); }
 };
 
+// ---- splitters (side panel / study panel) -------------------------------------------------------------------------------------------------
+/** Pointer-driven splitter handle (mouse, touch and pen share pointer events). axis/min/max are functions; apply(v, final) sets the size. */
+function attachSplitter(handle, { axis, sign = 1, read, apply, min, max, commit, reset }) {
+  handle.setAttribute('role', 'separator'); handle.tabIndex = 0;
+  handle.addEventListener('pointerdown', e => {
+    if (e.button != null && e.button > 0) return;
+    e.preventDefault(); e.stopPropagation();
+    const ax = axis(), start = ax === 'x' ? e.clientX : e.clientY, v0 = read(); let cur = v0;
+    try { handle.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+    handle.classList.add('drag'); document.body.classList.add('m2-resizing'); document.body.dataset.m2Axis = ax;
+    const move = ev => { if (ev.pointerId !== e.pointerId) return; cur = clamp(Math.round(v0 + ((ax === 'x' ? ev.clientX : ev.clientY) - start) * sign), min(), max()); apply(cur, false); };
+    const up = ev => {
+      if (ev.pointerId !== e.pointerId) return;
+      handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); handle.removeEventListener('pointercancel', up);
+      try { handle.releasePointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+      handle.classList.remove('drag'); document.body.classList.remove('m2-resizing'); delete document.body.dataset.m2Axis;
+      apply(cur, true); if (commit) commit(cur);
+    };
+    handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up); handle.addEventListener('pointercancel', up);
+  });
+  handle.addEventListener('keydown', e => {
+    const ax = axis(), dec = ax === 'x' ? 'ArrowLeft' : 'ArrowUp', inc = ax === 'x' ? 'ArrowRight' : 'ArrowDown';
+    if (e.key !== dec && e.key !== inc) return;
+    e.preventDefault(); const v = clamp(read() + (e.key === inc ? 16 : -16) * sign, min(), max()); apply(v, true); if (commit) commit(v);
+  });
+  handle.addEventListener('dblclick', e => { e.preventDefault(); if (reset) reset(); });
+  return handle;
+}
+export const SPLIT = { sideMin: 140, sideMaxAbs: 520, studyMinW: 220, studyMinH: 120 };
+const resizeSoon = (() => { let raf = 0; return () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; window.dispatchEvent(new Event('resize')); }); }; })();
+
+
 // ---- study panel -----------------------------------------------------------------------------------------------------------------------
 M.buildStudyPanel = function () {
   const panel = h('div', { class: 'm2-study', dataset: { tag: 'study_panel' } });
@@ -584,7 +618,32 @@ M.buildStudyPanel = function () {
   this.studyRows = h('div', { class: 'm2-study-rows' });
   panel.append(bar, h('div', { class: 'm2-study-scroll' }, this.studyRows));
   this.studyPanel = panel;
+  this.studySplitter = h('div', { class: 'm2-splitter', dataset: { tag: 'study_splitter' }, title: '끌어서 너비 조절 (두 번 누르면 기본값)', 'aria-label': '노트 패널 크기 조절' });
+  attachSplitter(this.studySplitter, {
+    axis: () => (this.studyWide() ? 'x' : 'y'), sign: -1,
+    read: () => (this.studyWide() ? panel.getBoundingClientRect().width : panel.getBoundingClientRect().height),
+    min: () => (this.studyWide() ? SPLIT.studyMinW : SPLIT.studyMinH), max: () => this.studyMax(),
+    apply: v => { panel.style.flex = '0 0 ' + v + 'px'; if (this.pdfArea) this.pdfArea.style.flex = '1 1 0'; resizeSoon(); },
+    commit: v => this.recentPrefs.putInt(this.studyWide() ? 'study_w' : 'study_h', Math.round(v)),
+    reset: () => { this.recentPrefs.remove(this.studyWide() ? 'study_w' : 'study_h'); this.applyStudySize(); resizeSoon(); },
+  });
+  panel.prepend(this.studySplitter);
   return panel;
+};
+M.studyWide = function () { return window.innerWidth >= 600; };
+M.studyMax = function () {
+  const r = this.studySplit ? this.studySplit.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight };
+  return Math.max(this.studyWide() ? SPLIT.studyMinW : SPLIT.studyMinH, Math.floor(this.studyWide() ? r.width - 260 : r.height - 200));
+};
+/** Applies the remembered (clamped) study panel size, or the default ratio when none was set. */
+M.applyStudySize = function () {
+  const panel = this.studyPanel, area = this.pdfArea; if (!panel) return;
+  const wide = this.studyWide(), saved = this.recentPrefs.getInt(wide ? 'study_w' : 'study_h', 0);
+  if (this.studySplitter) { this.studySplitter.classList.toggle('v', wide); this.studySplitter.classList.toggle('h', !wide); this.studySplitter.setAttribute('aria-orientation', wide ? 'vertical' : 'horizontal'); }
+  if (saved > 0 && this.studyVisible) {
+    const v = clamp(saved, wide ? SPLIT.studyMinW : SPLIT.studyMinH, this.studyMax());
+    panel.style.flex = '0 0 ' + v + 'px'; if (area) area.style.flex = '1 1 0';
+  } else { panel.style.flex = '1 1 0'; if (area) area.style.flex = (this.studyVisible ? '1.3' : '1') + ' 1 0'; }
 };
 M.layoutStudyPanel = function () {
   if (!this.studySplit) return;
@@ -594,8 +653,9 @@ M.layoutStudyPanel = function () {
   if (panel.parentElement !== split) split.append(panel);
   split.style.display = 'flex'; split.style.flexDirection = wide ? 'row' : 'column';
   panel.style.display = this.studyVisible ? 'flex' : 'none';
-  if (area) { area.style.flex = (this.studyVisible ? '1.3' : '1') + ' 1 0'; area.style.minWidth = '0'; area.style.minHeight = '0'; }
-  panel.style.flex = '1 1 0'; panel.style.minWidth = '0'; panel.style.minHeight = '0';
+  if (area) { area.style.minWidth = '0'; area.style.minHeight = '0'; }
+  panel.style.minWidth = '0'; panel.style.minHeight = '0';
+  this.applyStudySize();
   if (this.studyVisible) { window.dispatchEvent(new Event('resize')); }
 };
 M.showStudy = function (basket) {
@@ -1505,7 +1565,11 @@ M.editElementGeometry = function (element) {
 // ====================================================================================================================
 // Side panel: search / page previews / outline (+marks) / recordings
 // ====================================================================================================================
-M.sidePanelWidth = function () { return Math.min(190, Math.round(window.innerWidth * .42)); };
+M.sidePanelWidth = function () {
+  const def = Math.min(190, Math.round(window.innerWidth * .42)), saved = this.recentPrefs ? this.recentPrefs.getInt('side_w', 0) : 0;
+  const max = Math.max(SPLIT.sideMin, Math.min(SPLIT.sideMaxAbs, Math.round(window.innerWidth * .6)));
+  return saved > 0 ? clamp(saved, Math.min(SPLIT.sideMin, def), max) : def;
+};
 M.buildSidePanel = function () {
   if (!this.searchPanel) this.buildSearchPanel();
   if (!this.thumbnailPanel) {
@@ -1537,8 +1601,18 @@ M.buildSidePanel = function () {
   this.sideContent = h('div', { class: 'm2-side-content' }, this.searchPanel, this.thumbnailPanel, this.outlineScroll, this.recordingScroll);
   panel.append(this.sideContent);
   this.sidePanel = panel;
+  this.sideSplitter = h('div', { class: 'm2-splitter side', dataset: { tag: 'side_splitter' }, title: '끌어서 너비 조절 (두 번 누르면 기본값)', 'aria-label': '왼쪽 패널 너비 조절', 'aria-orientation': 'vertical' });
+  attachSplitter(this.sideSplitter, {
+    axis: () => 'x', sign: 1, read: () => panel.getBoundingClientRect().width,
+    min: () => SPLIT.sideMin, max: () => Math.max(SPLIT.sideMin, Math.min(SPLIT.sideMaxAbs, Math.round(window.innerWidth * .6))),
+    apply: (v, fin) => { panel.style.width = v + 'px'; resizeSoon(); if (fin) { this.recentPrefs.putInt('side_w', Math.round(v)); this.sidePanelResized(); } },
+    reset: () => { this.recentPrefs.remove('side_w'); panel.style.width = this.sidePanelWidth() + 'px'; resizeSoon(); this.sidePanelResized(); },
+  });
+  panel.append(this.sideSplitter);
   return panel;
 };
+/** Thumbnails are sized from the panel width: rebuild once a drag has ended. */
+M.sidePanelResized = function () { clearTimeout(this._thumbT); this._thumbT = setTimeout(() => { if (this.sidebarVisible && this.panelTab === 1 && this.rebuildThumbnails) this.rebuildThumbnails(); }, 120); };
 M.selectPanelTab = function (tab) {
   if (!this.sidePanel) this.buildSidePanel();
   const panel = this.sidePanel;
@@ -1864,6 +1938,11 @@ F.updateThumbnailSelection = function () {
   if (this.sidebarVisible && selected) this.thumbnailPanel.scrollTo({ top: Math.max(0, selected.offsetTop - 16), behavior: 'smooth' });
 };
 
+// ---- v3: print / Google Drive sync / offline notes (implemented in print.js, sync-ui.js) ---------------------------------------------------------
+M.printDocument = function () { return printDocument(this); };
+M.showSyncSettings = function () { return showSyncSettings(this); };
+M.showAboutOffline = function () { return showAboutOffline(this); };
+
 // ====================================================================================================================
 // install
 // ====================================================================================================================
@@ -1877,9 +1956,10 @@ export function initMain2(app) {
   app.outlineList = null; app.recordingList = null; app.sideTabs = []; app._thumbAspectCache = null;
   app.showAllThumbnails = app.recentPrefs.getBoolean('thumb_all', false);
   document.addEventListener('paste', e => app.onPasteEvent(e));
+  initSyncAuto(app);
   window.addEventListener('resize', () => {
-    if (app.studySplit) { const wide = window.innerWidth >= 600; app.studySplit.style.flexDirection = wide ? 'row' : 'column'; }
-    if (app.sidePanel && app.sidebarVisible) app.sidePanel.style.width = app.sidePanelWidth() + 'px';
+    if (app.studySplit) { const wide = window.innerWidth >= 600; app.studySplit.style.flexDirection = wide ? 'row' : 'column'; if (app.applyStudySize) app.applyStudySize(); }
+    if (app.sidePanel && app.sidebarVisible && !app.sideSplitter?.classList.contains('drag')) app.sidePanel.style.width = app.sidePanelWidth() + 'px';
   });
 }
 export function installMain2(cls) {

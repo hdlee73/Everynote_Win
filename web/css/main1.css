@@ -97,3 +97,41 @@
 
 /* the colour chooser opens over a still-open pen / highlight menu (menus sit at z 9500) */
 .ad-root:has([data-tag="color_picker"]){z-index:9700}
+
+/* ---- v3: icon option buttons (pen / width / toggles), Samsung Notes style ---- */
+.m-iseg{display:flex;align-items:center;justify-content:space-between;padding:4px 4px 6px}
+.m-ibtn{flex:1 1 0;min-width:0;max-width:48px;height:40px;margin:0 2px;padding:0;border:0;border-radius:14px;background:#F2F2F7;color:#3A3A3C;display:flex;align-items:center;justify-content:center;cursor:pointer;
+  -webkit-user-select:none;user-select:none;transition:background .12s,color .12s}
+.m-ibtn:hover{background:#E8E8EE}
+.m-ibtn.on{background:#E5F0FF;color:#007AFF;box-shadow:inset 0 0 0 2px #007AFF}
+.m-ibtn:focus{outline:none}
+.m-ibtn:focus-visible{outline:2px solid rgba(0,122,255,.55);outline-offset:1px}
+.m-opts{justify-content:flex-start}
+.m-opts .m-ibtn{flex:none;width:48px}
+.m-oplabel{display:flex;align-items:center;width:64px;color:#8E8E93}
+.m-oplabel span{margin-left:4px;font-size:12px;font-variant-numeric:tabular-nums}
+.m-tbsep{flex:none;width:1px;height:24px;margin:0 4px;background:#E0E0E6}
+
+/* ---- v3: zoom pill (left edge) + floating "add page" + welcome card ---- */
+.m-zoom{position:absolute;left:10px;bottom:calc(50% + 44px);width:46px;display:flex;flex-direction:column;align-items:stretch;border-radius:23px;background:rgba(255,255,255,.96);
+  box-shadow:0 2px 10px rgba(0,0,0,.28),0 0 0 1px rgba(0,0,0,.04);z-index:6;overflow:hidden}
+.m-zbtn{height:40px;padding:0;border:0;background:transparent;color:#1C1C1E;display:flex;align-items:center;justify-content:center;cursor:pointer;font:inherit}
+.m-zbtn:hover{background:rgba(0,0,0,.06)}
+.m-zbtn:focus{outline:none}
+.m-zbtn:focus-visible{outline:2px solid rgba(0,122,255,.55);outline-offset:-2px}
+.m-zbtn.pct{height:32px;font-size:12px;font-weight:700;color:#3A3A3C;border-top:1px solid #ECECF0;border-bottom:1px solid #ECECF0;font-variant-numeric:tabular-nums}
+.m-zbtn.pct.zoomed{color:#007AFF}
+.m-addpage{position:absolute;right:16px;bottom:16px;height:46px;padding:0 18px 0 14px;border:0;border-radius:23px;background:#007AFF;color:#fff;display:flex;align-items:center;gap:7px;
+  font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 3px 12px rgba(0,60,160,.4);z-index:6;white-space:nowrap}
+.m-addpage:hover{background:#0A6FE6}
+.m-addpage:focus{outline:none}
+.m-addpage:focus-visible{outline:3px solid rgba(0,122,255,.4);outline-offset:2px}
+.m-writing .m-arrow{opacity:.24}
+.m-viewport:hover .m-arrow{opacity:.55}
+.m-welcome{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:5}
+.m-welcome-card{pointer-events:auto;text-align:center;padding:28px 34px;max-width:min(420px,calc(100% - 32px));border-radius:24px;background:rgba(255,255,255,.92);box-shadow:0 6px 28px rgba(0,0,0,.14)}
+.m-welcome-name{font-size:30px;font-weight:800;letter-spacing:-.5px;color:#1C1C1E}
+.m-welcome-sub{margin:8px 0 18px;font-size:14px;line-height:1.4;color:#6C6C70;word-break:keep-all}
+.m-welcome-btn{height:44px;padding:0 20px;border:0;border-radius:22px;background:#007AFF;color:#fff;display:inline-flex;align-items:center;gap:8px;font-size:15px;font-weight:700;cursor:pointer}
+.m-welcome-btn:hover{background:#0A6FE6}
+@media (max-height:460px){.m-zoom{bottom:calc(50% + 34px);transform:scale(.85);transform-origin:left bottom}}

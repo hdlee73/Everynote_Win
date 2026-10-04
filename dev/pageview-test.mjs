@@ -329,11 +329,233 @@ const radius = await ev(() => { const v = T.view, d = v.contentRect(); v.textSel
   v.directTextSelection = false; const a = [at(2), at(5)]; v.directTextSelection = true; const b = [at(8), at(13)]; v.textRegions = []; return a.concat(b); });
 check('text recognition radius 3dp / 10dp', JSON.stringify(radius) === '[true,false,true,false]', JSON.stringify(radius));
 
+// =====================================================================================================================
+// v3: zoom API, backdrop, handles + delete, wheel / mouse page turning, text formatting
+// =====================================================================================================================
+await ev(() => { T.store.elements.length = 0; T.view.selectElement(null); T.view.resetZoom(); T.view.setInkTool(0, 0, 0); T.view.setPageSwipeEnabled(false); });
+await page.waitForTimeout(50);
+await clearLog();
+
+// --- zoom API ---------------------------------------------------------------------------------------------------
+{
+  const z = await ev(() => { const v = T.view; const out = [v.getZoom()]; v.setZoom(2); out.push(v.getZoom()); v.zoomBy(0.5); out.push(v.getZoom()); v.setZoom(9); out.push(v.getZoom()); v.setZoom(0.2); out.push(v.getZoom());
+    v.setZoom(3); v.resetZoom(); out.push(v.getZoom(), v.panX, v.panY); return out; });
+  check('zoom API setZoom/zoomBy/clamp/resetZoom', JSON.stringify(z) === '[1,2,1,4,1,1,0,0]', JSON.stringify(z));
+  const zl = await ev(() => T.log.filter(l => l.n === 'onZoomChanged').map(l => +l.a[0].toFixed(3)));
+  check('onZoomChanged fired for each real change', JSON.stringify(zl) === '[2,1,4,1,3,1]', JSON.stringify(zl));
+  await clearLog();
+  const cz = await ev(() => { const v = T.view, r = v.contentRect(); v.setZoom(2, r.left + r.width() * .75, r.top + r.height() * .25); const [nx, ny] = v.toPage(r.left + r.width() * .75, r.top + r.height() * .25); const q = v.contentRect(); v.resetZoom(); return [Math.abs(q.width() / r.width() - 2) < .001]; });
+  check('setZoom(z, fx, fy) keeps the focus point stable-ish and doubles the page', cz[0]);
+  await clearLog();
+  await page.mouse.move(450, 350); await page.keyboard.down('Control'); await page.mouse.wheel(0, -300); await page.keyboard.up('Control');
+  check('ctrl+wheel zoom reports onZoomChanged', (await logOf('onZoomChanged')) >= 1 && (await ev(() => T.view.getZoom())) > 1);
+  await ev(() => T.view.resetZoom());
+  await clearLog();
+}
+
+// --- backdrop vs paper (requirement 4) ----------------------------------------------------------------------------
+{
+  await ev(() => { T.view.setDarkPage(false); T.view.flush(); });
+  const px0 = await ev(() => { const v = T.view, c = v.snapshot(false, 1), g = c.getContext('2d'), r = v.pageRect();
+    const at = (x, y) => Array.from(g.getImageData(Math.round(x), Math.round(y), 1, 1).data).slice(0, 3).join(',');
+    return { corner: at(3, 3), paper: at(r.left + 8, r.top + 8), outside: at(r.left - 1, r.top + 100), outsideFar: at(r.left - 8, r.top + 100), cs: getComputedStyle(v.el).backgroundColor }; });
+  check('light backdrop #D9DADF around the paper', px0.corner === '217,218,223' && px0.cs === 'rgb(217, 218, 223)', JSON.stringify(px0));
+  check('paper is lighter than the backdrop', px0.paper === '255,255,255' && px0.outside !== px0.corner, JSON.stringify(px0));
+  await shot('12-backdrop-light');
+  await ev(() => T.view.setDarkPage(true)); await shot('12-backdrop-dark');
+  const dk = await ev(() => getComputedStyle(T.view.el).backgroundColor);
+  check('dark page uses the dark backdrop variant', dk === 'rgb(43, 44, 49)', dk);
+  await ev(() => T.view.setDarkPage(false));
+}
+
+// --- resize handles, delete button -------------------------------------------------------------------------------
+{
+  await ev(async () => {
+    const { PageElement } = await import('/js/store.js');
+    const mk = (kind, text, l, t, r, b, asset = '') => { const e = new PageElement(); e.page = 0; e.kind = kind; e.text = text; e.asset = asset; e.left = l; e.top = t; e.right = r; e.bottom = b; T.store.elements.push(e); return e; };
+    T.shape = mk('shape', 'rect|FF007AFF|2200AAFF|3', .45, .55, .75, .7);
+    T.img = mk('image', '', .1, .3, .3, .4);                        // 2:1 in page px? aspect = (.2*w)/(.1*h)
+    T.tb = mk('text', 'Hello text box', .1, .8, .6, .9);
+    T.view.invalidate();
+  });
+  const box = n => ev(n => { const e = T[n], r = T.view.pageRect(); return { l: r.left + e.left * r.width(), t: r.top + e.top * r.height(), r: r.left + e.right * r.width(), b: r.top + e.bottom * r.height(), W: r.width(), H: r.height() }; }, n);
+  const geo = n => ev(n => { const e = T[n]; return [e.left, e.top, e.right, e.bottom]; }, n);
+  const tap = (x, y, o) => drag([[x, y], [x, y]], o);
+  await tap(px(.6), py(.62), { type: 'touch', id: 71 });
+  check('shape tap selects', await ev(() => T.view.selectedElement() === T.shape));
+  check('onElementSelected fired', (await ev(() => T.log.filter(l => l.n === 'onElementSelected').length)) >= 1);
+  await shot('13-handles-8');
+  // right edge handle (mouse): only the width changes
+  let b = await box('shape'); const g0 = await geo('shape');
+  await drag(line(b.r, (b.t + b.b) / 2, b.r + 60, (b.t + b.b) / 2 + 20, 6), { type: 'mouse', id: 72 });
+  let g1 = await geo('shape');
+  check('edge handle R (mouse) widens only', g1[2] > g0[2] + 0.05 && Math.abs(g1[1] - g0[1]) < 1e-6 && Math.abs(g1[3] - g0[3]) < 1e-6 && Math.abs(g1[0] - g0[0]) < 1e-6, JSON.stringify([g0, g1]));
+  // top edge handle (pen)
+  b = await box('shape');
+  await drag(line((b.l + b.r) / 2, b.t, (b.l + b.r) / 2 + 10, b.t - 50, 6), { type: 'pen', id: 73 });
+  const g2 = await geo('shape');
+  check('edge handle T (pen) grows upward only', g2[1] < g1[1] - 0.03 && Math.abs(g2[3] - g1[3]) < 1e-6 && Math.abs(g2[0] - g1[0]) < 1e-6, JSON.stringify([g1, g2]));
+  // left edge handle (touch) and bottom-left corner
+  b = await box('shape');
+  await drag(line(b.l, (b.t + b.b) / 2, b.l - 40, (b.t + b.b) / 2, 5), { type: 'touch', id: 74 });
+  const g3 = await geo('shape');
+  check('edge handle L (touch)', g3[0] < g2[0] - 0.03 && Math.abs(g3[2] - g2[2]) < 1e-6, JSON.stringify([g2, g3]));
+  b = await box('shape');
+  await drag(line(b.l, b.b, b.l + 30, b.b + 30, 5), { type: 'mouse', id: 75 });
+  const g4 = await geo('shape');
+  check('corner BL (mouse) moves two sides', g4[0] > g3[0] + 0.01 && g4[3] > g3[3] + 0.01 && Math.abs(g4[2] - g3[2]) < 1e-6 && Math.abs(g4[1] - g3[1]) < 1e-6, JSON.stringify([g3, g4]));
+  await shot('14-shape-resized');
+  // body move with the mouse (no tool active)
+  b = await box('shape');
+  await drag(line((b.l + b.r) / 2, (b.t + b.b) / 2, (b.l + b.r) / 2 - 40, (b.t + b.b) / 2 - 40, 5), { type: 'mouse', id: 76 });
+  const g5 = await geo('shape');
+  check('mouse drags the selected element body', g5[0] < g4[0] - 0.02 && Math.abs((g5[2] - g5[0]) - (g4[2] - g4[0])) < 1e-6, JSON.stringify([g4, g5]));
+  // image (aspect locked): select, drag corner and edge, ratio stays
+  await tap(px(.2), py(.35), { type: 'touch', id: 77 });
+  check('image selected', await ev(() => T.view.selectedElement() === T.img));
+  const ratio = n => ev(n => { const e = T[n], r = T.view.pageRect(); return ((e.right - e.left) * r.width()) / ((e.bottom - e.top) * r.height()); }, n);
+  const r0 = await ratio('img'); b = await box('img');
+  await drag(line(b.r, b.b, b.r + 50, b.b + 5, 5), { type: 'mouse', id: 78 });
+  const r1 = await ratio('img'); const gi1 = await geo('img');
+  check('image corner keeps aspect', Math.abs(r1 - r0) < 0.02 && gi1[2] > .3 + 0.02, `r ${r0.toFixed(3)} -> ${r1.toFixed(3)}`);
+  b = await box('img');
+  await drag(line((b.l + b.r) / 2, b.b, (b.l + b.r) / 2, b.b + 30, 5), { type: 'touch', id: 79 });
+  const r2 = await ratio('img'); const gi2 = await geo('img');
+  check('image edge handle scales uniformly (aspect kept)', Math.abs(r2 - r0) < 0.02 && gi2[3] > gi1[3] + 0.005, `r ${r2.toFixed(3)}`);
+  await shot('15-image-resized');
+  // text box: select + resize + second tap edits
+  await clearLog();
+  await tap(px(.3), py(.85), { type: 'touch', id: 80 });
+  check('text box tap selects (first tap)', (await ev(() => T.view.selectedElement() === T.tb)) && (await logOf('onElementTapped')) === 0);
+  b = await box('tb'); const t0 = await geo('tb');
+  await drag(line(b.r, b.b, b.r - 40, b.b + 10, 5), { type: 'mouse', id: 81 });
+  const t1 = await geo('tb');
+  check('text box resizes by corner', t1[2] < t0[2] - 0.02 && t1[3] > t0[3], JSON.stringify([t0, t1]));
+  await tap(px((t1[0] + t1[2]) / 2), py((t1[1] + t1[3]) / 2), { type: 'touch', id: 82 });
+  check('second tap on a selected text box -> onElementTapped', (await logOf('onElementTapped')) === 1);
+  await shot('16-textbox-selected');
+  // delete button
+  await clearLog();
+  b = await box('tb'); const n0 = await ev(() => T.store.elements.length);
+  await tap(b.r, b.t - 28, { type: 'mouse', id: 83 });
+  const n1 = await ev(() => T.store.elements.length);
+  check('delete button removes the element', n1 === n0 - 1 && !(await ev(() => T.store.elements.includes(T.tb))) && (await ev(() => T.view.selectedElement())) === null);
+  check('onElementDeleted(e) fired once', (await logOf('onElementDeleted')) === 1 && (await ev(() => T.log.find(l => l.n === 'onElementDeleted').a[0] === T.tb)));
+  // delete with touch on the image + deleteSelectedElement API
+  await tap(px(.2), py(.35), { type: 'touch', id: 84 }); b = await box('img');
+  await tap(b.r, b.t - 28, { type: 'touch', id: 85 });
+  check('delete button works with touch', !(await ev(() => T.store.elements.includes(T.img))));
+  await tap(px(.6), py(.62), { type: 'touch', id: 86 });
+  check('deleteSelectedElement() API', (await ev(() => T.view.selectedElement() === T.shape && T.view.deleteSelectedElement())) && (await ev(() => T.store.elements.length)) === 0);
+  // handles are usable while the pen is the active tool, but the body is not grabbed (the pen writes)
+  await ev(async () => { const { PageElement } = await import('/js/store.js'); const e = new PageElement(); e.page = 0; e.kind = 'shape'; e.text = 'rect|FF007AFF|2200AAFF|3'; e.left = .4; e.top = .5; e.right = .7; e.bottom = .65; T.store.elements.push(e); T.shape = e; T.view.selectElement(e); T.view.setInkTool(1, 0xFF000000 | 0, .004); });
+  const sc0 = await ev(() => T.store.strokes.length); b = await box('shape');
+  await drag(line((b.l + b.r) / 2 - 20, (b.t + b.b) / 2, (b.l + b.r) / 2 + 20, (b.t + b.b) / 2 + 10, 5), { type: 'pen', id: 87 });
+  check('pen in write mode draws over a selected element (no body grab)', (await ev(() => T.store.strokes.length)) === sc0 + 1 && (await geo('shape'))[0] === .4);
+  await ev(() => { T.store.strokes.length = 0; T.store.elements.length = 0; T.view.setInkTool(0, 0, 0); T.view.selectElement(null); });
+}
+
+// --- wheel page turn + mouse read drag -----------------------------------------------------------------------------
+{
+  await clearLog();
+  await page.mouse.move(450, 350);
+  await page.mouse.wheel(0, 120);
+  await page.waitForTimeout(60);
+  check('wheel down at zoom 1 -> onPageSwipe(+1)', JSON.stringify(await ev(() => T.log.filter(l => l.n === 'onPageSwipe').map(l => l.a[0]))) === '[1]');
+  await page.mouse.wheel(0, 120); await page.mouse.wheel(0, 100); await page.waitForTimeout(60);
+  check('wheel inertia is debounced', (await logOf('onPageSwipe')) === 1);
+  await page.waitForTimeout(700);
+  await page.mouse.wheel(0, -120); await page.waitForTimeout(60);
+  check('wheel up -> onPageSwipe(-1)', JSON.stringify(await ev(() => T.log.filter(l => l.n === 'onPageSwipe').map(l => l.a[0]))) === '[1,-1]');
+  await page.waitForTimeout(700); await clearLog();
+  await page.mouse.wheel(0, 8); await page.waitForTimeout(60);
+  check('tiny wheel movement does not turn', (await logOf('onPageSwipe')) === 0);
+  await ev(() => T.view.setWheelPageTurn(false)); await page.waitForTimeout(500);
+  await page.mouse.wheel(0, 200); await page.waitForTimeout(60);
+  check('setWheelPageTurn(false)', (await logOf('onPageSwipe')) === 0);
+  await ev(() => { T.view.setWheelPageTurn(true); T.view.setZoom(2); }); await page.waitForTimeout(500);
+  const pan0 = await ev(() => T.view.panY); await page.mouse.wheel(0, 100); await page.waitForTimeout(60);
+  check('zoomed: wheel pans, no page turn', (await logOf('onPageSwipe')) === 0 && (await ev(() => T.view.panY)) !== pan0);
+  await ev(() => T.view.resetZoom());
+
+  // mouse drag in read mode
+  await clearLog();
+  await ev(() => { T.view.setPageSwipeEnabled(true); T.view.setMouseReadDrag(true); T.view.setDirectTextSelection(false); });
+  const dragTurn = async (o, id) => { await clearLog(); await drag(line(px(.8), py(.9), px(.2), py(.9), 8), { ...o, id }); return ev(() => T.log.filter(l => l.n === 'onPageSwipe').map(l => l.a[0])); };
+  check('mouse drag left in read mode -> onPageSwipe(+1)', JSON.stringify(await dragTurn({ type: 'mouse' }, 91)) === '[1]');
+  await clearLog(); await drag(line(px(.2), py(.9), px(.8), py(.9), 8), { type: 'mouse', id: 92 });
+  check('mouse drag right -> onPageSwipe(-1)', JSON.stringify(await ev(() => T.log.filter(l => l.n === 'onPageSwipe').map(l => l.a[0]))) === '[-1]');
+  check('pen drag never turns pages', (await dragTurn({ type: 'pen' }, 93)).length === 0);
+  await ev(() => T.view.setMouseReadDrag(false));
+  check('setMouseReadDrag(false) disables it', (await dragTurn({ type: 'mouse' }, 94)).length === 0 && (await ev(() => T.view.isMouseReadDrag())) === false);
+  await ev(() => { T.view.setMouseReadDrag(true); T.view.setInkTool(1, 0xFF000000 | 0, .004); });
+  const sc1 = await ev(() => T.store.strokes.length);
+  check('write mode: mouse writes, does not turn the page', (await dragTurn({ type: 'mouse' }, 95)).length === 0 && (await ev(() => T.store.strokes.length)) === sc1 + 1);
+  await ev(() => { T.store.strokes.length = 0; T.view.setInkTool(0, 0, 0); });
+  // a mouse drag that starts on a word still selects text
+  await ev(() => { T.view.setDirectTextSelection(true); });
+  await ev(() => { T.view.setDirectTextSelection(false); T.view.setPageSwipeEnabled(false); });
+  // pageDrag hook is used by the mouse too
+  await ev(() => { T.dragLog = []; T.view.setPageSwipeEnabled(true); T.view.setPageDrag({ start: d => { T.dragLog.push('start' + d); return true; }, move: m => T.dragLog.push('move'), end: v => T.dragLog.push('end'), touchAt: () => {} }); });
+  await drag(line(px(.8), py(.9), px(.3), py(.9), 8), { type: 'mouse', id: 96 });
+  check('mouse drag drives PageDrag (curl)', await ev(() => T.dragLog[0] === 'start1' && T.dragLog.includes('move') && T.dragLog.at(-1) === 'end'), JSON.stringify(await ev(() => T.dragLog)));
+  await ev(() => { T.view.setPageDrag(null); T.view.setPageSwipeEnabled(false); });
+}
+
+// --- text formatting (painter == inline editor layout) -----------------------------------------------------------
+{
+  await clearLog();
+  await ev(async () => {
+    const { PageElement } = await import('/js/store.js');
+    const mk = (o) => { const e = Object.assign(new PageElement(), { page: 0, kind: 'text', textSize: .03 }, o); T.store.elements.push(e); return e; };
+    mk({ text: 'Left aligned plain', left: .06, top: .42, right: .48, bottom: .47 });
+    mk({ text: 'Centered\nunderlined text', left: .06, top: .49, right: .48, bottom: .57, align: 'center', underline: true });
+    mk({ text: 'Right aligned\n오른쪽 정렬', left: .06, top: .59, right: .48, bottom: .67, align: 'right' });
+    mk({ text: 'First bullet\nSecond bullet with a very long line that must wrap around\nThird', left: .06, top: .69, right: .48, bottom: .83, list: 'bullet' });
+    mk({ text: 'One\nTwo\nThree\n\nFive', left: .52, top: .42, right: .94, bottom: .56, list: 'number' });
+    T.chk = mk({ text: 'Buy milk\nCall mom\nSend the report', left: .52, top: .58, right: .94, bottom: .68, list: 'check', checked: [true, false, true] });
+    mk({ text: 'Centered bullets\nunderline too', left: .52, top: .70, right: .94, bottom: .80, list: 'bullet', align: 'center', underline: true });
+    T.view.invalidate();
+  });
+  await shot('17-text-formats');
+  const lay = await ev(async () => {
+    const { AnnotationPainter } = await import('/js/painter.js'); const c = document.createElement('canvas').getContext('2d'); c.font = '20px sans-serif'; const m = s => c.measureText(s).width;
+    const L = AnnotationPainter.layoutText(m, 'ab\nlonger line', 300, 20, { align: 'right', list: 'bullet' });
+    const C = AnnotationPainter.layoutText(m, 'ab', 300, 20, { align: 'center' });
+    return { markerW: L.markerW, textW: L.textW, rightEdge: L.lines[1].x + L.lines[1].w, centerMid: C.lines[0].x + C.lines[0].w / 2, y: L.lines.map(l => l.y), n: AnnotationPainter.layoutText(m, 'x', 300, 20, { list: 'number' }).markerW, n10: AnnotationPainter.layoutText(m, '1\n2\n3\n4\n5\n6\n7\n8\n9\n10', 300, 20, { list: 'number' }).markerW };
+  });
+  check('layoutText: marker column 1.6em (2.1em for 10+ numbers)', lay.markerW === 32 && lay.n === 32 && lay.n10 === 42, JSON.stringify(lay));
+  check('layoutText: right/center alignment inside the text area', Math.abs(lay.rightEdge - 300) < 0.01 && Math.abs(lay.centerMid - 150) < 0.01 && lay.y[0] === 20 && Math.abs(lay.y[1] - 47) < 1e-9, JSON.stringify(lay));
+  // pixel checks: centred text is centred in its box, right text ends at the right edge
+  const cen = await ev(() => { const v = T.view, r = v.pageRect(), c = v.snapshot(false, 1), g = c.getContext('2d'); const e = T.store.elements[1];
+    const x0 = Math.round(r.left + e.left * r.width()), x1 = Math.round(r.left + e.right * r.width()), y0 = Math.round(r.top + (e.top) * r.height()), y1 = Math.round(r.top + (e.top + .035) * r.height());
+    const d = g.getImageData(x0, y0, x1 - x0, y1 - y0).data; let lo = 1e9, hi = -1; for (let y = 0; y < y1 - y0; y++) for (let x = 0; x < x1 - x0; x++) if (d[(y * (x1 - x0) + x) * 4] < 120) { lo = Math.min(lo, x); hi = Math.max(hi, x); }
+    return { left: lo, right: (x1 - x0) - hi, w: x1 - x0 }; });
+  check('painted centred line is centred (first line "Centered")', Math.abs(cen.left - cen.right) <= 3, JSON.stringify(cen));
+  const rt = await ev(() => { const v = T.view, r = v.pageRect(), c = v.snapshot(false, 1), g = c.getContext('2d'); const e = T.store.elements[2];
+    const x0 = Math.round(r.left + e.left * r.width()), x1 = Math.round(r.left + e.right * r.width()), y0 = Math.round(r.top + (e.top) * r.height()), y1 = Math.round(r.top + (e.top + .035) * r.height());
+    const d = g.getImageData(x0, y0, x1 - x0, y1 - y0).data; let hi = -1; for (let y = 0; y < y1 - y0; y++) for (let x = 0; x < x1 - x0; x++) if (d[(y * (x1 - x0) + x) * 4] < 120) hi = Math.max(hi, x);
+    return (x1 - x0) - hi; });
+  check('painted right-aligned line ends at the box edge', rt <= 3, 'gap ' + rt);
+  // clickable check boxes
+  await clearLog();
+  const cb = await ev(async () => { const { AnnotationPainter } = await import('/js/painter.js'); const r = T.view.pageRect(); return AnnotationPainter.checkBoxes(r, T.chk).map(c => ({ i: c.index, x: (c.rect.left + c.rect.right) / 2, y: (c.rect.top + c.rect.bottom) / 2 })); });
+  check('checkBoxes() lists one box per line', cb.length === 3 && cb[1].y > cb[0].y, JSON.stringify(cb));
+  await drag([[cb[1].x, cb[1].y], [cb[1].x, cb[1].y]], { type: 'touch', id: 101 });
+  check('tap on a check box toggles checked[1]', JSON.stringify(await ev(() => T.chk.checked)) === '[true,true,true]' && (await logOf('onCheckToggled')) === 1 && (await logOf('onInkChanged')) === 1 && (await ev(() => T.view.selectedElement())) === null);
+  await drag([[cb[0].x, cb[0].y], [cb[0].x, cb[0].y]], { type: 'mouse', id: 102 });
+  check('mouse click toggles checked[0] off', JSON.stringify(await ev(() => T.chk.checked)) === '[false,true,true]');
+  await shot('18-check-toggled');
+  const js = await ev(async () => { const { stringify } = await import('/js/store.js'); return stringify(T.chk.toJson()); });
+  check('checked persisted in the element JSON', js.includes('"list":"check"') && js.includes('"checked":[false,true,true]'), js);
+  await ev(() => { T.store.elements.length = 0; T.view.selectElement(null); T.view.invalidate(); });
+}
+
 // --- dark page, snapshot -----------------------------------------------------------------------------------
 await ev(() => T.view.setDarkPage(true));
 await shot('11-dark');
 const snap = await ev(() => { const c = T.view.snapshot(true, 1); return [c.width, c.height, c.getContext('2d').getImageData(2, 2, 1, 1).data.join(',')]; });
-check('snapshot dark size+bg', snap[0] === 900 && snap[1] === 700 && snap[2].startsWith('0,0,0'), JSON.stringify(snap));
+check('snapshot dark size + dark backdrop (page stays distinct)', snap[0] === 900 && snap[1] === 700 && snap[2] === '43,44,49,255', JSON.stringify(snap));
 await ev(() => T.view.setDarkPage(false));
 const cpb = await ev(() => { const c = T.view.copyPageBitmap(); return [c.width, c.height]; });
 check('copyPageBitmap', cpb[0] > 100);

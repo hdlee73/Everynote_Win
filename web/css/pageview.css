@@ -1,5 +1,10 @@
-/* PdfPageView root element (js/pageview.js). Layout is also set inline so the view works without this sheet. */
+/* PdfPageView root element (js/pageview.js). Layout is also set inline so the view works without this sheet.
+   Requirement 4: the area around the page ("backdrop") is a darker neutral than the paper, and the sheet gets a soft shadow and a
+   hairline border (both drawn by pageview.js from the custom properties below). Override the --pv-* variables to re-theme. */
 .pdf-page-view {
+  --pv-backdrop: #D9DADF;
+  --pv-paper-border: rgba(0, 0, 0, 0.20);
+  --pv-paper-shadow: rgba(20, 22, 30, 0.30);
   flex: 1 1 0;
   position: relative;
   overflow: hidden;
@@ -9,6 +14,18 @@
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
   outline: none;
+  background: var(--pv-backdrop);
+}
+/* dark page (page inverted) and dark app theme: a lifted charcoal so the black sheet still reads as a sheet */
+.pdf-page-view[data-dark-page="true"] {
+  --pv-backdrop: #2B2C31;
+  --pv-paper-border: rgba(255, 255, 255, 0.16);
+  --pv-paper-shadow: rgba(0, 0, 0, 0.70);
+}
+:root[data-theme="dark"] .pdf-page-view {
+  --pv-backdrop: #2B2C31;
+  --pv-paper-border: rgba(255, 255, 255, 0.16);
+  --pv-paper-shadow: rgba(0, 0, 0, 0.70);
 }
 .pdf-page-view > canvas {
   position: absolute;

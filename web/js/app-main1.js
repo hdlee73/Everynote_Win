@@ -27,6 +27,10 @@ const INK_COLORS2 = [0xFF8E1B14, 0xFFB35900, 0xFF8A6D00, 0xFF00746E, 0xFF0040A8,
 const RAINBOW = 'conic-gradient(#FF3B30,#FFCC00,#34C759,#00C7BE,#007AFF,#AF52DE,#FF3B30)';
 const INK_WIDTHS = [0.0022, 0.004, 0.0065, 0.009];
 const HIGHLIGHT_COLORS = [0x66FFDE59, 0x6654C27A, 0x66FF6B9A, 0x66549CF5, 0x66B67CF2];
+const PEN_ICONS = ['ic_pen_ball', 'ic_pen_pencil', 'ic_pen_fountain', 'ic_pen_brush', 'ic_pen_marker'];
+const WIDTH_ICONS = ['ic_width_1', 'ic_width_2', 'ic_width_3', 'ic_width_4'];
+const WIDTH_NAMES = ['얇게', '보통', '굵게', '최대'];
+const ZOOM_STEP = 1.25;
 const OFFICE_EXTS = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'hwp', 'hwpx'];
 const sameColor = (a, b) => (a | 0) === (b | 0);
 
@@ -60,6 +64,27 @@ function segmentedView(labels, current, choose) {
   refresh();
   return row;
 }
+/** iconSegmented(items=[{icon,label}], current, choose): row of round icon buttons (Samsung Notes style) with tooltips + aria-labels. */
+function iconSegView(items, current, choose, tag = '') {
+  const row = h('div', { class: 'm-iseg', dataset: tag ? { tag } : {} });
+  const btns = items.map((it, i) => {
+    const b = h('button', { class: 'm-ibtn', type: 'button', 'aria-label': it.label, title: it.label, 'aria-pressed': 'false', dataset: { idx: i } }, mkIcon(it.icon, 24, 'currentColor'));
+    b.addEventListener('click', () => { choose(i); row.refresh(); });
+    row.append(b); return b;
+  });
+  row.refresh = () => btns.forEach((b, i) => { const on = i === current(); b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+  row.refresh();
+  return row;
+}
+/** iconToggle(iconName, label, get, set): one round icon button that flips a flag. */
+function iconToggleView(iconName, label, get, set, tag = '') {
+  const b = h('button', { class: 'm-ibtn', type: 'button', 'aria-label': label, title: label, dataset: tag ? { tag } : {} }, mkIcon(iconName, 24, 'currentColor'));
+  b.refresh = () => { const on = !!get(); b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); };
+  b.addEventListener('click', () => { set(!get()); b.refresh(); });
+  b.refresh();
+  return b;
+}
+
 /**
  * swatches(colors, current, choose, size, more): colour dots (MainActivity.swatches).
  * more: 0 = presets only, 1 = adds a rainbow chip that opens ColorPicker, 2 = the same with an opacity slider.
@@ -101,12 +126,13 @@ function swatchesView(colors, current, choose, size = 32, more = 0, known = colo
 /** "투명도 NN%" slider (10-100%) for colours that carry their own alpha (MainActivity.opacityBar). */
 function opacityBar(alpha, set) {
   const pct = () => Math.round(alpha() * 100 / 255);
-  const label = h('div', { class: 'm-oplabel' }, '투명도 ' + pct() + '%');
-  const bar = h('input', { type: 'range', min: 10, max: 100, step: 1, class: 'm-opbar', 'aria-label': '투명도', dataset: { tag: 'opacity_bar' } });
+  const num = h('span', null, pct() + '%');
+  const label = h('div', { class: 'm-oplabel', title: '투명도', 'aria-label': '투명도' }, mkIcon('ic_opacity', 20, 'currentColor'), num);
+  const bar = h('input', { type: 'range', min: 10, max: 100, step: 1, class: 'm-opbar', 'aria-label': '투명도', title: '투명도', dataset: { tag: 'opacity_bar' } });
   bar.value = Math.max(10, pct());
-  bar.addEventListener('input', () => { const percent = +bar.value; label.textContent = '투명도 ' + percent + '%'; set(Math.round(percent * 255 / 100)); });
+  bar.addEventListener('input', () => { const percent = +bar.value; num.textContent = percent + '%'; set(Math.round(percent * 255 / 100)); });
   const row = h('div', { class: 'm-opacity' }, label, bar);
-  row.refresh = () => { bar.value = Math.max(10, pct()); label.textContent = '투명도 ' + pct() + '%'; };
+  row.refresh = () => { bar.value = Math.max(10, pct()); num.textContent = pct() + '%'; };
   return row;
 }
 
@@ -170,7 +196,7 @@ function makePageListener(app) {
     }
   };
   for (const n of ['onHighlightCreated', 'onMarkTapped', 'onMemoPointRequested', 'onZoomGestureStarted', 'onPageSwipe', 'onOutlinePointRequested', 'onInkChanged',
-    'onTextSelectionFinished', 'onTranslationTapped', 'onSelectionAdjustStarted', 'onLassoSelectionFinished', 'onElementTapped']) {
+    'onTextSelectionFinished', 'onTranslationTapped', 'onSelectionAdjustStarted', 'onLassoSelectionFinished', 'onElementTapped', 'onZoomChanged', 'onElementDeleted']) {
     l[n] = (...a) => { active(); return app[n](...a); };
   }
   l.onBlankLongPress = (page, x, y, viewX, viewY) => { active(); app.showInsertMenuAt(l.view, page, x, y, viewX, viewY); };
@@ -224,7 +250,7 @@ const methods = {
   async onCreate() {
     let info = {};
     try { info = (await host.info()) || {}; } catch (e) { console.error(e); }
-    this.hostInfo = info;
+    this.hostInfo = info; document.title = 'Everynote';
     const p = this.recentPrefs;
     this.verticalPageSwipe = p.getBoolean('vertical_page_swipe', false);
     this.fingerInk = p.getBoolean('finger_ink', false);
@@ -305,6 +331,10 @@ const methods = {
       if (k === 'o') this.choosePdf();
       else if (k === 'f') this.searchDocument();
       else if (k === 'g') this.goToPage();
+      else if (k === 'p') this.callUi2('printDocument');
+      else if ((e.key === '+' || e.key === '=') && this.renderer) this.zoomIn();
+      else if ((e.key === '-' || e.key === '_') && this.renderer) this.zoomOut();
+      else if (e.key === '0' && this.renderer) this.resetZoomAll();
       else if (k === 'z' && !e.shiftKey) this.undoInk();
       else if (k === 'y' || (k === 'z' && e.shiftKey)) this.redoInk();
       else if (k === 'w' && this.activeSession) this.closeDocument(this.activeSession);
@@ -316,9 +346,27 @@ const methods = {
       return;
     }
     if (e.altKey || !this.renderer) return;
-    const vert = this.verticalPageSwipe;
-    if (e.key === 'PageDown' || e.key === (vert ? 'ArrowDown' : 'ArrowRight')) { e.preventDefault(); this.animatePage(1); }
-    else if (e.key === 'PageUp' || e.key === (vert ? 'ArrowUp' : 'ArrowLeft')) { e.preventDefault(); this.animatePage(-1); }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !e.shiftKey) {
+      const el = this.selectedPageElement();
+      if (el) { e.preventDefault(); this.deleteElement(el); return; }
+    }
+    // mouse / keyboard page turning: arrows, PageUp/PageDown (any arrow turns the page), Home/End jump to the first/last page
+    if (e.key === 'PageDown' || e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); this.animatePage(1); }
+    else if (e.key === 'PageUp' || e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); this.animatePage(-1); }
+    else if (e.key === 'Home') { e.preventDefault(); if (this.currentPage > 0) this.showPage(0); }
+    else if (e.key === 'End') { e.preventDefault(); if (this.currentPage < this.renderer.pageCount - 1) this.showPage(this.renderer.pageCount - 1); }
+  },
+  /** Calls a method implemented by another part (print, drive sync, offline guide) or says it is missing. */
+  callUi2(name, ...args) {
+    if (typeof this[name] === 'function') return this[name](...args);
+    toast('이 기능은 아직 사용할 수 없습니다'); return undefined;
+  },
+  selectedPageElement() {
+    for (const v of [this.pageView, this.firstPageView, this.secondPageView]) {
+      const el = v && typeof v.selectedElement === 'function' ? v.selectedElement() : null;
+      if (el) return el;
+    }
+    return null;
   },
 
   applyKeepAwake() { host.call('power.keepAwake', { on: this.recentPrefs.getBoolean('keep_awake', false) }).catch(() => {}); },
@@ -402,6 +450,8 @@ const methods = {
     this.previousOverlay.addEventListener('click', () => this.animatePage(-1));
     this.nextOverlay.addEventListener('click', () => this.animatePage(1));
     viewport.append(this.previousOverlay, this.nextOverlay);
+    this.buildFloaters(viewport);
+    this.applyMouseReadDrag();
     this.buildLassoBar();
     if (this.lassoBar) viewport.append(h('div', { class: 'm-lassowrap' }, this.lassoBar));
     viewerRow.append(viewport);
@@ -434,6 +484,7 @@ const methods = {
     this.lassoButton = this.barIcon(writeBar, 'ic_lasso', '올가미 선택', 0xFFAF52DE, () => this.toggleLasso());
     this.memoButton = this.barIcon(writeBar, 'ic_note_add', '메모 추가', 0xFFFF9500, () => this.toggleMemoMode());
     this.barIcon(writeBar, 'ic_insert', '삽입 · 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
+    writeBar.append(h('div', { class: 'm-tbsep', 'aria-hidden': 'true' }));
     this.barIcon(writeBar, 'ic_undo', '실행 취소', 0xFF8E8E93, () => this.undoInk());
     this.barIcon(writeBar, 'ic_redo', '다시 실행', 0xFF8E8E93, () => this.redoInk());
     this.bottomBar.append(readBar, writeBar);
@@ -492,13 +543,81 @@ const methods = {
     viewport.addEventListener('pointerup', end, true); viewport.addEventListener('pointercancel', end, true);
   },
 
+  /** Zoom pill (+ / 100% / -) at the left edge, floating "페이지 추가" button at the bottom right and the empty-state welcome card. */
+  buildFloaters(viewport) {
+    const zoomBtn = (cls, label, content, click, tag) => {
+      const b = h('button', { class: 'm-zbtn ' + cls, type: 'button', 'aria-label': label, title: label, dataset: { tag } }, content);
+      b.addEventListener('click', click); return b;
+    };
+    this.zoomIn$ = zoomBtn('plus', '확대', mkIcon('ic_plus', 22, 'currentColor'), () => this.zoomIn(), 'zoom_in');
+    this.zoomLabel = zoomBtn('pct', '100%로 되돌리기', '100%', () => this.resetZoomAll(), 'zoom_reset');
+    this.zoomOut$ = zoomBtn('minus', '축소', mkIcon('ic_minus', 22, 'currentColor'), () => this.zoomOut(), 'zoom_out');
+    this.zoomPill = h('div', { class: 'm-zoom', role: 'group', 'aria-label': '확대·축소', dataset: { tag: 'zoom_pill' } }, this.zoomIn$, this.zoomLabel, this.zoomOut$);
+    this.addPageButton = h('button', { class: 'm-addpage', type: 'button', 'aria-label': '페이지 추가', title: '페이지 추가', dataset: { tag: 'add_page_fab' } }, mkIcon('ic_note_add', 22, 'currentColor'), h('span', null, '페이지 추가'));
+    this.addPageButton.addEventListener('click', () => { if (this.renderer) this.choosePageToInsert(this.currentPage); });
+    const open = h('button', { class: 'm-welcome-btn', type: 'button', 'aria-label': '문서 열기' }, mkIcon('ic_folder_open', 22, 'currentColor'), h('span', null, '문서 열기'));
+    open.addEventListener('click', () => this.showAddDocumentMenu());
+    this.welcomeCard = h('div', { class: 'm-welcome', dataset: { tag: 'welcome' } },
+      h('div', { class: 'm-welcome-card' }, h('div', { class: 'm-welcome-name' }, 'Everynote'),
+        h('div', { class: 'm-welcome-sub' }, 'PDF·Office·한글 문서를 열어 필기하고, 새 노트를 만들어 보세요.'), open));
+    viewport.append(this.zoomPill, this.addPageButton, this.welcomeCard);
+  },
+  /** Show / hide the document-only floaters (zoom pill, add page) and the welcome card. */
+  updateFloaters() {
+    const doc = this.renderer != null;
+    if (this.zoomPill) this.zoomPill.style.display = doc ? '' : 'none';
+    if (this.addPageButton) this.addPageButton.style.display = doc ? '' : 'none';
+    if (this.welcomeCard) this.welcomeCard.style.display = doc ? 'none' : '';
+    this.updateZoomUi();
+  },
+
+  // ---- zoom (PdfPageView.setZoom / getZoom / onZoomChanged; a local fallback keeps the buttons working on a view without them)
+  getZoomOf(view) { return view && typeof view.getZoom === 'function' ? view.getZoom() : (view && view.scale) || 1; },
+  setZoomOf(view, z) {
+    if (!view) return;
+    if (typeof view.setZoom === 'function') view.setZoom(z);
+    else { view.scale = Math.max(1, Math.min(4, z)); if (view.scale <= 1) view.panX = view.panY = 0; if (view.invalidate) view.invalidate(); }
+  },
+  zoomViews() {
+    const a = [this.firstPageView];
+    if (this.twoPage && this.secondPageView && isShown(this.secondPageView)) a.push(this.secondPageView);
+    return a;
+  },
+  zoomTo(z) {
+    if (this.renderer == null) return;
+    z = Math.round(z * 100) / 100; if (Math.abs(z - 1) < 0.03) z = 1;
+    for (const v of this.zoomViews()) this.setZoomOf(v, z);
+    this.updateZoomUi();
+  },
+  zoomIn() { this.zoomTo(this.getZoomOf(this.pageView) * ZOOM_STEP); },
+  zoomOut() { this.zoomTo(this.getZoomOf(this.pageView) / ZOOM_STEP); },
+  resetZoomAll() {
+    if (this.renderer == null) return;
+    for (const v of this.zoomViews()) { if (typeof v.resetZoom === 'function') v.resetZoom(); else this.setZoomOf(v, 1); }
+    this.updateZoomUi();
+  },
+  onZoomChanged() { this.updateZoomUi(); },
+  updateZoomUi() {
+    if (!this.zoomLabel || !this.pageView) return;
+    const z = this.getZoomOf(this.pageView), pct = Math.round(z * 100);
+    if (this.zoomLabel.textContent !== pct + '%') this.zoomLabel.textContent = pct + '%';
+    this.zoomLabel.title = this.zoomLabel.getAttribute('aria-label') + ' · 현재 ' + pct + '%';
+    this.zoomLabel.classList.toggle('zoomed', pct !== 100);
+  },
+  /** A mouse drags the page like a finger in reading mode (curl animation); in writing mode it writes. */
+  applyMouseReadDrag() {
+    const on = !this.writeMode;
+    for (const v of [this.firstPageView, this.secondPageView]) if (v && typeof v.setMouseReadDrag === 'function') v.setMouseReadDrag(on);
+  },
+
   sidePanelWidth() { return Math.min(190, Math.round(window.innerWidth * 0.42)); },
 
   // ============================================================ write mode / tool buttons
   /** Samsung Notes style: reading mode shows page tools, writing mode shows pen tools. */
   setWriteMode(on) {
     if (on && this.renderer == null) { toast('문서를 먼저 여세요'); return; }
-    this.writeMode = on;
+    this.writeMode = on; this.applyMouseReadDrag();
+    this.root.classList.toggle('m-writing', on);
     this.readBar.style.display = on ? 'none' : '';
     this.writeBar.style.display = on ? '' : 'none';
     if (on) { if (this.inkMode === 0 && !this.highlightMode && !this.memoMode && !this.outlineMode && !this.pageView.isLassoMode()) this.setInkMode(1); else this.updateToolStates(); }
@@ -519,26 +638,29 @@ const methods = {
     return best;
   },
   showPenMenu(anchor) {
-    const box = h('div', { class: 'm-menubox', style: { padding: '4px 2px 0' } });
+    const box = h('div', { class: 'm-menubox', dataset: { tag: 'pen_menu' }, style: { padding: '4px 2px 0' } });
     const apply = () => { this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools(); this.updateInkButton(); };
-    box.append(segmentedView(['얇게', '보통', '굵게', '최대'], () => this.widthIndex(), i => {
+    // pen type: icon buttons (ballpoint / pencil / fountain / brush / felt marker)
+    box.append(iconSegView(AnnotationPainter.PEN_NAMES.map((name, i) => ({ icon: PEN_ICONS[i] || 'ic_ink', label: name })), () => this.inkPen, i => {
+      this.inkPen = i; this.pageView.setInkPen(i); this.recentPrefs.putInt('ink_pen', i); this.syncOtherTools(); this.updateInkButton();
+    }, 'pen_types'));
+    // stroke width: four lines of growing thickness
+    box.append(iconSegView(WIDTH_ICONS.map((ic, i) => ({ icon: ic, label: '굵기 · ' + WIDTH_NAMES[i] })), () => this.widthIndex(), i => {
       this.inkWidth = INK_WIDTHS[i]; this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools();
-    }));
-    const penLabel = h('div', { class: 'm-seclabel', style: { padding: '6px 0 2px 8px' } }, '펜 종류');
-    box.append(penLabel);
-    box.append(segmentedView(AnnotationPainter.PEN_NAMES, () => this.inkPen, i => {
-      this.inkPen = i; this.pageView.setInkPen(i); this.recentPrefs.putInt('ink_pen', i); this.syncOtherTools();
-    }));
+    }, 'pen_widths'));
     const known = INK_COLORS.concat(INK_COLORS2);
     const pickInk = c => { this.inkColor = ((this.inkColor & 0xFF000000) | (c & 0xFFFFFF)) | 0; apply(); row1.refresh(); row2.refresh(); };
     const row1 = swatchesView(INK_COLORS, () => this.inkColor | 0xFF000000, pickInk, 22, 0, known);
     const row2 = swatchesView(INK_COLORS2, () => this.inkColor | 0xFF000000, pickInk, 22, 1, known);
     box.append(row1, row2);
     box.append(opacityBar(() => (this.inkColor >>> 24) & 255, a => { this.inkColor = ((a << 24) | (this.inkColor & 0xFFFFFF)) | 0; apply(); }));
-    AnchoredMenu.show(anchor, true, [
-      Row.custom(box), Row.divider(),
-      new Row('직선', 'ic_line', () => this.setInkMode(3)).selected(this.inkMode === 3).tint(argb(this.inkColor | 0xFF000000)),
-      new Row('손가락 필기', 'ic_ink', () => this.toggleFingerInk()).tint('#007AFF').selected(this.fingerInk)], null);
+    // straight line / finger writing: icon toggles
+    const opts = h('div', { class: 'm-iseg m-opts', dataset: { tag: 'pen_options' } });
+    const lineBtn = iconToggleView('ic_line', '직선 · 시작점에서 끝점까지', () => this.inkMode === 3, on => { this.setInkMode(on ? 3 : 1); }, 'pen_line');
+    const fingerBtn = iconToggleView('ic_touch', '손가락 필기', () => this.fingerInk, () => { this.toggleFingerInk(); }, 'pen_finger');
+    opts.append(lineBtn, fingerBtn);
+    box.append(opts);
+    AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
   },
   showHighlightMenu(anchor) {
     const box = h('div', { class: 'm-menubox', style: { padding: '6px 2px 0' } });
@@ -595,6 +717,9 @@ const methods = {
       this.recentPrefs.putBoolean('keep_awake', !awake); this.applyKeepAwake();
       toast(!awake ? '읽는 동안 화면이 꺼지지 않습니다' : '화면 자동 꺼짐을 따릅니다');
     }).tint('#8E8E93').selected(awake));
+    if (doc) rows.push(new Row('인쇄', 'ic_print', () => this.callUi2('printDocument')).tint('#007AFF'));
+    rows.push(new Row('구글 드라이브 동기화', 'ic_cloud_sync', () => this.callUi2('showSyncSettings')).tint('#34A853'));
+    rows.push(new Row('오프라인 사용 안내', 'ic_wifi_off', () => this.callUi2('showAboutOffline')).tint('#8E8E93'));
     rows.push(new Row('사용법', 'ic_outline', () => this.showHelp()).tint('#8E8E93'));
     const shortcuts = [];
     shortcuts.push(new Shortcut('문서함', 'ic_folder_open', false, () => this.showLibrary()));
@@ -604,10 +729,11 @@ const methods = {
   },
 
   showWelcome() {
-    if (this.writeMode) { this.writeMode = false; this.readBar.style.display = ''; this.writeBar.style.display = 'none'; }
+    if (this.writeMode) { this.writeMode = false; this.applyMouseReadDrag(); this.root.classList.remove('m-writing'); this.readBar.style.display = ''; this.writeBar.style.display = 'none'; }
     setVis(this.previousOverlay, 'gone'); setVis(this.nextOverlay, 'gone');
-    this.titleView.textContent = 'PDF Note';
+    this.titleView.textContent = 'Everynote'; document.title = 'Everynote';
     this.pageLabel.textContent = '문서 열기';
+    this.updateFloaters();
   },
 
   // ============================================================ sessions persistence
@@ -740,7 +866,7 @@ const methods = {
   offerOfficeImport(uri, name) {
     // the "본문만 미리보기" (text-only preview) button does not exist on Windows: no OfficeImporter port
     new AlertDialog.Builder().setTitle(name)
-      .setMessage('원본 서식·표·그림은 설치된 문서 앱에서 확인할 수 있습니다. 해당 앱에서 PDF로 내보낸 뒤 다시 가져오면 PDF Note에서 필기와 주석을 사용할 수 있습니다.')
+      .setMessage('원본 서식·표·그림은 설치된 문서 앱에서 확인할 수 있습니다. 해당 앱에서 PDF로 내보낸 뒤 다시 가져오면 Everynote에서 필기와 주석을 사용할 수 있습니다.')
       .setPositiveButton('원본 보기', () => this.openOfficeOriginal(uri, name))
       .setNegativeButton('PDF 가져오기', () => this.chooseConvertedPdf()).show();
   },
@@ -972,6 +1098,7 @@ const methods = {
     const nextLabel = first + step >= count && notebook ? '새 페이지 추가' : '다음 페이지';
     this.nextOverlay.setAttribute('aria-label', nextLabel); this.nextOverlay.title = nextLabel;
     this.pageLabel.textContent = two ? `${first + 1}\u2013${Math.min(first + 2, count)} / ${count}` : `${index + 1} / ${count}`;
+    this.applyMouseReadDrag(); this.updateFloaters();
     this.applyCrop(); this.updateBookmarkButton(); this.updateThumbnailSelection(); this.refreshStudyPanel(); this.saveSessionState(); this.applySearchHighlights();
     this.loadViewText(this.firstPageView); if (two && isShown(this.secondPageView)) this.loadViewText(this.secondPageView);
     this.schedulePrefetch(doc, first, second);
@@ -1061,7 +1188,13 @@ const methods = {
     this.paintTool(this.penButton, pen, this.soft(penColor), penColor);
     this.paintTool(this.hlButton, hl, this.soft(hlColor), hlColor);
     this.paintTool(this.eraserButton, eraser, 0xFFFFE3E8, 0xFFFF3B30);
-    if (this.penButton) this.penButton.setAttribute('aria-label', '펜');
+    if (this.penButton) {
+      const g = this.penButton.querySelector('.ico'), name = PEN_ICONS[this.inkPen] || 'ic_ink';
+      if (g && g.dataset.icon !== name) { setIcon(g, name); g.dataset.icon = name; }
+      this.penButton.setAttribute('aria-label', '펜'); this.penButton.title = '펜 · ' + (AnnotationPainter.PEN_NAMES[this.inkPen] || '');
+    }
+    if (this.hlButton) this.hlButton.title = '형광펜';
+    if (this.eraserButton) this.eraserButton.title = '지우개';
     if (this.inkButton) this.inkButton.setAttribute('aria-label', '필기 모드');
   },
   toggleFingerInk() {
@@ -1151,6 +1284,8 @@ const methods = {
   onBackPressed() {
     if (this.selectionPopup) { this.onSelectionAdjustStarted(); if (this.pageView) this.pageView.clearTextSelectionOverlay(); return true; }
     if (this.inlineElement != null) { this.commitInlineText(); return true; }
+    const sel = this.selectedPageElement();
+    if (sel) { for (const v of [this.firstPageView, this.secondPageView]) if (v && v.selectElement) v.selectElement(null); return true; }
     if (this.searchPanel && this.searchPanel.offsetParent !== null) { this.closeSearch(); return true; }
     if (this.fullscreen) { this.toggleFullscreen(); return true; }
     return false;
@@ -1174,6 +1309,8 @@ const methods = {
   onInkChanged() { if (this.store != null) { this.store.save(); if (this.activeSession != null) this.activeSession.redoStrokes.length = 0; } },
   onTextSelectionFinished(selection, anchorX, anchorY) { this.showTextSelectionPopup(selection, anchorX, anchorY); },
   onTranslationTapped(note) { this.editTranslation(note); },
+  /** The page view's own delete (X) button removed `element` from the page: drop it from the store too (idempotent) and save. */
+  onElementDeleted(element) { if (element && this.store) { this.deleteElement(element); toast('삭제했습니다'); } },
   onSelectionAdjustStarted() { const p = this.selectionPopup; if (p) { this.selectionPopup = null; if (p.close) p.close(); else if (p.remove) p.remove(); } },
 
   // ============================================================ page turning
