@@ -62,6 +62,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Plan (release when a tag is pushed, or when main carries a VERSION without a release yet)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'dev'; $rel = 'false'
+          if ("${{ github.ref }}" -like "refs/tags/v*") { $tag = "${{ github.ref_name }}"; $rel = 'true' }
+          elseif ("${{ github.ref }}" -eq "refs/heads/main" -and "${{ github.event_name }}" -eq "push" -and (Test-Path VERSION)) {
+            $cand = 'v' + (Get-Content VERSION -Raw).Trim()
+            gh release view $cand *> $null
+            if ($LASTEXITCODE -ne 0) { $tag = $cand; $rel = 'true' } else { Write-Host "release $cand already exists: build only" }
+          }
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          "DO_RELEASE=$rel" >> $env:GITHUB_ENV
+          Write-Host "::notice title=release-plan::tag=$tag release=$rel"
+
       - name: Fetch HWP engine
         id: engine
         continue-on-error: true
@@ -74,7 +90,7 @@ jobs:
         run: |
           if ((Test-Path web/hwp/rhwptopdf.umd.js) -and (Test-Path web/hwp/rhwptopdf.umd_bg.wasm)) {
             Write-Host "::notice title=hwp-engine::embedded $([int]((Get-Item web/hwp/rhwptopdf.umd_bg.wasm).Length/1KB)) KB wasm"
-          } elseif ("${{ github.ref }}" -like "refs/tags/*") {
+          } elseif ($env:DO_RELEASE -eq 'true') {
             Write-Host "::error title=hwp-engine::engine missing on a release build"; exit 1
           } else {
             Write-Host "::warning title=hwp-engine::engine missing: HWP conversion unavailable in this build"
@@ -88,8 +104,8 @@ jobs:
         id: ver
         shell: pwsh
         run: |
-          $v = '3.0.0'
-          if ("${{ github.ref }}" -like "refs/tags/v*") { $v = "${{ github.ref_name }}" -replace '^v\.?','' }
+          $v = (Get-Content VERSION -Raw).Trim()
+          if ($env:DO_RELEASE -eq 'true') { $v = $env:RELEASE_TAG -replace '^v\.?','' }
           "version=$v" >> $env:GITHUB_OUTPUT
 
       - name: Restore
@@ -155,8 +171,7 @@ jobs:
       - name: Compile installers (x64, arm64)
         shell: pwsh
         run: |
-          $v = "${{ github.ref_name }}"
-          if (-not ("${{ github.ref }}" -like "refs/tags/*")) { $v = "dev" }
+          $v = $env:RELEASE_TAG
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           foreach ($arch in 'x64', 'arm64') {
             $log = "iscc-$arch.log"
@@ -172,8 +187,7 @@ jobs:
       - name: Installer smoke test (silent install, shortcuts, Apps & features, uninstall)
         shell: pwsh
         run: |
-          $v = "${{ github.ref_name }}"
-          if (-not ("${{ github.ref }}" -like "refs/tags/*")) { $v = "dev" }
+          $v = $env:RELEASE_TAG
           ./tools/installer-smoke.ps1 -Setup "$PWD\dist\Everynote-Setup-$v-x64.exe" -Out installer-smoke
 
       - uses: actions/upload-artifact@v4
@@ -187,8 +201,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $v = "${{ github.ref_name }}"
-          if (-not ("${{ github.ref }}" -like "refs/tags/*")) { $v = "dev" }
+          $v = $env:RELEASE_TAG
           Copy-Item out/x64/Everynote.exe "dist/Everynote-$v-win-x64.exe"
           Copy-Item out/arm64/Everynote.exe "dist/Everynote-$v-win-arm64.exe"
           Get-ChildItem dist | Format-Table Name, Length
@@ -199,12 +212,12 @@ jobs:
           path: dist/*
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: env.DO_RELEASE == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "${{ github.ref_name }}"
+          $tag = $env:RELEASE_TAG
           $norm = 'v' + ($tag -replace '^v\.?','')
           $notes = "docs/release-notes/$norm.md"
           $files = Get-ChildItem dist | ForEach-Object { $_.FullName }
