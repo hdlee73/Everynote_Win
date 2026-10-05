@@ -225,7 +225,7 @@ sealed class Bridge
     }
 
     // ---- same-network device sync: plain-http requests to a private IPv4 address only (https pages cannot fetch http directly)
-    static readonly HttpClient lan = new(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }) { Timeout = TimeSpan.FromMinutes(10) };
+    static readonly System.Net.Http.HttpClient lan = new(new System.Net.Http.HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }) { Timeout = TimeSpan.FromMinutes(10) };
     static bool IsPrivateHost(string host)
     {
         if (!System.Net.IPAddress.TryParse(host, out var ip) || ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) return false;
@@ -236,32 +236,32 @@ sealed class Bridge
     {
         var uri = new Uri(S(a, "url"));
         if (uri.Scheme != "http" || !IsPrivateHost(uri.Host)) throw new ArgumentException("같은 네트워크(사설 주소)의 기기만 연결할 수 있습니다");
-        var method = new HttpMethod((S(a, "method", false) ?? "GET").ToUpperInvariant());
-        using var req = new HttpRequestMessage(method, uri);
+        var method = new System.Net.Http.HttpMethod((S(a, "method", false) ?? "GET").ToUpperInvariant());
+        using var req = new System.Net.Http.HttpRequestMessage(method, uri);
         if (a.TryGetProperty("headers", out var hs) && hs.ValueKind == JsonValueKind.Object)
             foreach (var h in hs.EnumerateObject()) if (h.Value.ValueKind == JsonValueKind.String && !req.Headers.TryAddWithoutValidation(h.Name, h.Value.GetString())) { }
         FileStream upload = null;
         try
         {
             var readPath = S(a, "readPath", false);
-            if (readPath != null) { upload = File.OpenRead(PathPolicy.ReadPath(readPath)); req.Content = new StreamContent(upload); }
-            else if (S(a, "text", false) is string text) req.Content = new StringContent(text, new System.Text.UTF8Encoding(false), "application/json");
+            if (readPath != null) { upload = File.OpenRead(PathPolicy.ReadPath(readPath)); req.Content = new System.Net.Http.StreamContent(upload); }
+            else if (S(a, "text", false) is string text) req.Content = new System.Net.Http.StringContent(text, new System.Text.UTF8Encoding(false), "application/json");
             var savePath = S(a, "savePath", false);
-            using var res = await lan.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+            using var res = await lan.SendAsync(req, System.Net.Http.HttpCompletionOption.ResponseHeadersRead);
             if (savePath != null && res.IsSuccessStatusCode)
             {
                 var dest = PathPolicy.WritePath(savePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(dest));
+                Directory.CreateDirectory(System.IO.Path.GetDirectoryName(dest));
                 var tmp = dest + ".part";
                 await using (var fs = File.Create(tmp)) await res.Content.CopyToAsync(fs);
                 File.Move(tmp, dest, true);
                 return new { status = (int)res.StatusCode, text = "" };
             }
-            var body = method == HttpMethod.Head ? "" : await res.Content.ReadAsStringAsync();
+            var body = method == System.Net.Http.HttpMethod.Head ? "" : await res.Content.ReadAsStringAsync();
             return new { status = (int)res.StatusCode, text = body.Length > 20 * 1024 * 1024 ? "" : body };
         }
         catch (TaskCanceledException) { throw new IOException("기기가 응답하지 않습니다"); }
-        catch (HttpRequestException e) { throw new IOException("기기에 연결할 수 없습니다 (" + (e.InnerException?.Message ?? e.Message) + ")"); }
+        catch (System.Net.Http.HttpRequestException e) { throw new IOException("기기에 연결할 수 없습니다 (" + (e.InnerException?.Message ?? e.Message) + ")"); }
         finally { upload?.Dispose(); }
     }
 
