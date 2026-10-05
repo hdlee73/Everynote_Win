@@ -18,6 +18,7 @@
 //   window.fullscreen({on}) power.keepAwake({on})
 //   office.engines() -> {word,excel,powerpoint,libreoffice:path|null}
 //   office.convert({id,path,kind}) -> {pdf:path}   (events office.progress {id,text}); office.cancel({id})
+//   net.http({url,method,headers,text,readPath,savePath}) -> {status,text}   (plain http to private IPv4 addresses only: device sync)
 //   ocr.recognize({png:b64,lang}) -> {width,height,words:[{text,x,y,w,h,line}]}  (pixel boxes)
 import { baseName, dirName } from './util.js';
 
@@ -107,6 +108,7 @@ const fake = {
       case 'office.engines': return { word: false, excel: false, powerpoint: false, libreoffice: null };
       case 'office.convert': throw new Error('변환 엔진이 없습니다');
       case 'office.cancel': return true;
+      case 'net.http': if (this.netHandler) return this.netHandler(a); throw new Error('브라우저에서는 지원하지 않습니다');
       case 'ocr.recognize': throw new Error('OCR unavailable in browser');
       default: throw new Error('unknown host method ' + m);
     }
@@ -154,6 +156,7 @@ export const host = {
   openDialog: (title, filters, multi = false) => host.call('dialog.open', { title, filters, multi }),
   saveDialog: (title, name, filters) => host.call('dialog.save', { title, name, filters }),
   shellOpen: pathOrUrl => host.call('shell.open', /^https?:/i.test(pathOrUrl) ? { url: pathOrUrl } : { path: pathOrUrl }),
+  netHttp: o => host.call('net.http', o),
   reveal: path => host.call('shell.reveal', { path }),
   baseName, dirName,
 };

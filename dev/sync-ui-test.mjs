@@ -1,0 +1,44 @@
+// UI check of 기기 동기화 (dialog -> merge with a fake phone). usage: node dev/sync-ui-test.mjs  (screenshots dev/out/sync-*.png)
+import {chromium} from '/tmp/npmtest/node_modules/playwright/index.mjs';
+import {serve} from './server.mjs'; import fs from 'fs';
+const PORT=8200+Math.floor(Math.random()*700); const s=await serve(PORT);
+const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
+const pg=await b.newPage({viewport:{width:1100,height:800}});
+const errs=[]; pg.on('pageerror',e=>errs.push('PE '+e.message)); pg.on('console',m=>{if(m.type()==='error'&&!/404/.test(m.text()))errs.push('CE '+m.text())});
+await pg.addInitScript(()=>{Map.prototype.getOrInsertComputed??=function(k,f){if(!this.has(k))this.set(k,f(k));return this.get(k)}});
+await pg.goto(`http://localhost:${PORT}/index.html`); await pg.waitForTimeout(1500);
+const bytes=[...fs.readFileSync('dev/samples/sample-ko.pdf')];
+let fails=0; const check=(n,ok,x='')=>{console.log((ok?'PASS ':'FAIL ')+n+(x?'  '+x:''));if(!ok)fails++};
+await pg.evaluate(async b=>{const {host}=await import('./js/host.js');host._fake.put('C:\\Docs\\sample-ko.pdf',new Uint8Array(b));await app.openPdf('C:\\Docs\\sample-ko.pdf');},bytes);
+await pg.waitForTimeout(1500);
+await pg.evaluate(async()=>{
+  const {host}=await import('./js/host.js'); const {sha256Hex}=await import('./js/sync.js');
+  const id=await sha256Hex(await host.readBytes('C:\\Docs\\sample-ko.pdf')); window.calls=[]; window.putBody=null;
+  host._fake.netHandler=async o=>{ calls.push((o.method||'GET')+' '+o.url+' '+(o.headers&&o.headers['X-Code']));
+    if(o.headers['X-Code']!=='123456')return{status:403,text:'wrong code'};
+    if(o.url.endsWith('/v1/docs'))return{status:200,text:JSON.stringify([{id,title:'x',pages:3}])};
+    if(o.url.endsWith('/v1/doc/'+id)&&(o.method||'GET')==='GET')return{status:200,text:JSON.stringify({format:'PDF Note annotations v2',elements:[],studyEntries:[],marks:[],bookmarks:[1],outlines:[],strokes:[],translations:[]})};
+    if(o.method==='PUT'&&o.url.endsWith('/v1/doc/'+id)){putBody=o.text;return{status:200,text:'ok'};}
+    return{status:404,text:''}; };
+  app.store.bookmarks.add(0);
+});
+await pg.evaluate(()=>app.showDeviceSync()); await pg.waitForTimeout(400);
+await pg.screenshot({path:'dev/out/sync-1-dialog.png'});
+check('dialog shows three modes', await pg.locator('.sync-mode').count()===3);
+const ins=pg.locator('.sync-view input.lib-in');
+await ins.nth(0).fill('192.168.0.9:40000'); await ins.nth(1).fill('000000');
+await pg.click('.ad-btn:has-text("동기화")'); await pg.waitForTimeout(800);
+check('wrong code -> failure card', await pg.locator('.ad-root:has-text("코드가 맞지 않습니다")').count()===1);
+await pg.screenshot({path:'dev/out/sync-2-wrongcode.png'});
+await pg.click('.ad-btn:has-text("다시 시도")'); await pg.waitForTimeout(300);
+const ins2=pg.locator('.sync-view input.lib-in');
+check('address remembered', (await ins2.nth(0).inputValue())==='192.168.0.9:40000');
+await ins2.nth(1).fill('123456'); await pg.click('.ad-btn:has-text("동기화")'); await pg.waitForTimeout(1500);
+const bm=await pg.evaluate(()=>[...app.store.bookmarks].sort().join());
+check('merged bookmarks locally', bm==='0,1', bm);
+check('merged notes sent to phone', await pg.evaluate(()=>putBody&&JSON.parse(putBody).bookmarks.join()==='0,1'));
+await pg.screenshot({path:'dev/out/sync-3-done.png'});
+await pg.evaluate(()=>app.showTools()); await pg.waitForTimeout(300);
+check('tools has sync tile', await pg.locator('.m2-tile[aria-label="다른 기기와 동기화"]').count()===1);
+const bad=await pg.evaluate(()=>{try{return 'x'}catch(e){return 'y'}});
+console.log(errs.join('\n')); console.log(fails?fails+' FAILED':'all passed'); await b.close(); s.close(); process.exit(fails?1:0);

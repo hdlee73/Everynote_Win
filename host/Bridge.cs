@@ -132,6 +132,7 @@ sealed class Bridge
 
             case "dialog.open": return await win.Dispatcher.InvokeAsync(() => DialogOpen(a));
             case "dialog.save": return await win.Dispatcher.InvokeAsync(() => DialogSave(a));
+            case "net.http": return await NetHttp(a);
             case "shell.open": ShellOpen(a); return true;
             case "shell.reveal": Reveal(PathPolicy.ReadPath(S(a, "path"))); return true;
             case "window.fullscreen": { var on = B(a, "on"); await win.Dispatcher.InvokeAsync(() => win.SetFullscreen(on)); return true; }
@@ -221,6 +222,47 @@ sealed class Bridge
             return true;
         }
         throw new FileNotFoundException("not found: " + from);
+    }
+
+    // ---- same-network device sync: plain-http requests to a private IPv4 address only (https pages cannot fetch http directly)
+    static readonly HttpClient lan = new(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false }) { Timeout = TimeSpan.FromMinutes(10) };
+    static bool IsPrivateHost(string host)
+    {
+        if (!System.Net.IPAddress.TryParse(host, out var ip) || ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) return false;
+        var b = ip.GetAddressBytes();
+        return b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168) || (b[0] == 169 && b[1] == 254);
+    }
+    static async Task<object> NetHttp(JsonElement a)
+    {
+        var uri = new Uri(S(a, "url"));
+        if (uri.Scheme != "http" || !IsPrivateHost(uri.Host)) throw new ArgumentException("같은 네트워크(사설 주소)의 기기만 연결할 수 있습니다");
+        var method = new HttpMethod((S(a, "method", false) ?? "GET").ToUpperInvariant());
+        using var req = new HttpRequestMessage(method, uri);
+        if (a.TryGetProperty("headers", out var hs) && hs.ValueKind == JsonValueKind.Object)
+            foreach (var h in hs.EnumerateObject()) if (h.Value.ValueKind == JsonValueKind.String && !req.Headers.TryAddWithoutValidation(h.Name, h.Value.GetString())) { }
+        FileStream upload = null;
+        try
+        {
+            var readPath = S(a, "readPath", false);
+            if (readPath != null) { upload = File.OpenRead(PathPolicy.ReadPath(readPath)); req.Content = new StreamContent(upload); }
+            else if (S(a, "text", false) is string text) req.Content = new StringContent(text, new System.Text.UTF8Encoding(false), "application/json");
+            var savePath = S(a, "savePath", false);
+            using var res = await lan.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+            if (savePath != null && res.IsSuccessStatusCode)
+            {
+                var dest = PathPolicy.WritePath(savePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(dest));
+                var tmp = dest + ".part";
+                await using (var fs = File.Create(tmp)) await res.Content.CopyToAsync(fs);
+                File.Move(tmp, dest, true);
+                return new { status = (int)res.StatusCode, text = "" };
+            }
+            var body = method == HttpMethod.Head ? "" : await res.Content.ReadAsStringAsync();
+            return new { status = (int)res.StatusCode, text = body.Length > 20 * 1024 * 1024 ? "" : body };
+        }
+        catch (TaskCanceledException) { throw new IOException("기기가 응답하지 않습니다"); }
+        catch (HttpRequestException e) { throw new IOException("기기에 연결할 수 없습니다 (" + (e.InnerException?.Message ?? e.Message) + ")"); }
+        finally { upload?.Dispose(); }
     }
 
     static object FsCopy(string from, string to)

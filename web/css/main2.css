@@ -216,3 +216,9 @@ body.m2-resizing[data-m2-axis="y"]{cursor:row-resize!important}
 .m2-tape-cell:hover{background:rgba(0,0,0,.04)}
 .m2-tape-cell img{max-width:100%;max-height:100%;object-fit:contain}
 .m2-opacity-bar{width:100%;accent-color:#007AFF;margin:4px 0 0;height:24px}
+
+.sync-view{display:flex;flex-direction:column;gap:10px;min-width:300px}
+.sync-note{font-size:13px;color:#6b6b70;line-height:1.45}
+.sync-mode{display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-size:14px}
+.sync-mode small{display:block;font-size:12px;color:#8E8E93;margin-top:2px}
+.sync-mode input{margin-top:3px}
