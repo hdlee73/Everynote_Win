@@ -271,7 +271,7 @@ function workbook(entries, title) {
 
 export function youtubeId(text) {
   if (text == null) return null;
-  const m = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^\s]*&)?v=|shorts\/|embed\/|live\/|v\/))([A-Za-z0-9_-]{11})/.exec(String(text).trim());
+  const m = /(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^\s]*&)?v=|shorts\/|embed\/|live\/|v\/)|i\d?\.ytimg\.com\/vi(?:_webp)?\/)([A-Za-z0-9_-]{11})/.exec(String(text).trim());
   return m ? m[1] : null;
 }
 
@@ -551,7 +551,7 @@ M.exportAnnotations = async function () {
   let json;
   try { json = this.pendingJsonExport = this.store.exportJson(this.documentUri, this.documentTitle); } catch (e) { toast('백업 실패'); return; }
   try {
-    const path = await saveBytesAs('필기 백업 파일 저장', stripPdf(this.documentTitle) + '_annotations.json', ['json'], utf8(json));
+    const path = await saveBytesAs('이 문서 필기 백업 저장', stripPdf(this.documentTitle) + '_annotations.json', ['json'], utf8(json));
     if (path) toast('주석을 내보냈습니다');
   } catch (e) { toast('백업 실패: ' + errMsg(e)); } finally { this.pendingJsonExport = null; }
 };
@@ -763,7 +763,7 @@ M.importSidecar = async function () {
   const target = this.store, session = this.activeSession;
   this.importTarget = target; this.importSession = session;
   let path;
-  try { [path] = await host.openDialog('필기 백업 파일 불러오기', [{ name: 'JSON', exts: ['json'] }], false); } catch (e) { path = null; }
+  try { [path] = await host.openDialog('이 문서 필기 백업 불러오기', [{ name: 'JSON', exts: ['json'] }], false); } catch (e) { path = null; }
   this.importTarget = null; this.importSession = null;
   if (!path) return;
   if (!session || !this.sessions.includes(session)) return;
@@ -777,7 +777,7 @@ M.importSidecar = async function () {
     if (root == null || typeof root !== 'object' || Array.isArray(root)) throw new Error('JSON 객체가 아닙니다');
   } catch (e) { toast('백업 읽기 실패: ' + errMsg(e)); return; }
   alertCard({
-    title: '필기 백업 파일 불러오기',
+    title: '이 문서 필기 백업 불러오기',
     message: '백업 문서: ' + (root.document == null ? '' : root.document) + '\n현재 문서: ' + session.title + '\n\n현재 문서의 주석·노트·발췌를 이 백업으로 교체합니다.',
     positive: ['복원', async () => {
       if (!this.sessions.includes(session)) return;
@@ -1243,6 +1243,7 @@ M.onElementTapped = function (element) {
   if (element.kind === 'audio') { this.showAudioPlayer(element); return; }
   if (element.kind === 'text') { this.beginInlineText(element, false); return; }
   if (element.kind === 'hyperlink') { this.showHyperlinkMenu(element); return; }
+  if (element.kind === 'link' && youtubeId(element.text) != null) { element.kind = 'youtube'; element.text = youtubeId(element.text); this.store.save(); }
   const kind = element.kind, R = AnchoredMenu.Row, rows = [];
   if (kind === 'link') rows.push(new R('링크 열기', 'ic_link', () => { if (this.validWebUrl(element.text)) this._openExternal(element.text, '링크를 열 앱이 없습니다'); }).tint('#5856D6'));
   if (kind === 'video') { rows.push(new R('여기서 재생', 'ic_video', () => this.playInline(element)).tint('#FF3B30')); rows.push(new R('크게 보기', 'ic_fullscreen', () => this.showVideoPlayer(element)).tint('#8E8E93')); }
@@ -1379,6 +1380,7 @@ M.importVideo = async function (source) {
 M.stopInlinePlayer = function () {
   const p = this._inlinePlayer; this._inlinePlayer = null;
   if (!p) return;
+  try { const yb = p.querySelector('.m2-ybar'); if (yb && yb._dispose) yb._dispose(); } catch (e) { /* ignore */ }
   try { const v = p.querySelector('video'); if (v) { v.pause(); v.removeAttribute('src'); v.load(); } const f = p.querySelector('iframe'); if (f) f.src = 'about:blank'; } catch (e) { /* ignore */ }
   p.remove();
 };
@@ -1399,17 +1401,17 @@ M.playInline = async function (element) {
   const box = this._inlineBox(element); if (!box) { toast('재생할 위치를 찾을 수 없습니다'); return; }
   let media;
   if (element.kind === 'youtube') {
-    media = h('iframe', { src: 'https://www.youtube.com/embed/' + element.text + '?autoplay=1&playsinline=1&rel=0&modestbranding=1', allow: 'autoplay; encrypted-media; picture-in-picture; fullscreen', allowfullscreen: 'true', referrerpolicy: 'strict-origin-when-cross-origin', style: { width: '100%', height: '100%', border: '0', background: '#000' } });
+    media = h('iframe', { src: 'https://www.youtube.com/embed/' + element.text + '?autoplay=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1', allow: 'autoplay; encrypted-media; picture-in-picture; fullscreen', allowfullscreen: 'true', referrerpolicy: 'strict-origin-when-cross-origin', style: { width: '100%', height: '100%', border: '0', background: '#000' } });
   } else {
     let url;
     try { if (!(await AnnotationStore.hasAsset(element.text))) throw new Error(); url = await AnnotationStore.assetUrl(element.text); } catch (e) { toast('동영상 파일을 찾을 수 없습니다'); return; }
-    media = h('video', { controls: true, autoplay: true, playsinline: true, style: { width: '100%', height: '100%', background: '#000', objectFit: 'contain' } });
-    media.addEventListener('error', () => toast('이 동영상은 재생할 수 없습니다'));
+    media = h('video', { autoplay: true, playsinline: true, style: { width: '100%', height: '100%', background: '#000', objectFit: 'contain' } });
+    media.addEventListener('error', () => toast('이 동영상은 재생할 수 없습니다 (형식 미지원). 다른 앱으로 열어 보세요'));
     media.src = url;
   }
   const close = iconButton('ic_close', '재생 닫기', '#fff', () => this.stopInlinePlayer(), 32, 32);
   Object.assign(close.style, { position: 'absolute', top: '4px', right: '4px', background: 'rgba(0,0,0,.6)', borderRadius: '16px' });
-  const kids = [media, close];
+  const kids = [media, close, element.kind === 'video' ? this._videoBar(media) : this._youtubeBar(media)];
   if (element.kind === 'video') {
     const big = iconButton('ic_fullscreen', '크게 보기', '#fff', () => { this.stopInlinePlayer(); this.showVideoPlayer(element); }, 32, 32);
     Object.assign(big.style, { position: 'absolute', top: '4px', left: '4px', background: 'rgba(0,0,0,.6)', borderRadius: '16px' }); kids.push(big);
@@ -1418,12 +1420,39 @@ M.playInline = async function (element) {
   document.body.append(frame); this._inlinePlayer = frame;
   if (media.play) media.play().catch(() => {});
 };
+/** Always-visible ⏪10 / play-pause / 10⏩ bar with a seek slider (video files). */
+M._videoBar = function (video) {
+  const btn = (t, f) => { const b = h('button', { type: 'button', class: 'm2-vbtn' }, t); b.addEventListener('click', f); return b; };
+  const play = btn('⏸', () => { if (video.paused) video.play().catch(() => {}); else video.pause(); });
+  const seek = h('input', { type: 'range', min: '0', max: '1000', value: '0', class: 'm2-vseek', 'aria-label': '재생 위치' });
+  const time = h('span', { class: 'm2-vtime' }, '0:00');
+  const fmt = t => { t = Math.max(0, Math.floor(t || 0)); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
+  seek.addEventListener('input', () => { if (video.duration) video.currentTime = video.duration * seek.value / 1000; });
+  const upd = () => { if (video.duration) seek.value = String(Math.round(video.currentTime / video.duration * 1000)); play.textContent = video.paused ? '▶' : '⏸'; time.textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration); };
+  video.addEventListener('timeupdate', upd); video.addEventListener('play', upd); video.addEventListener('pause', upd); video.addEventListener('loadedmetadata', upd);
+  video.addEventListener('click', () => play.click());
+  return h('div', { class: 'm2-vbar', dataset: { tag: 'video_bar' } }, btn('⏪10', () => { video.currentTime = Math.max(0, video.currentTime - 10); }), play, btn('10⏩', () => { video.currentTime = Math.min(video.duration || 1e9, video.currentTime + 10); }), seek, time);
+};
+/** YouTube embeds are driven through the IFrame API's postMessage commands. */
+M._youtubeBar = function (iframe) {
+  const state = { t: 0, s: -1 };
+  const send = (func, args) => { try { iframe.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args: args || [] }), '*'); } catch (e) { /* ignore */ } };
+  const onMsg = ev => { if (ev.source !== iframe.contentWindow) return; let d; try { d = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data; } catch (e) { return; } const i = d && d.info; if (i) { if (typeof i.currentTime === 'number') state.t = i.currentTime; if (typeof i.playerState === 'number') state.s = i.playerState; } };
+  window.addEventListener('message', onMsg);
+  iframe.addEventListener('load', () => { try { iframe.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 1 }), '*'); } catch (e) { /* ignore */ } });
+  const btn = (t, f) => { const b = h('button', { type: 'button', class: 'm2-vbtn' }, t); b.addEventListener('click', f); return b; };
+  const bar = h('div', { class: 'm2-vbar m2-ybar', dataset: { tag: 'video_bar' } },
+    btn('⏪ 10초', () => send('seekTo', [Math.max(0, state.t - 10), true])), btn('▶/⏸', () => send(state.s === 1 ? 'pauseVideo' : 'playVideo')), btn('10초 ⏩', () => send('seekTo', [state.t + 10, true])));
+  bar._dispose = () => window.removeEventListener('message', onMsg);
+  return bar;
+};
 M.showVideoPlayer = async function (element) {
   let url;
   try { if (!(await AnnotationStore.hasAsset(element.text))) throw new Error(); url = await AnnotationStore.assetUrl(element.text); } catch (e) { toast('동영상 파일을 찾을 수 없습니다'); return; }
-  const video = h('video', { class: 'm2-video', controls: true, autoplay: true, playsinline: true });
+  const video = h('video', { class: 'm2-video', autoplay: true, playsinline: true });
+  video.addEventListener('error', () => toast('이 동영상은 재생할 수 없습니다 (형식 미지원)'));
   let dlg;
-  const frame = h('div', { class: 'm2-videoframe' }, video, iconButton('ic_close', '동영상 닫기', '#fff', () => dlg.dismiss(), 48, 48));
+  const frame = h('div', { class: 'm2-videoframe' }, video, this._videoBar(video), iconButton('ic_close', '동영상 닫기', '#fff', () => dlg.dismiss(), 48, 48));
   frame.lastChild.classList.add('m2-video-close');
   dlg = new Overlay(frame, { onDismiss: () => { try { video.pause(); video.removeAttribute('src'); video.load(); } catch (e) { /* ignore */ } } });
   dlg.root.classList.add('m2-videoroot'); dlg.show();
@@ -1628,6 +1657,13 @@ M.handleDrop = function (e) {
   let file = null, uri = null;
   for (const f of dt.files || []) { if (/^(image|video)\//.test(f.type) || /\.(png|jpe?g|gif|webp|bmp|mp4|m4v|mov|webm|mkv|avi|wmv)$/i.test(f.name)) { file = f; break; } }
   if (!file) {
+    const ytDrop = youtubeId(dt.getData('text/uri-list')) || youtubeId(dt.getData('text/plain')) || youtubeId(dt.getData('text/html')) || youtubeId(dt.getData('text/x-moz-url'));
+    if (ytDrop != null) {
+      const hit0 = this.firstPageView, second0 = this.secondPageView; let hv = hit0;
+      if (this.twoPage && second0 && second0.el.offsetParent !== null && e.clientX >= second0.el.getBoundingClientRect().left) hv = second0;
+      if (hv) { const rr = hv.el.getBoundingClientRect(), nn = hv.toPage(e.clientX - rr.left, e.clientY - rr.top); this.dropTarget = [hv.getPageNumber(), nn[0], nn[1]]; this.dropTime = Date.now(); }
+      this.importYoutube(ytDrop); return true;
+    }
     const html = dt.getData('text/html'), text = (dt.getData('text/uri-list') || dt.getData('text/plain') || '').trim();
     if (html) { const m = /src=["']([^"']+)["']/.exec(html); if (m) uri = m[1]; }
     if (!uri && /^https?:\/\/\S+$/.test(text.split(/\r?\n/).find(l => l && !l.startsWith('#')) || '')) uri = text.split(/\r?\n/).find(l => l && !l.startsWith('#'));
@@ -2230,7 +2266,7 @@ M.startLibraryBackup = async function () {
     if (typeof this.commitInlineText === 'function') this.commitInlineText();
     const d = new Date(), z = n => String(n).padStart(2, '0');
     const stamp = `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`;
-    const out = await host.saveDialog('전체 문서 백업', `Everynote-백업-${stamp}.zip`, [{ name: 'Everynote 백업', exts: ['zip'] }]);
+    const out = await host.saveDialog('모든 문서 통째로 백업', `Everynote-백업-${stamp}.zip`, [{ name: 'Everynote 백업', exts: ['zip'] }]);
     if (!out) return;
     const progress = ProgressDialog.show('전체 백업', '문서와 필기를 모으는 중… 잠시 기다려 주세요');
     try {
@@ -2241,7 +2277,7 @@ M.startLibraryBackup = async function () {
 };
 M.startLibraryRestore = async function () {
   try {
-    const picked = await host.openDialog('백업에서 복원', [{ name: 'Everynote 백업', exts: ['zip'] }], false);
+    const picked = await host.openDialog('모든 문서 복원', [{ name: 'Everynote 백업', exts: ['zip'] }], false);
     if (!picked || !picked.length) return;
     const zip = picked[0];
     const run = async overwrite => {
@@ -2252,7 +2288,7 @@ M.startLibraryRestore = async function () {
       } catch (e) { progress.dismiss(); toast('복원 실패: ' + errMsg(e)); }
     };
     alertCard({
-      title: '백업에서 복원',
+      title: '모든 문서 복원',
       message: '백업의 문서·필기·사진·녹음·동영상을 문서함으로 복원합니다.\n\n• 추가 복원: 기존 문서는 그대로 두고, 같은 이름은 사본 (1)로 추가\n• 덮어쓰기: 같은 위치·이름의 문서를 백업 내용으로 교체 (열려 있는 문서는 건너뜀)',
       positive: ['추가 복원', () => run(false)], neutral: ['덮어쓰기', () => run(true)], negative: ['취소'],
     });

@@ -71,7 +71,13 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
     });
     list.append(line);
   }
-  card.append(h('div', { class: 'amenu-scroll' }, list));
+  const scroll = h('div', { class: 'amenu-scroll' }, list);
+  const more = h('div', { class: 'amenu-more', dataset: { tag: 'menu_more' }, role: 'button', 'aria-label': '아래에 더 있음' }, '▾  아래에 더 있음');
+  more.style.display = 'none';
+  const updateMore = () => { more.style.display = scroll.scrollTop + scroll.clientHeight < scroll.scrollHeight - 2 ? '' : 'none'; };
+  scroll.addEventListener('scroll', updateMore);
+  more.addEventListener('click', () => scroll.scrollBy({ top: Math.round(scroll.clientHeight * 0.7), behavior: 'smooth' }));
+  card.append(h('div', { class: 'amenu-scrollbox' }, scroll, more));
   if (shortcuts && shortcuts.length) {
     card.append(h('div', { class: 'amenu-sdiv' }));
     const icons = h('div', { class: 'amenu-shortcuts' });
@@ -98,6 +104,7 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
   document.addEventListener('keydown', onKey, true);
   card.style.visibility = 'hidden';
   document.body.append(backdrop, card);
+  updateMore();
   const hgt = card.offsetHeight;
   const r = anchor.getBoundingClientRect();
   const margin = 8, gap = 6;

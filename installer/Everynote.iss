@@ -46,7 +46,8 @@ VersionInfoDescription=Everynote Setup
 VersionInfoProductName=Everynote
 DefaultDirName={autopf}\Everynote
 DisableProgramGroupPage=yes
-DisableDirPage=auto
+DisableDirPage=no
+DirExistsWarning=auto
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog commandline
 ArchitecturesAllowed={#ArchAllowed}
@@ -74,6 +75,10 @@ Name: "korean"; MessagesFile: "{#KoFile}"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]
+english.LibTitle=Documents folder
+english.LibDesc=Where should Everynote keep your documents and notes?
+english.LibSub=Documents, notes, recordings and videos are stored in this folder. Existing documents are not moved automatically; you can change this later in the settings file (%1\config.json).
+english.LibPrompt=Documents folder:
 english.TaskAssoc=Add "Open with Everynote" for PDF, HWP and Office documents (does not change your default apps)
 english.GroupAssoc=File types:
 english.PurgeData=Also delete Everynote settings and cache?%n%n(%1)%n%nYour documents are kept either way.
@@ -95,6 +100,10 @@ korean.ModeFresh=새로 설치: 기존 문서·노트·설정을 날짜가 붙�
 korean.ModeWipe=새로 설치하고 삭제: 기존 문서·노트·설정을 완전히 삭제합니다
 korean.WipeConfirm=기존 문서·노트·설정이 완전히 삭제됩니다. 되돌릴 수 없습니다.%n%n계속할까요?
 korean.MovedInfo=이전 데이터를 다음 위치로 옮겨 두었습니다 (폴더 이름을 되돌리거나 문서를 꺼내 쓸 수 있습니다):
+korean.LibTitle=문서 저장 폴더
+korean.LibDesc=문서와 노트를 저장할 폴더를 선택하세요.
+korean.LibSub=문서, 노트, 녹음, 동영상이 이 폴더에 저장됩니다. 기존 문서는 자동으로 옮겨지지 않습니다. 나중에 설정 파일(%1\config.json)에서 바꿀 수도 있습니다.
+korean.LibPrompt=문서 저장 폴더:
 korean.TaskAssoc=PDF, HWP, Office 문서에 "Everynote로 열기" 추가 (기본 앱은 바뀌지 않습니다)
 korean.GroupAssoc=파일 형식:
 korean.PurgeData=Everynote 설정과 캐시도 함께 삭제할까요?%n%n(%1)%n%n문서는 어느 쪽을 선택해도 그대로 남습니다.
@@ -175,6 +184,7 @@ begin
 end;
 
 var
+  LibPage: TInputDirWizardPage;
   ModePage: TInputOptionWizardPage;
   FreshMode: Integer;   // 0 update (keep everything), 1 fresh install (old data moved aside), 2 fresh install (old data deleted)
   MovedList: String;
@@ -184,9 +194,40 @@ begin
   Result := ExpandConstant('{localappdata}\PDFNote');
 end;
 
-function LibDirPath(): String;
+function DefaultLibDir(): String;
 begin
   Result := ExpandConstant('{userdocs}\PDF Note');
+end;
+
+// library folder from an earlier installation's config.json ({"library": "C:\\path"}), else the default
+function LibDirPath(): String;
+var S: AnsiString; U: String; P, Q: Integer;
+begin
+  Result := DefaultLibDir();
+  if not LoadStringFromFile(DataDirPath() + '\config.json', S) then Exit;
+  U := String(S);
+  P := Pos('"library"', U);
+  if P = 0 then Exit;
+  Delete(U, 1, P + 8);
+  P := Pos('"', U);
+  if P = 0 then Exit;
+  Delete(U, 1, P);
+  Q := Pos('"', U);
+  if Q = 0 then Exit;
+  U := Copy(U, 1, Q - 1);
+  StringChangeEx(U, '\\', '\', True);
+  if U <> '' then Result := U;
+end;
+
+function ParamValue(const Name: String): String;
+var I: Integer; A: String;
+begin
+  Result := '';
+  for I := 1 to ParamCount do
+  begin
+    A := ParamStr(I);
+    if CompareText(Copy(A, 1, Length(Name) + 1), Name + '=') = 0 then begin Result := Copy(A, Length(Name) + 2, MaxInt); Exit; end;
+  end;
 end;
 
 function HasExistingData(): Boolean;
@@ -206,11 +247,17 @@ begin
   ModePage.Add(CustomMessage('ModeFresh'));
   ModePage.Add(CustomMessage('ModeWipe'));
   ModePage.SelectedValueIndex := 0;
+  // documents folder (separate from the program folder); /LIBRARY="D:\Notes" sets it for silent installs
+  LibPage := CreateInputDirPage(wpSelectDir, CustomMessage('LibTitle'), CustomMessage('LibDesc'), FmtMessage(CustomMessage('LibSub'), [DataDirPath()]), False, 'PDF Note');
+  LibPage.Add(CustomMessage('LibPrompt'));
+  if ParamValue('/LIBRARY') <> '' then LibPage.Values[0] := ParamValue('/LIBRARY') else LibPage.Values[0] := LibDirPath();
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
+  if (LibPage <> nil) and (PageID = LibPage.ID) then
+    Result := WizardSilent or (ParamValue('/LIBRARY') <> '');
   if (ModePage <> nil) and (PageID = ModePage.ID) then
     Result := WizardSilent or HasParam('/UPDATE') or HasParam('/FRESH') or HasParam('/FRESHDELETE') or (not HasExistingData());
 end;
@@ -243,8 +290,23 @@ begin
   Result := '';
 end;
 
+procedure SaveLibraryChoice();
+var Chosen, Json: String;
+begin
+  Chosen := RemoveBackslashUnlessRoot(Trim(LibPage.Values[0]));
+  if Chosen = '' then Exit;
+  // write config.json only when it differs from the default or an earlier choice must be replaced
+  if (CompareText(Chosen, DefaultLibDir()) = 0) and (not FileExists(DataDirPath() + '\config.json')) then Exit;
+  ForceDirectories(DataDirPath());
+  ForceDirectories(Chosen);
+  Json := Chosen;
+  StringChangeEx(Json, '\', '\\', True);
+  SaveStringToFile(DataDirPath() + '\config.json', '{"library": "' + Json + '"}', False);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  if CurStep = ssPostInstall then SaveLibraryChoice();
   if (CurStep = ssPostInstall) and (MovedList <> '') and (not WizardSilent) then
     MsgBox(CustomMessage('MovedInfo') + #13#10 + MovedList, mbInformation, MB_OK);
 end;
@@ -262,7 +324,7 @@ var
 begin
   if CurUninstallStep <> usPostUninstall then Exit;
   DataDir := ExpandConstant('{localappdata}\PDFNote');
-  LibDir := ExpandConstant('{userdocs}\PDF Note');
+  LibDir := LibDirPath();
   // user data is kept unless chosen: dialog when interactive, /PURGEDATA and /PURGELIBRARY when silent
   Purge := HasParam('/PURGEDATA');
   PurgeLib := HasParam('/PURGELIBRARY');

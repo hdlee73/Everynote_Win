@@ -31,7 +31,7 @@ button{font-family:inherit}
 .vhair{width:1px;background:#E5E5EA;flex:none}
 .ad-bar{display:flex;flex-direction:column}
 .ad-bar.row{flex-direction:row}
-.ad-btn{height:48px;display:flex;align-items:center;justify-content:center;font-size:17px;color:#007AFF;padding:0 12px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ad-btn{height:48px;display:flex;align-items:center;justify-content:center;font-size:17px;color:#007AFF;padding:0 12px;cursor:pointer;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:keep-all;overflow-wrap:anywhere}
 .ad-btn.bold{font-weight:700}
 .ad-bar.row .ad-btn{flex:1}
 .ad-btn:hover{background:rgba(0,0,0,.035)}
@@ -56,9 +56,9 @@ button{font-family:inherit}
   opacity:0;transform:scale(.96);transition:opacity .12s,transform .12s;transform-origin:center bottom}
 .amenu.in{opacity:1;transform:none}
 .amenu-scroll{max-height:60vh;overflow:auto}
-.amenu-row{height:44px;display:flex;align-items:center;padding:0 12px;cursor:pointer;border-radius:10px}
+.amenu-row{min-height:44px;padding-top:4px;padding-bottom:4px;box-sizing:border-box;display:flex;align-items:center;padding:4px 12px;cursor:pointer;border-radius:10px}
 .amenu-row:hover{background:rgba(0,0,0,.04)}
-.amenu-label{flex:1;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.amenu-label{flex:1;min-width:0;font-size:15px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
 .amenu-div{height:1px;background:#E5E5EA;margin:4px 12px}
 .amenu-sdiv{height:1px;background:#E5E5EA;margin:4px 8px 2px}
 .amenu-shortcuts{display:flex;height:44px}
@@ -68,3 +68,6 @@ button{font-family:inherit}
 /* ---- form fields (field_background.xml) ---- */
 .field{background:#F2F2F7;border:2px solid #F2F2F7;border-radius:12px;padding:12px 16px;font-size:16px;color:#1C1C1E;width:100%;outline:none}
 .field:focus{background:#fff;border-color:#007AFF}
+
+.amenu-scrollbox{position:relative}
+.amenu-more{position:absolute;left:0;right:0;bottom:0;height:28px;line-height:34px;text-align:center;font-size:12px;font-weight:600;color:#007AFF;cursor:pointer;background:linear-gradient(to bottom,rgba(255,255,255,0),rgba(255,255,255,.96) 70%);border-radius:0 0 12px 12px}
