@@ -109,12 +109,12 @@ const methods = {
         t.push(tile('인쇄', 'ic_print', () => this.callUi2('printDocument')));
         t.push(tile('PDF 내보내기', 'ic_pdf', run('exportPdf')));
         t.push(tile('노트·발췌 내보내기', 'ic_export', run('exportStudy')));
-        t.push(tile('필기 백업 파일 저장', 'ic_backup', run('exportAnnotations')));
-        t.push(tile('필기 백업 파일 불러오기', 'ic_import', run('importSidecar')));
+        t.push(tile('이 문서 필기 백업 저장', 'ic_backup', run('exportAnnotations')));
+        t.push(tile('이 문서 필기 백업 불러오기', 'ic_import', run('importSidecar')));
         t.push(tile('원본 파일 내보내기', 'ic_original', run('exportOriginal')));
         t.push(tile('다른 기기와 동기화', 'ic_sync', run('showDeviceSync')));
-        t.push(tile('전체 문서 백업', 'ic_backup', run('startLibraryBackup')));
-        t.push(tile('백업에서 복원', 'ic_import', run('startLibraryRestore')));
+        t.push(tile('모든 문서 통째로 백업', 'ic_backup', run('startLibraryBackup')));
+        t.push(tile('백업 파일에서 모든 문서 복원', 'ic_import', run('startLibraryRestore')));
         break;
     }
     return t;
@@ -128,7 +128,7 @@ const methods = {
     sections.push(section('읽기 편의', [tile('화면 켜 둠', 'ic_clock', () => {
       prefs.putBoolean('keep_awake', !awake); this.applyKeepAwake(); this.toast(!awake ? '읽는 동안 화면이 꺼지지 않습니다' : '화면 자동 꺼짐을 따릅니다');
     }, { selected: awake }),
-      tile('하단 메뉴 플로팅', 'ic_float', () => this.toggleFloatBar(), { selected: this.floatBar() }),
+      tile('하단 메뉴 위치·방향', 'ic_float', () => this.showBarLayoutMenu(this.bottomBar)),
       tile('전체 화면 메뉴 계속 표시', 'ic_float', () => this.toggleDockPinned(), { selected: this.dockPinned() })]));
     sections.push(section('인쇄', [
       tile('인쇄', 'ic_print', () => this.callUi2('printDocument'))]));

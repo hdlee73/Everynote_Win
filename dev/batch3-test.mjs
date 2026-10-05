@@ -100,6 +100,6 @@ check('same version -> up to date', same.includes('최신 버전'), same);
 
 // menus carry the new rows
 const rows=await pg.evaluate(async()=>{app.showMainMenu(document.body,false);await new Promise(r=>setTimeout(r,300));return [...document.querySelectorAll('.amenu-row .amenu-label')].map(e=>e.textContent)});
-check('main menu has backup + app info rows', rows.includes('전체 백업·복원')&&rows.includes('앱 정보·업데이트'), JSON.stringify(rows));
+check('main menu has backup + app info rows', rows.includes('모든 문서 백업·복원')&&rows.includes('앱 정보·업데이트'), JSON.stringify(rows));
 check('no page errors', errs.length===0, errs.join(' | '));
 await b.close(); s.close?.(); console.log(fails?`${fails} FAILED`:'ALL PASS'); process.exit(fails?1:0);

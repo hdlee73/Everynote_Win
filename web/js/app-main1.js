@@ -497,6 +497,7 @@ const methods = {
     this.barIcon(writeBar, 'ic_redo', '다시 실행', 0xFF8E8E93, () => this.redoInk());
     this.barGrip = this.makeGrip(this.bottomBar, 'bar');
     this.bottomBar.append(this.barGrip, readBar, writeBar);
+    this.barIcon(this.bottomBar, 'ic_float', '하단 메뉴 위치·방향', 0xFF8E8E93, v => this.showBarLayoutMenu(v)).classList.add('m-barlayout');
     content.append(this.bottomBar); this.contentCol = content;
     if (this.floatBar()) this.applyBarMode();
 
@@ -760,15 +761,14 @@ const methods = {
       this.recentPrefs.putBoolean('keep_awake', !awake); this.applyKeepAwake();
       toast(!awake ? '읽는 동안 화면이 꺼지지 않습니다' : '화면 자동 꺼짐을 따릅니다');
     }).tint('#8E8E93').selected(awake));
-    rows.push(new Row('하단 메뉴 플로팅', 'ic_float', () => this.toggleFloatBar()).tint('#8E8E93').selected(this.floatBar()));
     rows.push(new Row('전체 화면 메뉴 계속 표시', 'ic_float', () => this.toggleDockPinned()).tint('#8E8E93').selected(this.dockPinned()));
     if (doc) rows.push(new Row('인쇄', 'ic_print', () => this.callUi2('printDocument')).tint('#007AFF'));
-    rows.push(new Row('오프라인 사용 안내', 'ic_wifi_off', () => this.callUi2('showAboutOffline')).tint('#8E8E93'));
     rows.push(Row.divider());
-    rows.push(new Row('전체 백업·복원', 'ic_backup', null).tint('#007AFF').children([
-      new Row('전체 문서 백업 만들기', 'ic_backup', () => this.callUi2('startLibraryBackup')).tint('#007AFF'),
-      new Row('백업에서 복원', 'ic_import', () => this.callUi2('startLibraryRestore')).tint('#007AFF')]));
+    rows.push(new Row('모든 문서 백업·복원', 'ic_backup', null).tint('#007AFF').children([
+      new Row('모든 문서 통째로 백업', 'ic_backup', () => this.callUi2('startLibraryBackup')).tint('#007AFF'),
+      new Row('백업 파일에서 모든 문서 복원', 'ic_import', () => this.callUi2('startLibraryRestore')).tint('#007AFF')]));
     rows.push(new Row('사용법', 'ic_outline', () => this.showHelp()).tint('#8E8E93'));
+    rows.push(new Row('오프라인 사용 안내', 'ic_wifi_off', () => this.callUi2('showAboutOffline')).tint('#8E8E93'));
     rows.push(new Row('앱 정보·업데이트', 'ic_more_vert', () => this.callUi2('showAbout')).tint('#8E8E93'));
     const shortcuts = [];
     shortcuts.push(new Shortcut('문서함', 'ic_folder_open', false, () => this.showLibrary()));
@@ -1371,12 +1371,29 @@ const methods = {
     this._dockHideEnd = setTimeout(() => { if (!this.dockShown) d.style.display = 'none'; }, 170);
   },
   // ---- floating menus: the bottom bar as a draggable pill, the fullscreen toolbar that stays open
-  floatBar() { return this.recentPrefs.getBoolean('float_bar', false); },
-  dockPinned() { return this.recentPrefs.getBoolean('dock_pinned', false); },
-  toggleFloatBar() {
-    const on = !this.floatBar(); this.recentPrefs.putBoolean('float_bar', on); this.applyBarMode();
-    toast(on ? '하단 메뉴가 화면 위에 떠 있습니다 (왼쪽 ⋮⋮를 끌어 옮기기)' : '하단 메뉴를 아래에 고정했습니다');
+  /** 'bottom' | 'float' | 'left' | 'right' (migrates the old float_bar flag). */
+  barPlace() { const p = this.recentPrefs.getString('bar_place', null); return p || (this.recentPrefs.getBoolean('float_bar', false) ? 'float' : 'bottom'); },
+  barVertical() { const p = this.barPlace(); return p === 'left' || p === 'right' || (p === 'float' && this.recentPrefs.getBoolean('bar_vertical', false)); },
+  floatBar() { return this.barPlace() !== 'bottom'; },
+  setBarPlace(place) { this.recentPrefs.putString('bar_place', place); this.applyBarMode(); },
+  setBarOrientation(vertical) { this.recentPrefs.putBoolean('bar_vertical', vertical); this.applyBarMode(); },
+  showBarLayoutMenu(anchor) {
+    const p = this.barPlace();
+    const rows = [
+      new Row('아래에 고정', 'ic_float', () => { this.setBarPlace('bottom'); toast('하단 메뉴를 아래에 고정했습니다'); }).tint('#007AFF').selected(p === 'bottom'),
+      new Row('화면 위에 띄우기 (끌어서 이동)', 'ic_float', () => { this.setBarPlace('float'); toast('하단 메뉴가 화면 위에 떠 있습니다 (⋮⋮를 끌어 옮기기)'); }).tint('#007AFF').selected(p === 'float'),
+      new Row('왼쪽 옆에 고정 (세로)', 'ic_float', () => this.setBarPlace('left')).tint('#007AFF').selected(p === 'left'),
+      new Row('오른쪽 옆에 고정 (세로)', 'ic_float', () => this.setBarPlace('right')).tint('#007AFF').selected(p === 'right')];
+    if (p === 'float') {
+      const v = this.barVertical();
+      rows.push(Row.divider());
+      rows.push(new Row('가로 방향', 'ic_float', () => this.setBarOrientation(false)).tint('#8E8E93').selected(!v));
+      rows.push(new Row('세로 방향', 'ic_float', () => this.setBarOrientation(true)).tint('#8E8E93').selected(v));
+    }
+    AnchoredMenu.show(anchor, true, rows, null);
   },
+  dockPinned() { return this.recentPrefs.getBoolean('dock_pinned', false); },
+  toggleFloatBar() { this.setBarPlace(this.floatBar() ? 'bottom' : 'float'); },
   toggleDockPinned() {
     const on = !this.dockPinned(); this.recentPrefs.putBoolean('dock_pinned', on);
     if (this.fullscreen) {
@@ -1386,10 +1403,18 @@ const methods = {
     toast(on ? '전체 화면에서도 도구 모음이 계속 떠 있습니다 (왼쪽 ⋮⋮를 끌어 옮기기)' : '전체 화면 도구 모음이 자동으로 숨습니다');
   },
   applyBarMode() {
-    const f = this.floatBar(), b = this.bottomBar;
+    const place = this.barPlace(), f = place !== 'bottom', vert = this.barVertical(), b = this.bottomBar;
     b.style.translate = '';
-    b.classList.toggle('float', f); this.barGrip.style.display = f ? '' : 'none';
-    if (f) { this.root.append(b); this.applyFloatPos(b, 'bar'); } else this.contentCol.append(b);
+    b.classList.toggle('float', place === 'float');
+    b.classList.toggle('vert', vert);
+    b.classList.toggle('rail-left', place === 'left'); b.classList.toggle('rail-right', place === 'right');
+    this.barGrip.style.display = place === 'float' ? '' : 'none';
+    if (f) { this.root.append(b); if (place === 'float') this.applyFloatPos(b, vert ? 'barv' : 'bar'); } else this.contentCol.append(b);
+    this.railMargin();
+  },
+  railMargin() {
+    const p = this.barPlace(), on = !this.fullscreen;
+    this.root.classList.toggle('m-pad-l', on && p === 'left'); this.root.classList.toggle('m-pad-r', on && p === 'right');
   },
   floatPos(key) { try { const v = JSON.parse(this.recentPrefs.getString(key + '_pos', '[0,0]')); return [+v[0] || 0, +v[1] || 0]; } catch (e) { return [0, 0]; } },
   moveFloating(el, dx, dy) {
@@ -1408,7 +1433,7 @@ const methods = {
       const move = ev => { this.moveFloating(target, bx + ev.clientX - x0, by + ev.clientY - y0); };
       const up = () => {
         g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up); g.removeEventListener('pointercancel', up);
-        const t2 = (target.style.translate || '0px 0px').split(' ').map(parseFloat); this.recentPrefs.putString(key + '_pos', JSON.stringify([t2[0] || 0, t2[1] || 0]));
+        const t2 = (target.style.translate || '0px 0px').split(' ').map(parseFloat); this.recentPrefs.putString((target === this.bottomBar && this.barVertical() ? 'barv' : key) + '_pos', JSON.stringify([t2[0] || 0, t2[1] || 0]));
       };
       g.addEventListener('pointermove', move); g.addEventListener('pointerup', up); g.addEventListener('pointercancel', up);
     });
@@ -1417,7 +1442,7 @@ const methods = {
   toggleFullscreen() {
     this.fullscreen = !this.fullscreen;
     const disp = this.fullscreen ? 'none' : '';
-    this.header.style.display = disp; this.tabStrip.style.display = disp; this.bottomBar.style.display = disp;
+    this.header.style.display = disp; this.tabStrip.style.display = disp; this.bottomBar.style.display = disp; this.railMargin();
     if (this.fullscreen) this.showFullscreenDock(true); else this.hideFullscreenDock(false);
     host.call('window.fullscreen', { on: this.fullscreen }).catch(() => {});
   },
