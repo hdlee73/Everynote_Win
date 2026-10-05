@@ -79,6 +79,22 @@ english.GroupAssoc=File types:
 english.PurgeData=Also delete Everynote settings and cache?%n%n(%1)%n%nYour documents are kept either way.
 english.PurgeLibrary=Also delete your Everynote documents folder and the notes in it?%n%n(%1)%n%nThis cannot be undone.
 english.RunApp=Launch Everynote
+english.ModeTitle=Install type
+english.ModeDesc=Everynote data from an earlier installation was found.
+english.ModeSub=Choose how to install.%n%nDocuments folder: %2%nSettings and notes: %1
+english.ModeUpdate=Update (recommended): keep all documents, notes and settings, replace only the program
+english.ModeFresh=Fresh install: move the existing documents, notes and settings aside to a dated backup folder and start empty (nothing is deleted)
+english.ModeWipe=Fresh install and delete: permanently delete the existing documents, notes and settings
+english.WipeConfirm=The existing documents, notes and settings will be permanently deleted. This cannot be undone.%n%nContinue?
+english.MovedInfo=The earlier data was moved here (restore it by renaming the folders back, or copy documents out of them):
+korean.ModeTitle=설치 방식 선택
+korean.ModeDesc=이전에 사용한 Everynote 데이터가 있습니다.
+korean.ModeSub=설치 방식을 선택하세요.%n%n문서 폴더: %2%n설정·노트: %1
+korean.ModeUpdate=업데이트 (권장): 문서·노트·설정을 모두 그대로 두고 프로그램만 교체합니다
+korean.ModeFresh=새로 설치: 기존 문서·노트·설정을 날짜가 붙은 보관 폴더로 옮겨 두고 빈 상태로 시작합니다 (삭제하지 않음)
+korean.ModeWipe=새로 설치하고 삭제: 기존 문서·노트·설정을 완전히 삭제합니다
+korean.WipeConfirm=기존 문서·노트·설정이 완전히 삭제됩니다. 되돌릴 수 없습니다.%n%n계속할까요?
+korean.MovedInfo=이전 데이터를 다음 위치로 옮겨 두었습니다 (폴더 이름을 되돌리거나 문서를 꺼내 쓸 수 있습니다):
 korean.TaskAssoc=PDF, HWP, Office 문서에 "Everynote로 열기" 추가 (기본 앱은 바뀌지 않습니다)
 korean.GroupAssoc=파일 형식:
 korean.PurgeData=Everynote 설정과 캐시도 함께 삭제할까요?%n%n(%1)%n%n문서는 어느 쪽을 선택해도 그대로 남습니다.
@@ -158,10 +174,79 @@ begin
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM {#AppExe}', '', SW_HIDE, ewWaitUntilTerminated, Rc);
 end;
 
+var
+  ModePage: TInputOptionWizardPage;
+  FreshMode: Integer;   // 0 update (keep everything), 1 fresh install (old data moved aside), 2 fresh install (old data deleted)
+  MovedList: String;
+
+function DataDirPath(): String;
+begin
+  Result := ExpandConstant('{localappdata}\PDFNote');
+end;
+
+function LibDirPath(): String;
+begin
+  Result := ExpandConstant('{userdocs}\PDF Note');
+end;
+
+function HasExistingData(): Boolean;
+begin
+  Result := DirExists(DataDirPath()) or DirExists(LibDirPath());
+end;
+
+procedure InitializeWizard();
+begin
+  // /UPDATE (also used by the in-app updater) keeps everything and skips the page; /FRESH and /FRESHDELETE are the silent fresh installs
+  FreshMode := 0;
+  if HasParam('/FRESH') then FreshMode := 1;
+  if HasParam('/FRESHDELETE') then FreshMode := 2;
+  ModePage := CreateInputOptionPage(wpWelcome, CustomMessage('ModeTitle'), CustomMessage('ModeDesc'),
+    FmtMessage(CustomMessage('ModeSub'), [DataDirPath(), LibDirPath()]), True, False);
+  ModePage.Add(CustomMessage('ModeUpdate'));
+  ModePage.Add(CustomMessage('ModeFresh'));
+  ModePage.Add(CustomMessage('ModeWipe'));
+  ModePage.SelectedValueIndex := 0;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if (ModePage <> nil) and (PageID = ModePage.ID) then
+    Result := WizardSilent or HasParam('/UPDATE') or HasParam('/FRESH') or HasParam('/FRESHDELETE') or (not HasExistingData());
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if (ModePage <> nil) and (CurPageID = ModePage.ID) then
+  begin
+    if ModePage.SelectedValueIndex = 2 then
+      Result := MsgBox(CustomMessage('WipeConfirm'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+    if Result then FreshMode := ModePage.SelectedValueIndex;
+  end;
+end;
+
+procedure SetAside(const Dir: String);
+var Target: String;
+begin
+  if not DirExists(Dir) then Exit;
+  Target := Dir + '.old-' + GetDateTimeString('yyyymmdd-hhnnss', #0, #0);
+  if RenameFile(Dir, Target) then MovedList := MovedList + #13#10 + Target;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   CloseRunningApp();
+  // update (the default) never touches documents or settings
+  if FreshMode = 1 then begin SetAside(DataDirPath()); SetAside(LibDirPath()); end
+  else if FreshMode = 2 then begin DelTree(DataDirPath(), True, True, True); DelTree(LibDirPath(), True, True, True); end;
   Result := '';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and (MovedList <> '') and (not WizardSilent) then
+    MsgBox(CustomMessage('MovedInfo') + #13#10 + MovedList, mbInformation, MB_OK);
 end;
 
 function InitializeUninstall(): Boolean;

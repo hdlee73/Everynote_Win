@@ -72,3 +72,6 @@
 .m3-inline-bar{max-width:calc(100% - 16px);overflow-x:auto;overflow-y:hidden;scrollbar-width:none;overscroll-behavior-x:contain}
 .m3-inline-bar::-webkit-scrollbar{display:none}
 .m3-inline-bar>*{width:max-content;min-width:100%;box-sizing:border-box}
+.m3-line-row{height:38px;align-items:center}
+.m3-line-label{font-size:13px;color:#1C1C1E;padding:0 6px}
+.m3-fit-ruler{margin-left:8px;height:32px;padding:0 10px;border:0;border-radius:16px;background:#E8F1FF;color:#007AFF;font-size:13px;font-weight:700;cursor:pointer}

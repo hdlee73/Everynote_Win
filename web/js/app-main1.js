@@ -419,7 +419,7 @@ const methods = {
     this.titleView = h('div', { class: 'm-title', dataset: { tag: 'document_title' }, role: 'button' });
     this.titleView.addEventListener('click', () => { if (this.activeSession != null) this.beginTitleEdit(); else this.showLibrary(); });
     this.header.append(libraryButton, this.titleView, h('div', { class: 'm-spacer' }),
-      this.icon('ic_thumbnails', '페이지 목록', 0xFF007AFF, () => this.toggleSidebar()),
+      this.icon('ic_sidebar', '페이지 목록', 0xFF007AFF, () => this.toggleSidebar()),
       this.icon('ic_search', '문서·필기 검색', 0xFF30B0C7, () => this.searchDocument()),
       this.icon('ic_fullscreen', '전체 화면', 0xFFAF52DE, () => this.toggleFullscreen()),
       this.icon('ic_more_vert', '도구', NAVY, v => this.showMainMenu(v, false)));
@@ -480,7 +480,7 @@ const methods = {
     this.pageLabel.addEventListener('click', () => { if (this.renderer == null) this.showAddDocumentMenu(); else this.goToPage(); });
     readBar.append(this.pageLabel);
     this.barIcon(readBar, 'ic_outline', '문서 개요', 0xFF007AFF, () => this.showOutlineList());
-    this.barIcon(readBar, 'ic_thumbnails', '보기 방법', 0xFF30B0C7, v => this.showViewMenu(v));
+    this.barIcon(readBar, 'ic_eye', '보기 방법', 0xFF30B0C7, v => this.showViewMenu(v));
     this.bookmarkButton = this.barIcon(readBar, 'ic_star_outline', '즐겨찾기', 0xFFF5A623, () => this.toggleBookmark());
     this.barIcon(readBar, 'ic_insert', '삽입 · 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
     this.inkButton = this.barIcon(readBar, 'ic_ink', '필기 모드', 0xFF5856D6, () => this.setWriteMode(true));
@@ -504,7 +504,7 @@ const methods = {
     const dock = this.fullscreenDock = h('div', { class: 'm-dock', dataset: { tag: 'fullscreen_toolbar' } });
     dock.append(
       this.dockIcon('ic_outline', '전체 화면 개요', NAVY, () => this.showOutlineList()),
-      this.dockIcon('ic_thumbnails', '전체 화면 보기 방법', NAVY, v => this.showViewMenu(v)),
+      this.dockIcon('ic_eye', '전체 화면 보기 방법', NAVY, v => this.showViewMenu(v)),
       this.dockIcon('ic_ink', '전체 화면 필기도구', NAVY, v => this.penTap(v)),
       this.dockIcon('ic_note_add', '전체 화면 메모 추가', NAVY, () => this.toggleMemoMode()),
       this.dockIcon('ic_insert', '전체 화면 삽입', NAVY, v => this.showInsertMenu(v)),
@@ -764,7 +764,12 @@ const methods = {
     rows.push(new Row('전체 화면 메뉴 계속 표시', 'ic_float', () => this.toggleDockPinned()).tint('#8E8E93').selected(this.dockPinned()));
     if (doc) rows.push(new Row('인쇄', 'ic_print', () => this.callUi2('printDocument')).tint('#007AFF'));
     rows.push(new Row('오프라인 사용 안내', 'ic_wifi_off', () => this.callUi2('showAboutOffline')).tint('#8E8E93'));
+    rows.push(Row.divider());
+    rows.push(new Row('전체 백업·복원', 'ic_backup', null).tint('#007AFF').children([
+      new Row('전체 문서 백업 만들기', 'ic_backup', () => this.callUi2('startLibraryBackup')).tint('#007AFF'),
+      new Row('백업에서 복원', 'ic_import', () => this.callUi2('startLibraryRestore')).tint('#007AFF')]));
     rows.push(new Row('사용법', 'ic_outline', () => this.showHelp()).tint('#8E8E93'));
+    rows.push(new Row('앱 정보·업데이트', 'ic_more_vert', () => this.callUi2('showAbout')).tint('#8E8E93'));
     const shortcuts = [];
     shortcuts.push(new Shortcut('문서함', 'ic_folder_open', false, () => this.showLibrary()));
     shortcuts.push(new Shortcut('문서·필기 검색', 'ic_search', false, () => this.searchDocument()));
@@ -1144,7 +1149,7 @@ const methods = {
 
   /** showPage(index): returns a promise that resolves when the page is on screen (synchronous when its bitmaps are cached). */
   showPage(index) {
-    this.commitInlineText(); this.onSelectionAdjustStarted();
+    this.commitInlineText(); this.onSelectionAdjustStarted(); this.stopInlinePlayer();
     const doc = this.renderer;
     if (doc == null || index < 0 || index >= doc.pageCount) return Promise.resolve(false);
     ++this.ocrGeneration; this.resetPageTransforms();
@@ -1295,6 +1300,7 @@ const methods = {
     this.recognizePageText(true); toast('텍스트 선택: 단어에서 드래그하세요');
   },
   onZoomGestureStarted() {
+    this.stopInlinePlayer();
     if (this.highlightMode || this.memoMode || this.outlineMode) {
       this.highlightMode = this.memoMode = this.outlineMode = false;
       this.pageView.setHighlightMode(false, this.selectedColor); this.pageView.setMemoMode(false); this.pageView.setOutlineMode(false); this.updateToolStates();

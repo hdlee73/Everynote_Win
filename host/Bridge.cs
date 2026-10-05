@@ -133,6 +133,12 @@ sealed class Bridge
             case "dialog.open": return await win.Dispatcher.InvokeAsync(() => DialogOpen(a));
             case "dialog.save": return await win.Dispatcher.InvokeAsync(() => DialogSave(a));
             case "net.http": return await NetHttp(a);
+            case "zip.create": return await Task.Run(() => ZipCreate(a));
+            case "zip.entries": return await Task.Run(() => ZipEntries(PathPolicy.ReadPath(S(a, "path"))));
+            case "zip.readText": return await Task.Run(() => ZipReadText(PathPolicy.ReadPath(S(a, "path")), S(a, "name")));
+            case "zip.extract": return await Task.Run(() => ZipExtract(PathPolicy.ReadPath(S(a, "path")), S(a, "name"), PathPolicy.WritePath(S(a, "to"))));
+            case "update.check": return await UpdateCheck();
+            case "update.install": return await UpdateInstall(S(a, "url"));
             case "shell.open": ShellOpen(a); return true;
             case "shell.reveal": Reveal(PathPolicy.ReadPath(S(a, "path"))); return true;
             case "window.fullscreen": { var on = B(a, "on"); await win.Dispatcher.InvokeAsync(() => win.SetFullscreen(on)); return true; }
@@ -162,7 +168,7 @@ sealed class Bridge
         var v = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(Bridge).Assembly)?.InformationalVersion
                 ?? (ver == null ? "2.0.0" : ver.ToString(3));
         var plus = v.IndexOf('+'); if (plus > 0) v = v.Substring(0, plus);
-        return new { library = AppPaths.Library, data = AppPaths.Data, temp = AppPaths.Temp, documents = AppPaths.Documents, args = list, version = v, platform = "win" };
+        return new { library = AppPaths.Library, data = AppPaths.Data, temp = AppPaths.Temp, documents = AppPaths.Documents, args = list, version = v, platform = "win", installed = IsInstalled(), arch = Arch };
     }
 
     // ------------------------------------------------------------------------------------------------- fs
@@ -263,6 +269,113 @@ sealed class Bridge
         catch (TaskCanceledException) { throw new IOException("기기가 응답하지 않습니다"); }
         catch (System.Net.Http.HttpRequestException e) { throw new IOException("기기에 연결할 수 없습니다 (" + (e.InnerException?.Message ?? e.Message) + ")"); }
         finally { upload?.Dispose(); }
+    }
+
+    // ---- whole-library backup: plain ZIP (same layout as the Android app's backup file)
+    static object ZipCreate(JsonElement a)
+    {
+        var path = PathPolicy.WritePath(S(a, "path"));
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        var tmp = path + ".part"; int count = 0;
+        try
+        {
+            using (var fs = File.Create(tmp))
+            using (var z = new System.IO.Compression.ZipArchive(fs, System.IO.Compression.ZipArchiveMode.Create))
+            {
+                foreach (var e in a.GetProperty("entries").EnumerateArray())
+                {
+                    var name = e.GetProperty("name").GetString();
+                    if (string.IsNullOrEmpty(name) || name.StartsWith("/") || name.Contains("..") || name.Contains('\\')) throw new ArgumentException("bad entry name");
+                    var entry = z.CreateEntry(name, System.IO.Compression.CompressionLevel.Fastest);
+                    using var es = entry.Open();
+                    if (e.TryGetProperty("file", out var f) && f.ValueKind == JsonValueKind.String) { using var src = File.OpenRead(PathPolicy.ReadPath(f.GetString())); src.CopyTo(es); }
+                    else { var bytes = new System.Text.UTF8Encoding(false).GetBytes(e.TryGetProperty("text", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() : ""); es.Write(bytes, 0, bytes.Length); }
+                    count++;
+                }
+            }
+            File.Move(tmp, path, true);
+        }
+        finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch { } }
+        return new { count };
+    }
+    static object ZipEntries(string path)
+    {
+        using var z = System.IO.Compression.ZipFile.OpenRead(path);
+        return z.Entries.Where(e => !e.FullName.EndsWith("/")).Select(e => new { name = e.FullName, size = e.Length }).ToList();
+    }
+    static object ZipReadText(string path, string name)
+    {
+        using var z = System.IO.Compression.ZipFile.OpenRead(path);
+        var e = z.GetEntry(name) ?? throw new FileNotFoundException("not in zip: " + name);
+        if (e.Length > 128L * 1024 * 1024) throw new IOException("항목이 너무 큽니다");
+        using var r = new StreamReader(e.Open(), new System.Text.UTF8Encoding(false));
+        return r.ReadToEnd();
+    }
+    static object ZipExtract(string path, string name, string to)
+    {
+        using var z = System.IO.Compression.ZipFile.OpenRead(path);
+        var e = z.GetEntry(name) ?? throw new FileNotFoundException("not in zip: " + name);
+        Directory.CreateDirectory(Path.GetDirectoryName(to));
+        var tmp = to + ".part";
+        try { using (var src = e.Open()) using (var dst = File.Create(tmp)) src.CopyTo(dst); File.Move(tmp, to, true); }
+        finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch { } }
+        return true;
+    }
+
+    // ---- update check (GitHub releases of this project only)
+    const string ReleaseApi = "https://api.github.com/repos/hdlee73/PDF-Note-Windows/releases/latest";
+    const string DownloadPrefix = "https://github.com/hdlee73/PDF-Note-Windows/releases/download/";
+    static readonly System.Net.Http.HttpClient web = new() { Timeout = TimeSpan.FromMinutes(15) };
+    static string Arch => RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64" : "x64";
+    static bool IsInstalled() => File.Exists(Path.Combine(AppContext.BaseDirectory, "unins000.exe"));
+    static async Task<object> UpdateCheck()
+    {
+        using var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, ReleaseApi);
+        req.Headers.TryAddWithoutValidation("User-Agent", "Everynote");
+        req.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
+        try
+        {
+            using var res = await web.SendAsync(req);
+            if (!res.IsSuccessStatusCode) throw new IOException("업데이트 서버 응답 " + (int)res.StatusCode);
+            using var d = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+            var root = d.RootElement;
+            var tag = root.GetProperty("tag_name").GetString() ?? "";
+            string setup = null, exe = null;
+            if (root.TryGetProperty("assets", out var assets))
+                foreach (var asset in assets.EnumerateArray())
+                {
+                    var n = asset.GetProperty("name").GetString() ?? ""; var u = asset.GetProperty("browser_download_url").GetString();
+                    if (n.EndsWith("-" + Arch + ".exe", StringComparison.OrdinalIgnoreCase) && n.Contains("Setup", StringComparison.OrdinalIgnoreCase)) setup = u;
+                    else if (n.EndsWith("-win-" + Arch + ".exe", StringComparison.OrdinalIgnoreCase)) exe = u;
+                }
+            return new
+            {
+                version = tag.TrimStart('v', 'V'),
+                page = root.TryGetProperty("html_url", out var h) ? h.GetString() : "",
+                notes = root.TryGetProperty("body", out var b) && b.ValueKind == JsonValueKind.String ? b.GetString() : "",
+                setupUrl = setup, exeUrl = exe, installed = IsInstalled(), arch = Arch,
+            };
+        }
+        catch (System.Net.Http.HttpRequestException e) { throw new IOException("업데이트 서버에 연결할 수 없습니다 (" + (e.InnerException?.Message ?? e.Message) + ")"); }
+        catch (TaskCanceledException) { throw new IOException("업데이트 서버가 응답하지 않습니다"); }
+    }
+    /// <summary>Downloads the Setup of a release of this project and starts it in update mode (it closes this app, keeps all documents and settings).</summary>
+    async Task<object> UpdateInstall(string url)
+    {
+        if (!url.StartsWith(DownloadPrefix, StringComparison.Ordinal) || !url.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("허용되지 않는 주소입니다");
+        Directory.CreateDirectory(AppPaths.Temp);
+        var dest = Path.Combine(AppPaths.Temp, Path.GetFileName(new Uri(url).LocalPath));
+        var tmp = dest + ".part";
+        using (var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, url))
+        {
+            req.Headers.TryAddWithoutValidation("User-Agent", "Everynote");
+            using var res = await web.SendAsync(req, System.Net.Http.HttpCompletionOption.ResponseHeadersRead);
+            if (!res.IsSuccessStatusCode) throw new IOException("내려받지 못했습니다 (" + (int)res.StatusCode + ")");
+            await using var fs = File.Create(tmp); await res.Content.CopyToAsync(fs);
+        }
+        File.Move(tmp, dest, true);
+        Process.Start(new ProcessStartInfo(dest, "/UPDATE") { UseShellExecute = true });
+        return true;
     }
 
     static object FsCopy(string from, string to)

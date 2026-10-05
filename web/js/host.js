@@ -19,6 +19,8 @@
 //   office.engines() -> {word,excel,powerpoint,libreoffice:path|null}
 //   office.convert({id,path,kind}) -> {pdf:path}   (events office.progress {id,text}); office.cancel({id})
 //   net.http({url,method,headers,text,readPath,savePath}) -> {status,text}   (plain http to private IPv4 addresses only: device sync)
+//   zip.create({path,entries:[{name,file}|{name,text}]}) -> {count} ; zip.entries({path}) -> [{name,size}] ; zip.readText({path,name}) -> string ; zip.extract({path,name,to})
+//   update.check() -> {version,page,notes,setupUrl,exeUrl,installed,arch} (GitHub releases of this project) ; update.install({url}) downloads the Setup and starts it with /UPDATE
 //   ocr.recognize({png:b64,lang}) -> {width,height,words:[{text,x,y,w,h,line}]}  (pixel boxes)
 import { baseName, dirName } from './util.js';
 
@@ -65,7 +67,7 @@ const fake = {
     this.init();
     const P = a && a.path ? this.norm(a.path) : null;
     switch (m) {
-      case 'app.info': return { library: this.lib, data: this.data, temp: this.data + '\\tmp', documents: 'C:\\Users\\dev\\Documents', args: [], version: 'dev', platform: 'web' };
+      case 'app.info': return { library: this.lib, data: this.data, temp: this.data + '\\tmp', documents: 'C:\\Users\\dev\\Documents', args: [], version: 'dev', platform: 'web', installed: false, arch: 'x64' };
       case 'app.log': console.log('[host.log]', a.msg); return true;
       case 'fs.list': {
         const out = []; const pre = P + '\\';
@@ -109,6 +111,15 @@ const fake = {
       case 'office.convert': throw new Error('변환 엔진이 없습니다');
       case 'office.cancel': return true;
       case 'net.http': if (this.netHandler) return this.netHandler(a); throw new Error('브라우저에서는 지원하지 않습니다');
+      case 'zip.create': {
+        const entries = a.entries.map(e => ({ name: e.name, bytes: e.file ? this.files.get(this.norm(e.file)).bytes : new TextEncoder().encode(e.text || '') }));
+        (this.zips ||= new Map()).set(P, entries); this.put(P, new Uint8Array([80, 75])); return { count: entries.length };
+      }
+      case 'zip.entries': return (this.zips.get(P) || (() => { throw new Error('not a zip'); })()).map(e => ({ name: e.name, size: e.bytes.length }));
+      case 'zip.readText': { const e = (this.zips.get(P) || []).find(x => x.name === a.name); if (!e) throw new Error('not in zip: ' + a.name); return new TextDecoder().decode(e.bytes); }
+      case 'zip.extract': { const e = (this.zips.get(P) || []).find(x => x.name === a.name); if (!e) throw new Error('not in zip: ' + a.name); this.put(a.to, e.bytes); return true; }
+      case 'update.check': if (this.updateHandler) return this.updateHandler(a); throw new Error('브라우저에서는 지원하지 않습니다');
+      case 'update.install': (this.installed ||= []).push(a.url); return true;
       case 'ocr.recognize': throw new Error('OCR unavailable in browser');
       default: throw new Error('unknown host method ' + m);
     }
@@ -157,6 +168,12 @@ export const host = {
   saveDialog: (title, name, filters) => host.call('dialog.save', { title, name, filters }),
   shellOpen: pathOrUrl => host.call('shell.open', /^https?:/i.test(pathOrUrl) ? { url: pathOrUrl } : { path: pathOrUrl }),
   netHttp: o => host.call('net.http', o),
+  zipCreate: (path, entries) => host.call('zip.create', { path, entries }),
+  zipEntries: path => host.call('zip.entries', { path }),
+  zipReadText: (path, name) => host.call('zip.readText', { path, name }),
+  zipExtract: (path, name, to) => host.call('zip.extract', { path, name, to }),
+  updateCheck: () => host.call('update.check'),
+  updateInstall: url => host.call('update.install', { url }),
   reveal: path => host.call('shell.reveal', { path }),
   baseName, dirName,
 };

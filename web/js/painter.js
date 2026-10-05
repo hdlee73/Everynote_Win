@@ -159,7 +159,7 @@ export class AnnotationPainter {
   static layoutText(measure, text, widthPx, size, opts = {}) {
     const align = AnnotationPainter.alignIndex(opts.align);
     const paragraphs = String(text ?? '').split('\n');
-    const textW = Math.max(size, widthPx), pitch = size * 1.35;
+    const textW = Math.max(size, widthPx), pitch = size * (opts.line > 0 ? opts.line : 1.35);
     const lines = []; let y = size;
     paragraphs.forEach((para, pi) => {
       let remaining = para, first = true;
@@ -203,7 +203,7 @@ export class AnnotationPainter {
   }
 
   /** The text-formatting options of a typing box ({align, underline, strike}). */
-  static textOpts(e) { return { align: AnnotationPainter.alignIndex(e.align), underline: !!e.underline, strike: !!e.strike }; }
+  static textOpts(e) { return { align: AnnotationPainter.alignIndex(e.align), underline: !!e.underline, strike: !!e.strike, ...(e.lineSpacing > 0 ? { line: e.line() } : {}) }; }
 
   /** Page-px rectangles of the '☐'/'☑' markers that start a line of a typing box ([{index, rect}]; index = '\n' line). Tapping one toggles it (Windows extra). d = page rect px. */
   static checkBoxes(d0, e) {
@@ -223,7 +223,7 @@ export class AnnotationPainter {
    * Height (fraction of the page height) a typing box needs so none of its text is clipped. Same wrapping as text().
    * pageAspect = page height / page width.
    */
-  static fitHeight(text, widthFraction, sizeFraction, pageAspect, face = Typeface.DEFAULT) {
+  static fitHeight(text, widthFraction, sizeFraction, pageAspect, face = Typeface.DEFAULT, line = 1.35) {
     const pageWidth = 1000;
     const size = Math.max(1, sizeFraction * pageWidth);
     const ctx = getMeasureCtx();
@@ -231,7 +231,7 @@ export class AnnotationPainter {
     if (ctx) { ctx.font = face.css(size); measure = s => ctx.measureText(s).width; } else measure = s => fallbackMeasure(s, size);
     const boxWidth = Math.max(size, widthFraction * pageWidth);
     const lines = AnnotationPainter.layoutText(measure, text, boxWidth, size).lines.length;
-    const heightPx = size * (1.35 * Math.max(1, lines) + .15);
+    const heightPx = size * (line * Math.max(1, lines) + .15);
     return heightPx / (pageWidth * Math.max(.1, pageAspect));
   }
 
