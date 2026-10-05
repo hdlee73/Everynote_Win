@@ -8,6 +8,7 @@ import { h, icon, argb } from './util.js';
 import { prefs } from './prefs.js';
 import { host } from './host.js';
 import { toast as showToast } from './ui/toast.js';
+import { AnchoredMenu } from './ui/menu.js';
 import { AlertDialog, showActionSheet as uiActionSheet } from './ui/alert.js';
 import { AnnotationStore } from './store.js';
 import { AnnotationPainter } from './painter.js';
@@ -16,11 +17,11 @@ const NAVY = 0xFF1C1C1E | 0, ACCENT = 0xFF007AFF | 0, ACTIVE_BG = 0xFFE5F0FF | 0
 const GRAY = 0xFF8E8E93 | 0, DANGER = 0xFFFF3B30 | 0;
 const CATEGORY_TITLES = ['문서', '보기·이동', '필기·삽입', '학습·주석', '내보내기·백업'];
 const TEXT_COLORS = [0xFF1C1C1E, 0xFF8E8E93, 0xFF007AFF, 0xFF16835B, 0xFFEA580C, 0xFFFF3B30, 0xFFDB2777, 0xFF7C3AED].map(c => c | 0);
-const FONT_IDS = ['sans', 'serif', 'mono', 'hand'];
-const FONT_NAMES = ['고딕', '명조', '고정폭', '손글씨'];
+const FONT_IDS = ['sans', 'medium', 'light', 'black', 'condensed', 'serif', 'mono', 'typewriter', 'hand', 'casual'];
+const FONT_NAMES = ['고딕 (기본)', '고딕 중간', '고딕 얇게', '고딕 굵게', '고딕 좁게', '명조', '고정폭', '타자기', '손글씨', '캐주얼'];
 const TEXT_PAGE_POINTS = 595;
 const PAPER_COLORS = [0xFFFFF3A6, 0xFFFFD6E0, 0xFFCFE8FF, 0xFFD5F5D0, 0xFFFFE0B8, 0xFFE6D9FF, 0xFFFFFFFF].map(c => c | 0);
-const SIDE_TITLES = ['검색', '페이지 미리보기', '개요', '음성 녹음'];
+const SIDE_TITLES = ['🔍 검색', '🖼️ 미리보기', '🔖 개요', '🎙️ 음성 녹음'];
 const SIDE_ICONS = ['ic_search', 'ic_thumbnails', 'ic_outline', 'ic_mic'];
 const LASSO_RECT = 1, LASSO_CIRCLE = 2;
 
@@ -56,52 +57,50 @@ const methods = {
         t.push(tile('문서함·파일 관리', 'ic_folder_open', run('showLibrary')));
         t.push(tile('문서 추가', 'ic_note_add', run('showAddDocumentMenu')));
         t.push(tile('새 노트', 'ic_note_add', run('newNotebook')));
-        t.push(tile('현재 문서 이름 변경', 'ic_text', () => { if (this.activeSession) this.renameDocument(this.activeSession); else this.toast('문서를 먼저 여세요'); }));
+        t.push(tile('현재 문서 이름 변경', 'ic_rename', () => { if (this.activeSession) this.renameDocument(this.activeSession); else this.toast('문서를 먼저 여세요'); }));
         break;
       case 1:
-        t.push(tile('페이지 미리보기', 'ic_thumbnails', run('toggleSidebar'), { selected: this.sidebarVisible }));
+        t.push(tile('페이지 미리보기', 'ic_sidebar', run('toggleSidebar'), { selected: this.sidebarVisible }));
         t.push(tile('페이지로 이동', 'ic_page', run('goToPage')));
-        t.push(tile('현재 페이지 뒤에 추가', 'ic_note_add', () => this.choosePageToInsert(this.currentPage)));
+        t.push(tile('현재 페이지 뒤에 추가', 'ic_page_add', () => this.choosePageToInsert(this.currentPage)));
         t.push(tile('페이지 삭제', 'ic_delete', () => this.confirmDeletePage(this.currentPage), { tint: DANGER }));
-        t.push(tile('두 쪽 보기 · ' + (this.twoPage ? '켜짐' : '꺼짐'), 'ic_thumbnails', run('toggleTwoPage'), { selected: this.twoPage }));
+        t.push(tile('두 쪽 보기 · ' + (this.twoPage ? '켜짐' : '꺼짐'), 'ic_book', run('toggleTwoPage'), { selected: this.twoPage }));
         t.push(tile('전체 화면', 'ic_fullscreen', run('toggleFullscreen')));
-        t.push(tile('페이지 넘김 설정', 'ic_sliders', run('choosePageSwipeDirection')));
-        t.push(tile('넘김 효과', 'ic_sliders', run('choosePageAnimation')));
-        t.push(tile('읽기·페이지 넘김', 'ic_book', () => this.setInkMode(0)));
+        t.push(tile('페이지 넘김 설정', 'ic_swipe', run('choosePageSwipeDirection')));
+        t.push(tile('넘김 효과', 'ic_magic', run('choosePageAnimation')));
+        t.push(tile('읽기·페이지 넘김', 'ic_swipe', () => this.setInkMode(0)));
         break;
       case 2:
         t.push(tile('필기 모드', 'ic_ink', () => this.setWriteMode(true)));
         t.push(tile('올가미·영역 캡처', 'ic_lasso', run('startLasso')));
-        t.push(tile('텍스트 선택', 'ic_scan', run('startTextSelection')));
+        t.push(tile('텍스트 선택', 'ic_select_text', run('startTextSelection')));
         t.push(tile('타이핑', 'ic_text', run('toggleTyping')));
-        t.push(tile('사진·이미지', 'ic_image', run('pickImage')));
+        t.push(tile('사진·이미지', 'ic_image', run('insertImage')));
         t.push(tile('스티커', 'ic_sticker', run('showStickerPicker')));
         t.push(tile('동영상', 'ic_video', run('pickVideo')));
         t.push(tile('하이퍼링크', 'ic_link', run('startHyperlink')));
-        t.push(tile('이미지 붙여넣기', 'ic_copy', run('pasteImage')));
-        t.push(tile('유튜브 링크', 'ic_video', run('askYoutube')));
+        t.push(tile('유튜브 링크', 'ic_youtube', run('askYoutube')));
         t.push(tile('음성 녹음', 'ic_mic', run('startRecording')));
-        t.push(tile('메모 추가', 'ic_note_add', run('toggleMemoMode')));
+        t.push(tile('메모 추가', 'ic_memo', run('toggleMemoMode')));
         break;
       case 3:
         t.push(tile('문서·필기 검색', 'ic_search', run('searchDocument')));
-        t.push(tile('듀얼 뷰 노트', 'ic_note_add', () => this.showStudy(false)));
-        t.push(tile('발췌 바구니', 'ic_copy', () => this.showStudy(true)));
+        t.push(tile('듀얼 뷰 노트', 'ic_dual', () => this.showStudy(false)));
+        t.push(tile('발췌 바구니', 'ic_basket', () => this.showStudy(true)));
         t.push(tile('메모·하이라이트', 'ic_highlight', run('showMarkList')));
         t.push(tile('번역 포스트잇', 'ic_translate', run('showTranslations')));
         t.push(tile('책갈피', 'ic_star', run('showBookmarks')));
         t.push(tile('개요 목록', 'ic_outline', run('showOutlineList')));
-        t.push(tile('개요 추가', 'ic_note_add', run('toggleOutlineMode')));
+        t.push(tile('개요 추가', 'ic_flag', run('toggleOutlineMode')));
         t.push(tile('글자 다시 인식', 'ic_scan', () => this.recognizePageText(true)));
         break;
       default:
-        t.push(tile('PDF 내보내기', 'ic_folder_open', run('exportPdf')));
         t.push(tile('인쇄', 'ic_print', () => this.callUi2('printDocument')));
-        t.push(tile('노트·발췌 내보내기', 'ic_copy', run('exportStudy')));
-        t.push(tile('주석 백업', 'ic_copy', run('exportAnnotations')));
-        t.push(tile('주석 백업 복원', 'ic_undo', run('importSidecar')));
-        t.push(tile('원본 파일 내보내기', 'ic_folder_open', run('exportOriginal')));
-        t.push(tile('두 쪽 나눈 사본 만들기', 'ic_book', run('splitCurrentDocument')));
+        t.push(tile('PDF 내보내기', 'ic_pdf', run('exportPdf')));
+        t.push(tile('노트·발췌 내보내기', 'ic_export', run('exportStudy')));
+        t.push(tile('필기 백업 파일 저장', 'ic_backup', run('exportAnnotations')));
+        t.push(tile('필기 백업 파일 불러오기', 'ic_import', run('importSidecar')));
+        t.push(tile('원본 파일 내보내기', 'ic_original', run('exportOriginal')));
         break;
     }
     return t;
@@ -357,6 +356,10 @@ const methods = {
     const all = edit.value, at = Math.max(0, edit.selectionStart), start = at === 0 ? 0 : all.lastIndexOf('\n', at - 1) + 1; let end = all.indexOf('\n', start);
     return AnnotationStore.PageElement.markerKind(all.substring(start, end < 0 ? all.length : end));
   },
+  setInlineFont(id) {
+    if (!this.inlineElement || !AnnotationStore.PageElement.FONTS.includes(id)) return;
+    this.inlineElement.font = id; if (this.inlineFontLabel) this.inlineFontLabel(); this.applyInlineStyle();
+  },
   changeInlineSize(delta) {
     if (!this.inlineElement) return;
     const points = Math.max(8, Math.min(72, this.pointsOf(this.inlineElement) + delta));
@@ -367,8 +370,21 @@ const methods = {
   buildInlineBar(e) {
     const card = h('div', { class: 'm3-inline-bar', dataset: { tag: 'inline_style_bar' } });
     const panel = h('div', { class: 'm3-inline-panel', style: { display: 'none' } });
-    const faces = this.segmented(FONT_NAMES, () => Math.max(0, FONT_IDS.indexOf(e.font)), i => { e.font = FONT_IDS[i]; this.applyInlineStyle(); });
-    faces.dataset.tag = 'text_fonts'; faces.style.padding = '2px 0'; faces.style.height = '40px'; panel.append(faces);
+    // Android v1.32.0: the font is a combo box showing the chosen font in its own typeface; its menu previews every font
+    const faces = h('div', { class: 'm3-fontbox', role: 'button', 'aria-label': '글꼴 선택', dataset: { tag: 'text_fonts' } });
+    const showFont = () => { const at = Math.max(0, FONT_IDS.indexOf(e.font)); faces.textContent = '글꼴  ' + FONT_NAMES[at] + '  ▾'; faces.style.font = AnnotationPainter.typeface(e.font, false, false).css(14); };
+    showFont(); this.inlineFontLabel = showFont;
+    faces.addEventListener('mousedown', ev => ev.preventDefault());
+    faces.addEventListener('click', () => {
+      let menu;
+      const rows = FONT_IDS.map((id, i) => {
+        const sample = h('div', { class: 'm3-fontrow', role: 'button', 'aria-label': FONT_NAMES[i], dataset: { font: id }, style: { color: id === e.font ? '#007AFF' : '#1C1C1E', font: AnnotationPainter.typeface(id, false, false).css(16) } }, FONT_NAMES[i] + '   가나다 ABC abc');
+        sample.addEventListener('click', () => { this.setInlineFont(id); if (menu) menu.close(); });
+        return AnchoredMenu.Row.custom(sample);
+      });
+      menu = AnchoredMenu.show(faces, false, rows, null);
+    });
+    panel.append(faces);
     const palette = this.swatches(TEXT_COLORS, () => e.color | 0xFF000000, c => { e.color = c | 0xFF000000; this.applyInlineStyle(); }, 26, 1);
     palette.dataset.tag = 'text_colors'; palette.style.padding = '2px 0'; palette.style.height = '34px'; panel.append(palette);
     const tbtn = (content, label, tag, onClick) => {
@@ -381,7 +397,7 @@ const methods = {
       const open = panel.style.display === 'none'; panel.style.display = open ? '' : 'none'; style.classList.toggle('on', open);
     });
     style.classList.add('m3-aa');
-    const bold = tbtn(icon('ic_bold', 20, 'currentColor'), '굵게', 'text_bold', () => { e.bold = !e.bold; this.applyInlineStyle(); });
+    const bold = tbtn(h('span', { style: { fontWeight: '800', fontSize: '16px' } }, 'B'), '굵게', 'text_bold', () => { e.bold = !e.bold; this.applyInlineStyle(); });
     const italic = tbtn(icon('ic_italic', 20, 'currentColor'), '기울임', 'text_italic', () => { e.italic = !e.italic; this.applyInlineStyle(); });
     const underline = tbtn(icon('ic_underline', 20, 'currentColor'), '밑줄', 'text_underline', () => { e.underline = !e.underline; this.applyInlineStyle(); });
     const strike = tbtn(icon('ic_strike', 20, 'currentColor'), '취소선', 'text_strike', () => { e.strike = !e.strike; this.applyInlineStyle(); });
@@ -442,6 +458,12 @@ const methods = {
 
   // ================================================================== iOS-style action sheet and editor card
   showActionSheet(title, labels, checked, pick) { return uiActionSheet(title, labels, checked, pick); },
+  showRecordingMenu(clip, anchor) {
+    const R = AnchoredMenu.Row;
+    AnchoredMenu.showRightOf(anchor || this.sidePanel, this.sidePanel, [
+      new R('재생', 'ic_speaker', () => { Promise.resolve(this.showPage(clip.page)).then(() => this.showAudioPlayer(clip)); }).tint('#30B0C7'),
+      new R('삭제', 'ic_delete', () => this.deleteRecording(clip)).danger()]);
+  },
   rebuildRecordings() {
     this.recordingList.textContent = ''; if (!this.store) return;
     const rec = !!this.recorder;
@@ -453,7 +475,7 @@ const methods = {
       const row = h('div', { class: 'm3-row m3-recrow', dataset: { tag: 'recording_item' } }, h('div', { class: 'm3-row-text' }, '▶  ' + clip.text + '\n페이지 ' + (clip.page + 1)));
       row.addEventListener('click', () => { Promise.resolve(this.showPage(clip.page)).then(() => this.showAudioPlayer(clip)); });
       this.swipeToDelete(row, () => this.deleteRecording(clip));
-      row.append(iconButton('ic_delete', '녹음 삭제', DANGER, ev => { ev.stopPropagation(); this.deleteRecording(clip); }, 44, 44, 10));
+      { const mb = iconButton('ic_more_vert', '녹음 관리', NAVY, ev => { ev.stopPropagation(); this.showRecordingMenu(clip, mb); }, 44, 44, 10); row.append(mb); }
       this.recordingList.append(row);
     }
   },

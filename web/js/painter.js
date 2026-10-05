@@ -11,17 +11,22 @@ const FAMILIES = {
   serif: '"Noto Serif KR","Noto Serif","Batang","Times New Roman",serif',
   mono: '"D2Coding","Consolas","Malgun Gothic","Noto Sans Mono",monospace',
   hand: '"Ink Free","Segoe Script","Nanum Pen Script","Malgun Gothic",cursive',
+  medium: SANS, light: SANS, black: SANS,
+  condensed: '"Arial Narrow","Segoe UI","Malgun Gothic","Noto Sans KR",sans-serif',
+  typewriter: '"Courier New","Courier Prime","Malgun Gothic",monospace',
+  casual: '"Comic Sans MS","Segoe Print","Malgun Gothic",cursive',
 };
+const WEIGHTS = { medium: 500, light: 300, black: 900 };
 const EMOJI = '"Segoe UI Emoji","Noto Color Emoji","Apple Color Emoji","Segoe UI","Malgun Gothic",sans-serif';
 
 /** android.graphics.Typeface stand-in: family + BOLD(1)/ITALIC(2) style flags. */
 export class Typeface {
   static NORMAL = 0; static BOLD = 1; static ITALIC = 2; static BOLD_ITALIC = 3;
-  constructor(family, style = 0) { this.family = family; this.style = style; }
+  constructor(family, style = 0, weight = 0) { this.family = family; this.style = style; this.weight = weight; }
   getStyle() { return this.style; }
   /** CSS font shorthand for a size in px. forceBold emulates Paint.setFakeBoldText. */
   css(size, forceBold = false) {
-    return `${this.style & 2 ? 'italic ' : ''}${(this.style & 1) || forceBold ? 'bold ' : ''}${size}px ${this.family}`;
+    return `${this.style & 2 ? 'italic ' : ''}${(this.style & 1) || forceBold ? 'bold ' : this.weight ? this.weight + ' ' : ''}${size}px ${this.family}`;
   }
   /** Android-style FontMetrics {ascent (negative), descent} for this face at `size` px. */
   metrics(c, size) {
@@ -140,7 +145,7 @@ export class AnnotationPainter {
   /** Maps a stored font id (sans, serif, mono, hand) plus style flags to a Typeface. */
   static typeface(font, bold, italic) {
     const style = (bold ? Typeface.BOLD : 0) | (italic ? Typeface.ITALIC : 0);
-    return new Typeface(FAMILIES[font] || FAMILIES.sans, style);
+    return new Typeface(FAMILIES[font] || FAMILIES.sans, style, WEIGHTS[font] || 0);
   }
 
   // ------------------------------------------------------------------------------------------ text
@@ -281,6 +286,7 @@ export class AnnotationPainter {
         const b = AnnotationPainter.box(d, e);
         c.save();
         if (e.rot && AnnotationPainter.rotates(e)) AnnotationPainter.rotateAround(c, e.rot, b.centerX(), b.centerY());
+        if (e.alpha < .999 && AnnotationPainter.rotates(e)) c.globalAlpha *= Math.max(.05, e.alpha);   // Android v1.32.0 saveLayerAlpha
         try { AnnotationPainter._element(c, d, dw, store, e, b); } finally { c.restore(); }
       }
     } finally { c.restore(); }

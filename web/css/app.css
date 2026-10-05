@@ -18,6 +18,7 @@ button{font-family:inherit}
 .ad-root{position:fixed;inset:0;z-index:9000}
 .ad-dim{position:absolute;inset:0;background:rgba(0,0,0,0);display:flex;align-items:center;justify-content:center;transition:background .2s}
 .ad-root.in .ad-dim{background:rgba(0,0,0,.36)}
+.ad-root.sheet.in .ad-dim{background:rgba(0,0,0,.12)}
 .ad-root.out .ad-dim{background:rgba(0,0,0,0);transition:background .15s}
 .ad-card{width:min(calc(100vw - 48px),330px);background:#fff;border-radius:18px;overflow:hidden;opacity:0;transform:scale(.9);transition:opacity .18s,transform .18s;box-shadow:0 10px 40px rgba(0,0,0,.25)}
 .ad-root.in .ad-card{opacity:1;transform:none}

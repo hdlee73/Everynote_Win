@@ -55,10 +55,13 @@ await page.setViewportSize({ width: 500, height: 700 }); await page.waitForTimeo
 check('narrow split column', (await ev(() => getComputedStyle(T.app.studySplit).flexDirection)) === 'column'); await shot('03-study-narrow');
 await page.setViewportSize({ width: W, height: Hh });
 // exporters
-const ex = await ev(() => { const es = T.app.store.studyEntries; const d = new TextDecoder(); return { md: d.decode(T.exportStudyBytes(es, 'a.pdf', 0)), csv: d.decode(T.exportStudyBytes([{ page: 0, text: '=1+1\n"q"', comment: '' }], 'a.pdf', 1)), tsv: d.decode(T.exportStudyBytes([{ page: 1, text: 'a<b>\nc\td', comment: 'x&y' }], 'a.pdf', 3)), x: Array.from(T.exportStudyBytes(es, 'a.pdf', 2)) }; });
+const ex = await ev(() => { const es = T.app.store.studyEntries; const d = new TextDecoder(); return { md: d.decode(T.exportStudyBytes(es, 'a.pdf', 0)), csv: d.decode(T.exportStudyBytes([{ page: 0, text: '=1+1\n"q"', comment: '' }], 'a.pdf', 1)), docx: Array.from(T.exportStudyBytes(es, 'a.pdf', 4)), x: Array.from(T.exportStudyBytes(es, 'a.pdf', 2)) }; });
+const pdfOut = await ev(async () => Array.from(await T.exportStudyBytes(T.app.store.studyEntries, '한글 노트.pdf', 3)));
 check('md', ex.md.startsWith('# a.pdf\n\n## [p.1]\n\n첫 번째 노트\n두 줄\n\n설명 문장\n\n'));
 check('csv', ex.csv.endsWith('"a.pdf",1,"\'=1+1\n""q""",""\r\n'), JSON.stringify(ex.csv));
-check('tsv', ex.tsv === 'a&lt;b&gt;<br>c&#9;d\t' + 'x&amp;y<br>a.pdf · p.2\n', JSON.stringify(ex.tsv));
+fs.writeFileSync('/tmp/m2-test.docx', Buffer.from(ex.docx)); fs.writeFileSync('/tmp/m2-test.pdf', Buffer.from(pdfOut));
+{ const l = execSync('python3 -c "import zipfile;z=zipfile.ZipFile(\'/tmp/m2-test.docx\');print(z.testzip());d=z.read(\'word/document.xml\').decode();print(\'[p.1]\' in d and \'첫 번째 노트\' in d)" 2>&1 || true').toString(); check('docx export valid (Android v1.32.0)', l.startsWith('None') && l.includes('True'), l); }
+check('pdf export valid', Buffer.from(pdfOut).subarray(0, 5).toString() === '%PDF-' && pdfOut.length > 2000, String(pdfOut.length));
 fs.writeFileSync('/tmp/m2-test.xlsx', Buffer.from(ex.x));
 try { const l = execSync('python3 -c "import zipfile;z=zipfile.ZipFile(\'/tmp/m2-test.xlsx\');print(z.testzip());print(z.namelist());import openpyxl" 2>&1 || true').toString(); console.log(l.trim()); check('xlsx zip valid', l.startsWith('None')); } catch (e) { check('xlsx zip', false, String(e)); }
 
@@ -92,19 +95,18 @@ await ev(() => T.app.goToPage()); await page.fill('.ad-root input', 'x'); await 
 await ev(() => T.app.choosePageSwipeDirection()); await shot('10-swipe-dir'); await page.click('.ad-cell >> nth=2'); await page.waitForTimeout(250);
 check('swipe pref', (await ev(() => [T.app.swipeEnabled, T.app.verticalPageSwipe, T.prefs.getBoolean('vertical_page_swipe', false)])).join() === 'true,true,true');
 await ev(() => T.app.showAddDocumentMenu()); await shot('11-add-doc'); await page.keyboard.press('Escape'); await page.waitForTimeout(250);
-await ev(() => T.app.showOutlineItem(T.app.store.outlines[0])); await shot('12-outline-item'); await page.click('.ad-btn >> text=취소'); await page.waitForTimeout(250);
+await ev(() => T.app.showOutlineItem(T.app.store.outlines[0])); await shot('12-outline-item'); check('outline item menu: 이동 / 삭제 rows in a menu card', (await page.locator('.amenu .amenu-row').count()) === 2); await page.keyboard.press('Escape'); await page.waitForTimeout(250);
 
 // ---------------------------------------------------------------- sheets
 await ev(() => T.app.showPageMenu(2)); await shot('13-page-menu');
-check('page menu tiles', (await page.locator('.m2-tile').count()) === 3);
-check('page menu is a menu card (anchored_menu look, rows left-aligned, no icon tiles / grabber)', await page.evaluate(() => { const s = document.querySelector('[data-tag=menu_sheet]'), r = s.getBoundingClientRect(), row = s.querySelector('.m2-tile'), n = row.querySelector('.m2-tile-name').getBoundingClientRect(), rr = row.getBoundingClientRect(); return getComputedStyle(s).borderRadius === '18px' && r.width <= 322 && rr.height === 44 && n.left - rr.left < 60 && !document.querySelector('.m2-grabber,.m2-tile-chip') && Math.abs((r.left + r.right) / 2 - innerWidth / 2) < 2; }));
+check('page menu rows (anchored menu card, Android v1.32.0)', (await page.locator('.amenu .amenu-row').count()) === 3);
 await page.keyboard.press('Escape'); await page.waitForTimeout(300);
-check('sheet closed', (await page.locator('.m2-bsheet').count()) === 0);
+check('sheet closed', (await page.locator('.amenu').count()) === 0);
 
 // ---------------------------------------------------------------- side panel + search
 await ev(() => T.app.selectPanelTab(1)); await shot('14-thumbs'); await page.waitForTimeout(1200); await shot('14b-thumbs');
 check('3 thumbnails', (await page.locator('.m2-thumb').count()) === 3 && (await page.locator('.m2-thumb-canvas').count()) === 3);
-check('title favorites', (await textOf('.m2-side-title')) === '즐겨찾기 페이지');
+check('title is the unified 미리보기 with an emoji (Android v1.32.0)', (await textOf('.m2-side-title')) === '🖼️ 미리보기');
 await ev(() => { T.app.showAllThumbnails = true; T.app.selectPanelTab(1); }); await page.waitForTimeout(2500); await shot('15-thumbs-all');
 check('all thumbnails', (await page.locator('.m2-thumb').count()) === 12);
 await ev(() => { T.app.showAllThumbnails = false; T.app.selectPanelTab(2); }); await shot('16-outline');
@@ -130,7 +132,7 @@ await ev(() => T.app.showTableDialog(null)); await shot('21-table'); await page.
 check('table armed', await ev(() => T.app.placementKind === 'table' && T.app.placementText.split('\n').length === 1 + 4 * 3 && T.app.placementText.startsWith('4,3,')), await ev(() => T.app.placementText.slice(0, 30)));
 await ev(() => T.app.createPlacedElement(T.app.currentPage, .5, .7)); await page.waitForTimeout(400); await shot('22-placed');
 check('elements', (await ev(() => T.app.store.elements.map(e => e.kind).join())) === 'sticker,shape,table');
-await ev(() => T.app.onElementTapped(T.app.store.elements[2])); await shot('23-element-menu'); await page.click('.ad-cell >> text=셀 내용 편집'); await page.waitForTimeout(250); await shot('24-table-cells');
+await ev(() => T.app.onElementTapped(T.app.store.elements[2])); await shot('23-element-menu'); await page.click('.amenu-row >> text=셀 내용 편집'); await page.waitForTimeout(250); await shot('24-table-cells');
 await page.fill('.ad-root input >> nth=0', '제목1'); await page.click('.ad-btn >> text=저장'); await page.waitForTimeout(200);
 check('table cell saved', await ev(() => T.app.store.elements[2].text.split('\n')[1] === '제목1'));
 await ev(() => T.app.editElementGeometry(T.app.store.elements[0])); await shot('25-geometry'); await page.fill('.ad-root input >> nth=2', '30'); await page.click('.ad-btn >> text=적용'); await page.waitForTimeout(200);
@@ -232,7 +234,7 @@ check('원본 파일 내보내기 copies the original bytes', orig.same && orig.
 check('toast 원본 파일을 내보냈습니다', (await textOf('.toast')) === '원본 파일을 내보냈습니다');
 // own PDF / image as template: new-note dialog -> host.openDialog -> NotebookFiles.importTemplate -> paper.setTemplate
 await ev(() => { T.host.openDialog = async () => { T.host._fake.put('C:\\Users\\dev\\Downloads\\my-form.pdf', T.bytes); return ['C:\\Users\\dev\\Downloads\\my-form.pdf']; }; T.app.libraryFolder = T.app.library.root; T.app.newNotebook(); }); await page.waitForTimeout(300);
-await page.selectOption('.lib-paper select', { index: 9 }); await page.waitForTimeout(200);
+await page.click('[data-tag=paper_picker]'); await page.click('.amenu-row >> text=내 PDF·이미지 서식'); await page.waitForTimeout(200);
 await shot('41-new-note-template');
 check('template button appears for 내 PDF·이미지 서식', await page.locator('.lib-paper >> text=PDF·이미지 서식 고르기').isVisible());
 await page.click('.lib-paper >> text=PDF·이미지 서식 고르기'); await page.waitForTimeout(500);
@@ -241,7 +243,7 @@ check('picked template is copied (private copy) and shown', /^서식: .+다시 �
 await page.fill('.lib-notename input', 'V127 서식 노트'); await page.click('.ad-btn >> text=만들기'); await page.waitForTimeout(2500);
 check('note created from own template', await ev(() => T.calls.some(c => c[0] === 'openPdf' && String(c[1]).endsWith('V127 서식 노트.pdf'))));
 await shot('42-template-note');
-await ev(() => T.app.newNotebook()); await page.waitForTimeout(300); await page.selectOption('.lib-paper select', { index: 9 }); await page.click('.ad-btn >> text=만들기'); await page.waitForTimeout(400);
+await ev(() => T.app.newNotebook()); await page.waitForTimeout(300); await page.click('[data-tag=paper_picker]'); await page.click('.amenu-row >> text=내 PDF·이미지 서식'); await page.click('.ad-btn >> text=만들기'); await page.waitForTimeout(400);
 check('custom paper without a template stays open with an error', (await page.locator('.ad-root').count()) >= 1);
 await page.click('.ad-btn >> text=취소'); await page.waitForTimeout(200);
 

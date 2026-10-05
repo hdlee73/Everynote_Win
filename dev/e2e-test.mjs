@@ -15,7 +15,7 @@ console.log(await pg.evaluate(()=>({page:app.currentPage,title:app.documentTitle
 const v3=await pg.evaluate(()=>({title:document.title,header:app.titleView.textContent,zoom:getComputedStyle(app.zoomPill).display!=='none',zlabel:app.zoomLabel.textContent,fab:getComputedStyle(app.addPageButton).display!=='none',welcome:getComputedStyle(app.welcomeCard).display==='none'}));
 console.log('v3 ui', JSON.stringify(v3), v3.title==='Everynote'&&v3.header==='sample-ko.pdf'&&v3.zoom&&v3.zlabel==='100%'&&v3.fab&&v3.welcome?'PASS':'FAIL');
 await pg.click('[data-tag="zoom_in"]'); await pg.waitForTimeout(300);
-console.log('zoom in via pill', await pg.evaluate(()=>app.zoomLabel.textContent), await pg.evaluate(()=>app.zoomLabel.textContent)==='125%'?'PASS':'FAIL');
+console.log('zoom in via pill', await pg.evaluate(()=>app.zoomLabel.textContent), await pg.evaluate(()=>app.zoomLabel.textContent)==='105%'?'PASS':'FAIL');
 await pg.keyboard.press('ArrowRight'); await pg.waitForTimeout(1200);
 console.log('ArrowRight page', await pg.evaluate(()=>app.currentPage), await pg.evaluate(()=>app.currentPage)===1?'PASS':'FAIL');
 await pg.screenshot({path:'dev/out/e2e-v3.png'});

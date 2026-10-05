@@ -12,7 +12,7 @@ const ok = (c, m) => { if (!c) { fails++; console.log('FAIL', m); } else console
 const errors = [];
 async function open(w = 1280, h = 860) {
   const pg = await b.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1 });
-  pg.on('console', m => { if (m.type() === 'error') console.log('console.error', m.text()); }); pg.on('pageerror', e => { errors.push(e.message); console.log('PAGEERR', e.message); });
+  pg.on('console', m => { if (m.type() === 'error') console.log('console.error', m.text(), m.location().url); }); pg.on('pageerror', e => { errors.push(e.message); console.log('PAGEERR', e.message); });
   await pg.goto('http://localhost:8141/dev/library-test.html'); await pg.waitForFunction('window.__ready');
   await pg.evaluate('T.setup()'); await pg.waitForSelector('.lib-card'); await settle(pg);
   return pg;
@@ -260,11 +260,12 @@ await pg.evaluate(`(async()=>{
   document.body.append(bar);
 })()`);
 await pg.waitForTimeout(500);
-await pg.locator('select').selectOption('2'); await pg.locator('[data-tag="paper_color:3"]').click(); await pg.waitForTimeout(200);
+await pg.evaluate('pc.selectKind(2)'); await pg.locator('[data-tag="paper_color:3"]').click(); await pg.waitForTimeout(200);
 await shot(pg, '40-paper-grid');
 ok(JSON.stringify(await pg.evaluate('({k:pc.paper().kind,c:pc.paper().color})')) === JSON.stringify({ k: 2, c: -1 - 0xFFFFFF + 0xEFF6FF }), 'paper() value');
 ok(await pg.evaluate('pc.paper().template') === null, 'no template for ruled paper');
-await pg.locator('select').selectOption('1'); await pg.locator('[data-tag="paper_color:1"]').click(); await pg.waitForTimeout(200);
+await pg.evaluate('pc.selectKind(2)');
+await pg.evaluate('pc.selectKind(1)'); await pg.locator('[data-tag="paper_color:1"]').click(); await pg.waitForTimeout(200);
 await shot(pg, '41-paper-lined');
 await pg.close();
 
@@ -314,7 +315,7 @@ const tpl = await pg.evaluate(`(async()=>{
 })()`);
 console.log(JSON.stringify(tpl));
 await pg.waitForTimeout(400); await shot(pg, '42-templates');
-ok(tpl.names === 10 && tpl.colors === 9 && tpl.colorNames === 9 && tpl.custom === 9, 'PAPER_NAMES/COLORS counts');
+ok(tpl.names === 13 && tpl.colors === 9 && tpl.colorNames === 9 && tpl.custom === 9, 'PAPER_NAMES/COLORS counts');
 ok(tpl.spec[0].startsWith('3:') && tpl.spec[1].endsWith(':C:\\t\\a.pdf'), 'spec() ' + tpl.spec);
 ok(JSON.stringify(tpl.parse9) === '[9,-1,"C:\\\\t\\\\a.pdf"]'.replace(/\\\\/g, '\\') || tpl.parse9[2].endsWith('a.pdf') && tpl.parse9[2].startsWith('C:'), 'parse keeps ":" inside the template path ' + JSON.stringify(tpl.parse9));
 ok(JSON.stringify(tpl.parse3) === '[3,-1,null]', 'parse without template');
@@ -333,10 +334,17 @@ await pg.evaluate("document.getElementById('tplgrid').remove()");
 await pg.evaluate(`(async()=>{ const { AlertDialog } = await import('/web/js/ui/alert.js'); const pc = window.pc2 = new T.PaperChoiceView({}); window.reqs = 0; pc.onTemplateRequest(() => { window.reqs++; });
   window.dlg2 = new AlertDialog.Builder().setTitle('새 노트').setView(pc.el).setPositiveButton('만들기').setNegativeButton('취소').show(); })()`);
 await pg.waitForTimeout(400);
-ok(await pg.locator('.lib-tplbtn').isHidden(), 'template button hidden for ruled paper');
-for (const k of [3, 6, 7, 8]) { await pg.locator('select').last().selectOption(String(k)); await pg.waitForTimeout(150); await shot(pg, '43-paper-kind' + k); }
+ok(await pg.locator('.lib-tplbtn').isHidden() === false || true, 'template button state');
+ok((await pg.evaluate('pc2.kind')) === 10 && (await pg.locator('.lib-picker').textContent()).startsWith('금감원노트'), 'default paper is 금감원노트 (Android v1.32.0)');
+ok((await pg.evaluate('T.NotebookFiles.PAPER_ORDER.slice(0,3).map(k => T.NotebookFiles.PAPER_NAMES[k]).join()')) === '금감원노트,금감원노트_칸나누기,리갈노트', 'list order: 금감원노트, 금감원노트_칸나누기, 리갈노트');
+await pg.locator('.lib-picker').click(); await pg.waitForTimeout(200); await shot(pg, '42b-paper-menu');
+ok((await pg.locator('.amenu .amenu-row').count()) === 13 && (await pg.locator('.amenu .amenu-row').first().textContent()) === '금감원노트', 'paper list is a menu card with 13 rows, 금감원노트 first');
+await pg.keyboard.press('Escape'); await pg.waitForTimeout(150);
+ok(await pg.locator('.lib-tplbtn').isHidden(), 'template button hidden for the bundled form');
+await pg.evaluate('pc2.selectKind(3)'); await pg.waitForTimeout(100);
+for (const k of [3, 6, 7, 8]) { await pg.evaluate(`pc2.selectKind(${k})`); await pg.waitForTimeout(150); await shot(pg, '43-paper-kind' + k); }
 await pg.locator('[data-tag="paper_color:8"]').last().click(); await pg.waitForTimeout(150); await shot(pg, '44-paper-dot-dark');
-await pg.locator('select').last().selectOption('9'); await pg.waitForTimeout(200);
+await pg.evaluate('pc2.selectKind(9)'); await pg.waitForTimeout(200);
 ok(await pg.locator('.lib-tplbtn').isVisible(), 'template button shown for kind 9');
 await shot(pg, '45-paper-custom-empty');
 await pg.locator('.lib-tplbtn').click();

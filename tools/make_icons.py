@@ -31,10 +31,10 @@ Image.open(os.path.join(out, 'icon-512.png')).save(os.path.join(root, 'web/asset
 Image.open(os.path.join(out, 'icon-256.png')).save(os.path.join(root, 'web/assets/everynote-icon-256.png'))
 import shutil; shutil.copy(ico, os.path.join(root, 'installer/everynote.ico'))
 # Inno wizard images (BMP): large 164x314, small 55x55
-big = Image.new('RGB', (164, 314), (10, 108, 255))
+big = Image.new('RGB', (164, 314), (43, 58, 155))
 grad = Image.new('RGB', (1, 314))
 for y in range(314):
-    t = y / 313; grad.putpixel((0, y), (int(90 + (10 - 90) * t), int(200 + (108 - 200) * t), int(250 + (255 - 250) * t)))
+    t = y / 313; grad.putpixel((0, y), (int(91 + (43 - 91) * t), int(124 + (58 - 124) * t), int(250 + (155 - 250) * t)))
 big.paste(grad.resize((164, 314)), (0, 0))
 ic = Image.open(os.path.join(out, 'icon-128.png')).convert('RGBA')
 big.paste(ic, (18, 70), ic)

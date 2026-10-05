@@ -8,6 +8,33 @@ function checkLabel(text) {
   return w;
 }
 
+const has = (t, ...k) => k.some(x => t.includes(x));
+/** Leading icon for list rows (Android v1.32.0 iconFor/tintFor) so plain lists look like the other menu cards. */
+export function iconFor(text) {
+  const t = String(text == null ? '' : text);
+  if (has(t, '삭제', '비우기')) return 'ic_delete';
+  if (has(t, '복원', '불러오기', '가져오기') || (t.includes('열기') && !t.includes('저장'))) return 'ic_import';
+  if (t.includes('이름')) return 'ic_rename';
+  if (has(t, '내보내', '공유', '저장')) return 'ic_export';
+  if (t.includes('PDF')) return 'ic_pdf';
+  if (has(t, 'Word', 'docx')) return 'ic_word';
+  if (has(t, 'Excel', 'CSV', 'Markdown')) return 'ic_table';
+  if (t.includes('폴더')) return 'ic_folder_open';
+  if (t.includes('색')) return 'ic_palette';
+  if (has(t, '이동', '페이지')) return 'ic_page';
+  if (has(t, '닫기', '취소')) return null;
+  return 'ic_page';
+}
+export function tintFor(text) {
+  const t = String(text == null ? '' : text);
+  if (has(t, '삭제', '비우기')) return '#FF3B30';
+  if (has(t, '복원', '불러오기', '가져오기', '내보내', '공유', '저장', 'PDF')) return '#34C759';
+  if (t.includes('Word')) return '#007AFF';
+  if (has(t, 'Excel', 'CSV', 'Markdown')) return '#30B0C7';
+  if (t.includes('색')) return '#AF52DE';
+  return '#8E8E93';
+}
+
 export class AlertDialog {
   static Builder = class {
     constructor() {
@@ -53,7 +80,7 @@ export class AlertDialog {
   show() {
     document.body.append(this.root);
     requestAnimationFrame(() => this.root.classList.add('in'));
-    this._key = e => { if (e.key === 'Escape' && this.b.cancelable) { e.stopPropagation(); e.preventDefault(); if (this.b.cancelL) this.b.cancelL(this); this.dismiss(); } };
+    this._key = e => { if (e.key === 'Escape' && this.b.cancelable && !document.querySelector('.amenu')) { e.stopPropagation(); e.preventDefault(); if (this.b.cancelL) this.b.cancelL(this); this.dismiss(); } };
     document.addEventListener('keydown', this._key, true);
     const f = this.root.querySelector('input,textarea'); if (f) setTimeout(() => f.focus(), 30);
     return this;
@@ -128,6 +155,8 @@ export class AlertDialog {
       bt.classList.add('sheet-btn');
       bt.style.color = label.includes('삭제') || label.includes('비우기') ? '#FF3B30' : slot === 1 ? '#8E8E93' : '#007AFF';
       bt.style.fontWeight = '400';
+      { const danger = label.includes('삭제') || label.includes('비우기'); const ic = danger ? 'ic_delete' : slot === 1 ? 'ic_close' : iconFor(label);
+        if (ic && !bt.querySelector('svg')) bt.prepend(icon(ic, 20, danger ? '#FF3B30' : slot === 1 ? '#8E8E93' : tintFor(label), 'margin-right:12px')); }
       list.append(bt);
     }
     root.append(list);

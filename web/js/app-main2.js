@@ -28,11 +28,11 @@ const RAINBOW = 'conic-gradient(#FF3B30,#FFCC00,#34C759,#00C7BE,#007AFF,#AF52DE,
 export const INK_WIDTHS = [0.0022, 0.004, 0.0065, 0.009];
 export const HIGHLIGHT_COLORS = [0x66FFDE59, 0x6654C27A, 0x66FF6B9A, 0x66549CF5, 0x66B67CF2];
 export const TEXT_COLORS = [0xFF1C1C1E, 0xFF8E8E93, 0xFF007AFF, 0xFF16835B, 0xFFEA580C, 0xFFFF3B30, 0xFFDB2777, 0xFF7C3AED].map(c => c | 0);
-export const FONT_IDS = ['sans', 'serif', 'mono', 'hand'];
-export const FONT_NAMES = ['고딕', '명조', '고정폭', '손글씨'];
+export const FONT_IDS = ['sans', 'medium', 'light', 'black', 'condensed', 'serif', 'mono', 'typewriter', 'hand', 'casual'];
+export const FONT_NAMES = ['고딕 (기본)', '고딕 중간', '고딕 얇게', '고딕 굵게', '고딕 좁게', '명조', '고정폭', '타자기', '손글씨', '캐주얼'];
 export const TEXT_PAGE_POINTS = 595;
 export const PAPER_COLORS = [0xFFFFF3A6, 0xFFFFD6E0, 0xFFCFE8FF, 0xFFD5F5D0, 0xFFFFE0B8, 0xFFE6D9FF, 0xFFFFFFFF].map(c => c | 0);
-export const SIDE_TITLES = ['검색', '페이지 미리보기', '개요', '음성 녹음'];
+export const SIDE_TITLES = ['🔍 검색', '🖼️ 미리보기', '🔖 개요', '🎙️ 음성 녹음'];
 export const SIDE_ICONS = ['ic_search', 'ic_thumbnails', 'ic_outline', 'ic_mic'];
 export const STICKER_TITLES = ['별·하트', '낙엽·꽃', '응원·표시', '메모용', '표정·동물', '날씨·생활'];
 export const STICKER_GROUPS = [
@@ -193,15 +193,64 @@ const htmlEsc = s => xml(s).replace(/\r/g, '').replace(/\n/g, '<br>').replace(/\
 const csvEsc = s => { s = String(s); if (/^\s*[=+@-]/.test(s)) s = "'" + s; return '"' + s.replace(/"/g, '""') + '"'; };
 export function exportStudyBytes(entries, title, format) {
   if (format === 2) return workbook(entries, title);
+  if (format === 3) return pdfBytes(entries, title);
+  if (format === 4) return docxBytes(entries, title);
   let out = '';
   if (format === 0) out += '# ' + title + '\n\n';
   if (format === 1) out += '﻿document,page,text,comment\r\n';
   for (const e of entries) {
     if (format === 0) out += '## [p.' + (e.page + 1) + ']\n\n' + e.text + '\n\n' + e.comment + '\n\n';
-    else if (format === 1) out += csvEsc(title) + ',' + (e.page + 1) + ',' + csvEsc(e.text) + ',' + csvEsc(e.comment) + '\r\n';
-    else out += htmlEsc(e.text) + '\t' + (htmlEsc(e.comment) + '<br>' + htmlEsc(title) + ' · p.' + (e.page + 1)) + '\n';
+    else out += csvEsc(title) + ',' + (e.page + 1) + ',' + csvEsc(e.text) + ',' + csvEsc(e.comment) + '\r\n';
   }
   return utf8(out);
+}
+/** Android v1.32.0 StudyExporter.docx: minimal Word package (title, "[p.N]" headings, text, comment). */
+function docxBytes(entries, title) {
+  const para = (text, bold, size) => '<w:p><w:r><w:rPr>' + (bold ? '<w:b/>' : '') + `<w:sz w:val="${size}"/></w:rPr>` +
+    String(text).replace(/\r/g, '').split('\n').map((l, i) => (i ? '<w:br/>' : '') + `<w:t xml:space="preserve">${xml(l)}</w:t>`).join('') + '</w:r></w:p>';
+  let body = para(title, true, '32');
+  for (const e of entries) { body += para('[p.' + (e.page + 1) + ']', true, '22') + para(e.text, false, '24'); if (e.comment) body += para(e.comment, false, '22'); }
+  return zipStore([
+    ['[Content_Types].xml', utf8('<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')],
+    ['_rels/.rels', utf8('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')],
+    ['word/document.xml', utf8('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + body + '</w:body></w:document>')],
+  ]);
+}
+/** A4 PDF of the notes. Text is drawn on a canvas (system fonts cover Korean) and each page embedded as a JPEG. Async. */
+async function pdfBytes(entries, title) {
+  const { PDFDocument } = await import('../vendor/pdflib/pdf-lib.esm.min.js');
+  const W = 595, H = 842, M = 48, TW = W - 2 * M, S = 2, FONT = '"Malgun Gothic","Noto Sans KR","Apple SD Gothic Neo",sans-serif';
+  const blocks = [{ t: title, size: 20, bold: true, color: '#000', gap: 20 }];
+  for (const e of entries) {
+    blocks.push({ t: '[p.' + (e.page + 1) + ']', size: 11, bold: true, color: '#0A84FF', gap: 3 });
+    blocks.push({ t: String(e.text), size: 12, color: '#000', gap: 4 });
+    if (e.comment) blocks.push({ t: String(e.comment), size: 11, color: '#555', gap: 4 });
+    blocks[blocks.length - 1].gap = 14;
+  }
+  const doc = await PDFDocument.create();
+  let canvas, ctx, y;
+  const newPage = () => { canvas = document.createElement('canvas'); canvas.width = W * S; canvas.height = H * S; ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W * S, H * S); ctx.scale(S, S); ctx.textBaseline = 'top'; y = M; };
+  const flush = async () => {
+    const jpg = await new Promise(res => canvas.toBlob(res, 'image/jpeg', .92));
+    const img = await doc.embedJpg(new Uint8Array(await jpg.arrayBuffer()));
+    doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
+  };
+  newPage();
+  for (const b of blocks) {
+    ctx.font = (b.bold ? 'bold ' : '') + b.size + 'px ' + FONT;
+    const lines = [];
+    for (const para of b.t.replace(/\r/g, '').split('\n')) {
+      let cur = '';
+      for (const ch of para) { if (ctx.measureText(cur + ch).width > TW && cur) { lines.push(cur); cur = ch; } else cur += ch; }
+      lines.push(cur);
+    }
+    const lh = b.size * 1.25, hgt = lines.length * lh;
+    if (y + hgt > H - M && y > M) { await flush(); newPage(); ctx.font = (b.bold ? 'bold ' : '') + b.size + 'px ' + FONT; }
+    ctx.fillStyle = b.color; lines.forEach((l, i) => ctx.fillText(l, M, y + i * lh));
+    y += hgt + b.gap;
+  }
+  await flush();
+  return new Uint8Array(await doc.save());
 }
 function workbook(entries, title) {
   const row = (n, vals) => `<row r="${n}">` + vals.map((v, i) => `<c r="${String.fromCharCode(65 + i)}${n}" t="inlineStr"><is><t xml:space="preserve">${xml(v)}</t></is></c>`).join('') + '</row>';
@@ -443,17 +492,15 @@ M.showOutlineList = function () {
   if (this.sidebarVisible && this.panelTab === 2) { this.closeSidePanel(); return; }
   this.selectPanelTab(2);
 };
-M.showOutlineItem = function (item) {
-  alertCard({
-    title: item.title, message: '페이지 ' + (item.page + 1),
-    positive: ['이동', () => { this._goTo(item.page, item.x, item.y); }],
-    negative: ['삭제', () => {
+M.showOutlineItem = function (item, anchor) {
+  const R = AnchoredMenu.Row;
+  AnchoredMenu.showRightOf(anchor || this.sidePanel, this.sidePanel, [
+    new R('이동', 'ic_page', () => { this._goTo(item.page, item.x, item.y); }).tint('#30B0C7'),
+    new R('삭제', 'ic_delete', () => {
       const a = this.store.outlines, i = a.indexOf(item); if (i >= 0) a.splice(i, 1);
       this.store.save(); toast('개요 항목을 삭제했습니다');
       if (this.sidebarVisible && this.panelTab === 2) this.rebuildOutlinePanel();
-    }],
-    neutral: ['취소'],
-  });
+    }).danger()]);
 };
 M.choosePageSwipeDirection = function () {
   const choices = ['화살표만 · 드래그 넘김 끄기', '수평 · 좌우로 넘기기', '수직 · 위아래로 넘기기'];
@@ -500,7 +547,7 @@ M.exportAnnotations = async function () {
   let json;
   try { json = this.pendingJsonExport = this.store.exportJson(this.documentUri, this.documentTitle); } catch (e) { toast('백업 실패'); return; }
   try {
-    const path = await saveBytesAs('주석 백업', stripPdf(this.documentTitle) + '_annotations.json', ['json'], utf8(json));
+    const path = await saveBytesAs('필기 백업 파일 저장', stripPdf(this.documentTitle) + '_annotations.json', ['json'], utf8(json));
     if (path) toast('주석을 내보냈습니다');
   } catch (e) { toast('백업 실패: ' + errMsg(e)); } finally { this.pendingJsonExport = null; }
 };
@@ -695,12 +742,12 @@ M.refreshStudyPanel = function () {
 };
 M.exportStudy = function () {
   if (!this.store) return;
-  listDialog('노트·발췌 내보내기', ['Markdown (.md)', 'CSV (.csv)', 'Excel (.xlsx)', 'Anki (.tsv · 앞면/뒷면)'], async format => {
+  listDialog('노트·발췌 내보내기', ['Markdown (.md)', 'CSV (.csv)', 'Excel (.xlsx)', 'PDF (.pdf)', 'Word (.docx)'], async format => {
     const entries = this.store.studyEntries.filter(e => !this.basketOnly || e.excerpt);
     if (entries.length === 0) { toast('내보낼 항목이 없습니다'); return; }
     let bytes;
-    try { bytes = exportStudyBytes(entries, this.documentTitle, format); } catch (e) { toast('내보내기 실패'); return; }
-    const ext = ['md', 'csv', 'xlsx', 'tsv'][format];
+    try { bytes = await exportStudyBytes(entries, this.documentTitle, format); } catch (e) { toast('내보내기 실패'); return; }
+    const ext = ['md', 'csv', 'xlsx', 'pdf', 'docx'][format];
     try {
       const path = await saveBytesAs('노트·발췌 내보내기', stripPdf(this.documentTitle) + '_notes.' + ext, [ext], bytes);
       if (path) toast('내보냈습니다');
@@ -712,7 +759,7 @@ M.importSidecar = async function () {
   const target = this.store, session = this.activeSession;
   this.importTarget = target; this.importSession = session;
   let path;
-  try { [path] = await host.openDialog('주석 백업 복원', [{ name: 'JSON', exts: ['json'] }], false); } catch (e) { path = null; }
+  try { [path] = await host.openDialog('필기 백업 파일 불러오기', [{ name: 'JSON', exts: ['json'] }], false); } catch (e) { path = null; }
   this.importTarget = null; this.importSession = null;
   if (!path) return;
   if (!session || !this.sessions.includes(session)) return;
@@ -726,7 +773,7 @@ M.importSidecar = async function () {
     if (root == null || typeof root !== 'object' || Array.isArray(root)) throw new Error('JSON 객체가 아닙니다');
   } catch (e) { toast('백업 읽기 실패: ' + errMsg(e)); return; }
   alertCard({
-    title: '주석 백업 복원',
+    title: '필기 백업 파일 불러오기',
     message: '백업 문서: ' + (root.document == null ? '' : root.document) + '\n현재 문서: ' + session.title + '\n\n현재 문서의 주석·노트·발췌를 이 백업으로 교체합니다.',
     positive: ['복원', async () => {
       if (!this.sessions.includes(session)) return;
@@ -821,13 +868,13 @@ M.deletePage = function (session, index) {
   return this.modifyPages(session, '페이지를 삭제하는 중…', () => this.library.deletePage(file, index), () => session.store.removePage(index), index, '페이지 삭제 실패');
 };
 /** Page menu of the preview sidebar: go / add after / delete. */
-M.showPageMenu = function (page) {
+M.showPageMenu = function (page, anchor) {
   if (!this.renderer) return;
-  const section = new Section(null);
-  section.add(new Tile('이 페이지로 이동', 'ic_page', () => this.showPage(page)));
-  section.add(new Tile('뒤에 페이지 추가', 'ic_note_add', () => this.choosePageToInsert(page)));
-  section.add(new Tile('이 페이지 삭제', 'ic_delete', () => this.confirmDeletePage(page)).tint(0xFFFF3B30));
-  this.showSheet('페이지 ' + (page + 1), [section]);
+  const R = AnchoredMenu.Row;
+  AnchoredMenu.showRightOf(anchor || this.sidePanel, this.sidePanel, [
+    new R('이 페이지로 이동', 'ic_page', () => this.showPage(page)).tint('#30B0C7'),
+    new R('뒤에 페이지 추가', 'ic_page_add', () => this.choosePageToInsert(page)).tint('#34C759'),
+    new R('이 페이지 삭제', 'ic_delete', () => this.confirmDeletePage(page)).danger()]);
 };
 /** Runs a file-level page edit, then re-opens the renderer and shifts the annotations to match. */
 M.modifyPages = async function (session, message, operation, annotations, target, failure) {
@@ -1033,7 +1080,7 @@ M.createPlacedElement = async function (page, x, y) {
   if (kind === 'image' || kind === 'video' || kind === 'sticker' || kind === 'youtube') {
     let ratio = kind === 'youtube' ? 16 / 9 : 1;
     if (kind !== 'sticker' && kind !== 'youtube') { const r = await assetRatio(element.asset); if (r > 0) ratio = r; }
-    let w = kind === 'sticker' ? .16 : .5, hh = w * pageRatio / ratio;
+    let w = kind === 'sticker' ? .16 : String(element.asset).startsWith('tape-') ? .32 : .5, hh = w * pageRatio / ratio;
     if (hh > .6) { hh = .6; w = hh * ratio / pageRatio; }
     element.left = Math.max(0, Math.min(1 - w, x - w / 2)); element.top = Math.max(0, Math.min(1 - hh, y - hh / 2));
     element.right = element.left + w; element.bottom = element.top + hh;
@@ -1056,22 +1103,26 @@ M.onElementTapped = function (element) {
   if (element.kind === 'audio') { this.showAudioPlayer(element); return; }
   if (element.kind === 'text') { this.beginInlineText(element, false); return; }
   if (element.kind === 'hyperlink') { this.showHyperlinkMenu(element); return; }
-  const kind = element.kind;
-  const labels = kind === 'youtube' ? ['유튜브에서 열기', '위치·크기', '삭제'] : kind === 'shape' ? ['색·선 굵기', '위치·크기', '삭제']
-    : kind === 'table' ? ['셀 내용 편집', '행·열·색상', '위치·크기', '삭제'] : (kind === 'image' || kind === 'sticker') ? ['위치·크기', '삭제']
-    : kind === 'video' ? ['재생', '위치·크기', '삭제'] : kind === 'link' ? ['링크 열기', '수정', '위치·크기', '삭제'] : ['수정', '위치·크기', '삭제'];
-  listDialog('페이지 ' + (element.page + 1), labels, index => {
-    const action = labels[index];
-    if (action === '링크 열기') { if (this.validWebUrl(element.text)) this._openExternal(element.text, '링크를 열 앱이 없습니다'); }
-    else if (action === '재생') this.showVideoPlayer(element);
-    else if (action === '유튜브에서 열기') this.openYoutube(element.text);
-    else if (action === '색·선 굵기') this.showShapeDialog(element);
-    else if (action === '셀 내용 편집') this.editTableCells(element);
-    else if (action === '행·열·색상') this.showTableDialog(element);
-    else if (action === '수정') this.editPageElement(element, false);
-    else if (action === '위치·크기') this.editElementGeometry(element);
-    else this.deleteElement(element);
-  });
+  const kind = element.kind, R = AnchoredMenu.Row, rows = [];
+  if (kind === 'link') rows.push(new R('링크 열기', 'ic_link', () => { if (this.validWebUrl(element.text)) this._openExternal(element.text, '링크를 열 앱이 없습니다'); }).tint('#5856D6'));
+  if (kind === 'video') rows.push(new R('재생', 'ic_video', () => this.showVideoPlayer(element)).tint('#FF3B30'));
+  if (kind === 'youtube') rows.push(new R('유튜브에서 열기', 'ic_youtube', () => this.openYoutube(element.text)).tint('#FF0000'));
+  if (kind === 'shape') rows.push(new R('색·선 굵기', 'ic_palette', () => this.showShapeDialog(element)).tint('#AF52DE'));
+  if (kind === 'table') { rows.push(new R('셀 내용 편집', 'ic_table', () => this.editTableCells(element)).tint('#30B0C7')); rows.push(new R('행·열·색상', 'ic_sliders', () => this.showTableDialog(element)).tint('#AF52DE')); }
+  if (kind === 'link' || !['youtube', 'shape', 'table', 'image', 'sticker', 'video'].includes(kind)) rows.push(new R('수정', 'ic_compose', () => this.editPageElement(element, false)).tint('#007AFF'));
+  rows.push(new R('위치·크기', 'ic_fullscreen', () => this.editElementGeometry(element)).tint('#34C759'));
+  if (AnnotationPainter.rotates(element)) rows.push(R.custom(this.opacityRow(element)));
+  rows.push(new R('삭제', 'ic_delete', () => this.deleteElement(element)).danger());
+  AnchoredMenu.showCentered('페이지 ' + (element.page + 1), rows);
+};
+/** An inline slider inside the element menu (Android v1.32.0): fades a picture, sticker, shape or table (10-100 %); the page repaints live. */
+M.opacityRow = function (element) {
+  const target = this.store;
+  const label = h('div', { style: { fontSize: '13px', color: '#636366' } }, '투명도  ' + Math.round(element.alpha * 100) + '%');
+  const bar = h('input', { type: 'range', min: '10', max: '100', step: '1', value: String(Math.max(10, Math.min(100, Math.round(element.alpha * 100)))), class: 'm2-opacity-bar', 'aria-label': '투명도 조절', dataset: { tag: 'opacity_bar' } });
+  bar.addEventListener('input', () => { const v = Number(bar.value); element.alpha = v / 100; label.textContent = '투명도  ' + v + '%'; if (this.pageView) this.pageView.invalidate(); this.redrawPages(); });
+  bar.addEventListener('change', () => { if (target) target.save(); });
+  return h('div', { class: 'm2-opacity-row', dataset: { tag: 'opacity_row' }, style: { padding: '8px 14px 6px' } }, label, bar);
 };
 M._openExternal = async function (url, failToast) { try { await host.shellOpen(url); } catch (e) { toast(failToast); } };
 M.editPageElement = function (element, fresh) {
@@ -1108,6 +1159,14 @@ M.pickImage = async function () {
   if (!this.renderer) { toast('문서를 먼저 여세요'); return; }
   let r; try { r = await host.openDialog('이미지 선택', [{ name: '이미지', exts: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }], false); } catch (e) { return; }
   if (r && r[0]) this.importImage(r[0]);
+};
+/** Android v1.32.0 insertImage: a menu card first, so the picker can be cancelled by tapping outside. */
+M.insertImage = function () {
+  if (!this.renderer) { toast('문서를 먼저 여세요'); return; }
+  const R = AnchoredMenu.Row;
+  AnchoredMenu.showCentered('사진·이미지 넣기', [
+    new R('파일에서 선택', 'ic_folder_open', () => this.pickImage()).tint('#FF9500'),
+    new R('복사한 이미지 붙여넣기', 'ic_paste', () => this.pasteImage()).tint('#34C759')]);
 };
 M.pickVideo = async function () {
   if (!this.renderer) { toast('문서를 먼저 여세요'); return; }
@@ -1203,6 +1262,15 @@ M.showStickerPicker = function () {
       row.append(cell);
     });
   });
+  box.append(h('div', { class: 'm2-st-title' }, '마스킹 테이프'));
+  { let row = null;
+    for (let i = 1; i <= 16; i++) {
+      if ((i - 1) % 4 === 0) { row = h('div', { class: 'm2-st-row m2-tape-row' }); box.append(row); }
+      const name = 'tape-' + (i < 10 ? '0' : '') + i + '.png';
+      const cell = h('div', { class: 'm2-tape-cell', role: 'button', 'aria-label': '마스킹 테이프 ' + i, dataset: { tape: name } }, h('img', { src: new URL('../assets/stickers/' + name, import.meta.url).href, alt: '', draggable: 'false' }));
+      cell.addEventListener('click', () => { if (holder) holder.dismiss(); this.placementText = ''; this.placementRot = -4; this.placeElement('image', name); });
+      row.append(cell);
+    } }
   const mine = this.pill('내 이미지로 스티커 만들기', '이미지 선택', ACTIVE_BG, ACTIVE_FG, () => { if (holder) holder.dismiss(); this.pickImage(); });
   mine.style.cssText += ';height:44px;margin-top:10px';
   box.append(mine);
@@ -1213,14 +1281,13 @@ M.showStickerPicker = function () {
 M.insertRows = function () {
   const R = AnchoredMenu.Row;
   return [
-    new R('사진·이미지', 'ic_image', () => this.pickImage()).tint('#007AFF'),
+    new R('사진·이미지', 'ic_image', () => this.insertImage()).tint('#007AFF'),
     new R('스티커', 'ic_sticker', () => this.showStickerPicker()).tint('#FF9500'),
     new R('도형', 'ic_rect', () => this.showShapeDialog(null)).tint('#AF52DE'),
-    new R('표', 'ic_thumbnails', () => this.showTableDialog(null)).tint('#30B0C7'),
+    new R('표', 'ic_table', () => this.showTableDialog(null)).tint('#30B0C7'),
     new R('동영상', 'ic_video', () => this.pickVideo()).tint('#FF3B30'),
-    new R('유튜브 링크', 'ic_video', () => this.askYoutube()).tint('#FF0000'),
+    new R('유튜브 링크', 'ic_youtube', () => this.askYoutube()).tint('#FF0000'),
     new R('하이퍼링크', 'ic_link', () => this.startHyperlink()).tint('#5856D6'),
-    new R('붙여넣기', 'ic_copy', () => this.pasteImage()).tint('#8E8E93'),
   ];
 };
 M.showInsertMenu = function (anchor) {
@@ -1627,7 +1694,7 @@ M.selectPanelTab = function (tab) {
   this.thumbnailPanel.style.display = tab === 1 ? 'block' : 'none';
   this.outlineScroll.style.display = tab === 2 ? 'block' : 'none';
   this.recordingScroll.style.display = tab === 3 ? 'block' : 'none';
-  this.sideTitle.textContent = tab === 1 && !this.showAllThumbnails ? '즐겨찾기 페이지' : SIDE_TITLES[tab];
+  this.sideTitle.textContent = SIDE_TITLES[tab];
   this.sideMore.style.display = tab === 1 ? 'flex' : 'none';
   this.sideTabs.forEach((b, i) => { const on = i === tab; b.style.color = on ? ACTIVE_FG : NAVY; b.style.background = on ? ACTIVE_BG : 'transparent'; });
   const width = this.sidePanelWidth(); panel.style.width = width + 'px';
@@ -1641,43 +1708,54 @@ function fitText(el, min, max) {
   requestAnimationFrame(() => { let s = max; while (s > min && el.scrollWidth > el.clientWidth) { s--; el.style.fontSize = s + 'px'; } });
 }
 M.closeSidePanel = function () {
+  const searched = this.panelTab === 0 && this.searchHits && this.searchHits.length > 0;
   this.sidebarVisible = false; if (this.sidePanel) this.sidePanel.style.display = 'none';
   this.closeSearch(); this.hideKeyboard(); this.applySearchHighlights();
+  if (searched && this.renderer && this.resetZoomAll) this.resetZoomAll();   // Android v1.32.0: the zoom of a search jump does not stay
   window.dispatchEvent(new Event('resize'));
 };
-/** Icon-only floating menu for the preview panel: favorites only, all pages, add page, delete page. */
+/** Preview panel ⋮ menu (Android v1.32.0): favorites only / all pages (checked), add page, delete page. */
 M.showThumbnailMenu = function (anchor) {
-  const column = h('div', { class: 'm2-thumbmenu', dataset: { tag: 'thumb_menu' } });
-  const backdrop = h('div', { class: 'amenu-backdrop' });
-  const close = () => { backdrop.remove(); column.remove(); };
-  backdrop.addEventListener('mousedown', close); backdrop.addEventListener('contextmenu', e => { e.preventDefault(); close(); });
-  const entries = [['ic_star', '즐겨찾기 페이지만', !this.showAllThumbnails, NAVY], ['ic_thumbnails', '전체 페이지', this.showAllThumbnails, NAVY], ['ic_note_add', '페이지 추가', false, NAVY], ['ic_delete', '페이지 삭제', false, RED]];
-  entries.forEach(([ic, label, on, tint], id) => {
-    const b = iconButton(ic, label, on ? ACTIVE_FG : tint, () => {
-      close();
-      if (id < 2) { this.showAllThumbnails = id === 1; this.recentPrefs.putBoolean('thumb_all', this.showAllThumbnails); this.selectPanelTab(1); }
-      else if (id === 2) this.chooseAddedPage(); else this.confirmDeletePage(this.currentPage);
-    }, 46, 46);
-    b.style.padding = '10px'; b.style.borderRadius = '14px'; if (on) b.style.background = ACTIVE_BG;
-    column.append(b);
-  });
-  document.body.append(backdrop, column);
-  const r = anchor.getBoundingClientRect();
-  const w = column.offsetWidth, hgt = column.offsetHeight;
-  column.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - 8 - w)) + 'px';
-  column.style.top = Math.max(8, Math.min(window.innerHeight - hgt - 8, r.bottom - 4)) + 'px';
+  const R = AnchoredMenu.Row;
+  AnchoredMenu.show(anchor, false, [
+    new R('즐겨찾기 페이지만', 'ic_star', () => { this.showAllThumbnails = false; this.recentPrefs.putBoolean('thumb_all', false); this.selectPanelTab(1); }).tint('#F5A623').selected(!this.showAllThumbnails),
+    new R('전체 페이지', 'ic_thumbnails', () => { this.showAllThumbnails = true; this.recentPrefs.putBoolean('thumb_all', true); this.selectPanelTab(1); }).tint('#007AFF').selected(this.showAllThumbnails),
+    R.divider(),
+    new R('페이지 추가', 'ic_page_add', () => this.chooseAddedPage()).tint('#34C759'),
+    new R('페이지 삭제', 'ic_delete', () => this.confirmDeletePage(this.currentPage)).danger()], null);
 };
-/** Lets a list row be swiped away (either direction) to delete it; taps and vertical scrolling keep working. */
+/** Lets a list row be swiped away (either direction) to delete it. iOS Mail style (Android v1.32.0): a red area with a trash icon is revealed
+ *  under the row; past the 40% line it turns darker and the icon grows. Taps and vertical scrolling keep working. */
 M.swipeToDelete = function (row, del) {
-  let sx = 0, sy = 0, dragging = false, id = null, dx = 0;
+  let sx = 0, sy = 0, dragging = false, id = null, dx = 0, bg = null, ic = null, armed = false;
   const slop = 8;
   row.classList.add('m2-swipe');
+  const sync = () => {
+    if (!bg) return;
+    const w = row.offsetWidth, was = armed; armed = Math.abs(dx) > w * .4;
+    if (armed && !was && navigator.vibrate) try { navigator.vibrate(8); } catch (err) { /* ignore */ }
+    bg.style.background = armed ? '#D92D20' : '#FF3B30';
+    const sz = armed ? 25 : 22, left = dx < 0;
+    ic.style.width = ic.style.height = sz + 'px';
+    ic.style.top = (row.offsetHeight - sz) / 2 + 'px';
+    ic.style.left = ''; ic.style.right = '';
+    if (left) ic.style[armed ? 'left' : 'right'] = '18px'; else ic.style[armed ? 'right' : 'left'] = '18px';
+    bg.style.display = Math.abs(dx) < 22 + 18 ? 'none' : '';
+  };
+  const mkBg = () => {
+    const par = row.parentElement; if (!par) return;
+    if (getComputedStyle(par).position === 'static') par.style.position = 'relative';
+    bg = h('div', { class: 'm2-swipe-bg' }); ic = icon('ic_delete', 22, '#fff'); ic.style.position = 'absolute'; bg.append(ic);
+    bg.style.top = row.offsetTop + 'px'; bg.style.left = row.offsetLeft + 'px'; bg.style.width = row.offsetWidth + 'px'; bg.style.height = row.offsetHeight + 'px';
+    par.insertBefore(bg, row);
+  };
+  const rmBg = () => { if (bg) bg.remove(); bg = ic = null; armed = false; };
   row.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse' && e.button !== 0) return; sx = e.clientX; sy = e.clientY; dragging = false; id = e.pointerId; dx = 0; });
   row.addEventListener('pointermove', e => {
     if (e.pointerId !== id) return;
     dx = e.clientX - sx; const dy = e.clientY - sy;
-    if (!dragging && Math.abs(dx) > slop * 1.5 && Math.abs(dx) > Math.abs(dy) * 1.4) { dragging = true; try { row.setPointerCapture(id); } catch (err) { /* ignore */ } row.style.transition = 'none'; }
-    if (dragging) { row.style.transform = 'translateX(' + dx + 'px)'; row.style.opacity = Math.max(.25, 1 - Math.abs(dx) / Math.max(1, row.offsetWidth)); }
+    if (!dragging && Math.abs(dx) > slop * 1.5 && Math.abs(dx) > Math.abs(dy) * 1.4) { dragging = true; try { row.setPointerCapture(id); } catch (err) { /* ignore */ } row.style.transition = 'none'; mkBg(); }
+    if (dragging) { row.style.transform = 'translateX(' + dx + 'px)'; sync(); }
   });
   const end = e => {
     if (e.pointerId !== id) return; id = null;
@@ -1685,8 +1763,9 @@ M.swipeToDelete = function (row, del) {
     dragging = false;
     const gone = e.type === 'pointerup' && Math.abs(dx) > row.offsetWidth * .4;
     row._swiped = true; setTimeout(() => { row._swiped = false; }, 50);
-    if (gone) { row.style.transition = 'transform .14s, opacity .14s'; row.style.transform = 'translateX(' + Math.sign(dx) * row.offsetWidth + 'px)'; row.style.opacity = '0'; setTimeout(del, 140); }
-    else { row.style.transition = 'transform .16s, opacity .16s'; row.style.transform = ''; row.style.opacity = '1'; }
+    row.style.transition = 'transform .16s';
+    if (gone) { row.style.transform = 'translateX(' + Math.sign(dx) * row.offsetWidth + 'px)'; dx = Math.sign(dx) * row.offsetWidth; sync(); setTimeout(() => { rmBg(); del(); }, 160); }
+    else { row.style.transform = ''; dx = 0; setTimeout(rmBg, 170); }
   };
   row.addEventListener('pointerup', end); row.addEventListener('pointercancel', end);
   row.addEventListener('click', e => { if (row._swiped) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
@@ -1722,7 +1801,7 @@ M.rebuildOutlineItems = function () {
     row.append(h('div', { class: 'm2-outline-t' }, item.title, h('span', { class: 'm2-outline-p' }, '  (p' + (item.page + 1) + ')')));
     row.addEventListener('click', () => this._goTo(item.page, item.x, item.y));
     this.swipeToDelete(row, () => { const a = this.store.outlines, i = a.indexOf(item); if (i >= 0) a.splice(i, 1); this.store.save(); this.rebuildOutlinePanel(); toast('개요를 삭제했습니다'); });
-    row.append(iconButton('ic_more_vert', '개요 관리', NAVY, () => this.showOutlineItem(item)));
+    { const mb = iconButton('ic_more_vert', '개요 관리', NAVY, ev => { ev.stopPropagation(); this.showOutlineItem(item, mb); }); row.append(mb); }
     this.outlineList.append(row);
   }
 };
@@ -1769,10 +1848,10 @@ M.rebuildThumbnails = async function () {
     const preview = h('div', { class: 'm2-thumb-img', style: { width: pw + 'px', height: ph + 'px' } });
     const number = h('div', { class: 'm2-thumb-num' }, String(page + 1));
     const more = h('div', { class: 'm2-thumb-more', role: 'button', 'aria-label': '페이지 ' + (page + 1) + ' 메뉴' }, '⋮');
-    more.addEventListener('click', e => { e.stopPropagation(); this.showPageMenu(page); });
+    more.addEventListener('click', e => { e.stopPropagation(); this.showPageMenu(page, more); });
     item.append(preview, h('div', { class: 'm2-thumb-row' }, number, more));
     item.addEventListener('click', () => this.showPage(page));
-    item.addEventListener('contextmenu', e => { e.preventDefault(); this.showPageMenu(page); });
+    item.addEventListener('contextmenu', e => { e.preventDefault(); this.showPageMenu(page, item); });
     this.thumbnailList.append(item);
   }
   if (this.updateThumbnailSelection) this.updateThumbnailSelection();

@@ -166,20 +166,20 @@ check('floating 페이지 추가 button at the bottom right', zoomBox.fabRight &
 await shot('10-zoom-pill');
 await page.click('[data-tag="zoom_in"]'); await page.waitForTimeout(200);
 let zs = await page.evaluate(() => ({ z: app.pageView.scale, label: app.zoomLabel.textContent, g: app.getZoomOf(app.pageView) }));
-check('zoom + -> 125%', Math.abs(zs.z - 1.25) < .01 && zs.label === '125%', JSON.stringify(zs));
+check('zoom + -> 105% (5% steps, Android v1.32.0)', Math.abs(zs.z - 1.05) < .001 && zs.label === '105%', JSON.stringify(zs));
 await page.click('[data-tag="zoom_in"]'); await page.click('[data-tag="zoom_in"]'); await page.waitForTimeout(200);
 await shot('11-zoomed');
 zs = await page.evaluate(() => ({ z: app.pageView.scale, label: app.zoomLabel.textContent }));
-check('zoom + x3 -> 195%', zs.z > 1.9 && zs.label === Math.round(zs.z * 100) + '%', JSON.stringify(zs));
+check('zoom + x3 -> 115%', Math.abs(zs.z - 1.15) < .001 && zs.label === '115%', JSON.stringify(zs));
 await page.click('[data-tag="zoom_out"]'); await page.waitForTimeout(150);
-check('zoom - lowers', await page.evaluate(() => app.pageView.scale < 1.7 && app.pageView.scale > 1.4));
+check('zoom - lowers', await page.evaluate(() => Math.abs(app.pageView.scale - 1.1) < .001));
 await page.click('[data-tag="zoom_reset"]'); await page.waitForTimeout(150);
 check('click % -> 100%', await page.evaluate(() => app.pageView.scale === 1 && app.zoomLabel.textContent === '100%'));
-for (let i = 0; i < 6; i++) await page.click('[data-tag="zoom_out"]'); await page.waitForTimeout(200); await shot('11b-zoom-out-40');
+await page.evaluate(() => app.zoomTo(.5)); for (let i = 0; i < 2; i++) await page.click('[data-tag="zoom_out"]'); await page.waitForTimeout(200); await shot('11b-zoom-out-40');
 zs = await page.evaluate(() => { const v = app.pageView, r = v.pageRect(); return { z: v.scale, label: app.zoomLabel.textContent, cx: r.left + (v.crop.centerX()) * r.width() - v.width / 2, cy: r.top + v.crop.centerY() * r.height() - v.height / 2 }; });   // the cropped printed area is what gets centred
-check('zoom - x6 stops at 40%, label 40%, printed area centred on the grey backdrop (v3.3.0)', Math.abs(zs.z - 0.4) < 1e-6 && zs.label === '40%' && Math.abs(zs.cx) < 1 && Math.abs(zs.cy) < 1, JSON.stringify(zs));
+check('zoom - stops at 40%, label 40%, printed area centred on the grey backdrop (v3.3.0)', Math.abs(zs.z - 0.4) < 1e-6 && zs.label === '40%' && Math.abs(zs.cx) < 1 && Math.abs(zs.cy) < 1, JSON.stringify(zs));
 await page.click('[data-tag="zoom_in"]'); await page.waitForTimeout(150);
-check('zoom + from 40% -> 50%', await page.evaluate(() => app.zoomLabel.textContent === '50%'), await page.evaluate(() => app.zoomLabel.textContent));
+check('zoom + from 40% -> 45%', await page.evaluate(() => app.zoomLabel.textContent === '45%'), await page.evaluate(() => app.zoomLabel.textContent));
 await page.click('[data-tag="zoom_reset"]'); await page.waitForTimeout(150);
 await page.evaluate(() => app.pageView.setZoom ? app.pageView.setZoom(2.5) : (app.pageView.scale = 2.5, app.pageView.invalidate())); await page.waitForTimeout(250);
 check('label follows view zoom (pinch/wheel path -> onZoomChanged)', await page.evaluate(() => app.zoomLabel.textContent === '250%'), await page.evaluate(() => app.zoomLabel.textContent));

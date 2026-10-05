@@ -212,7 +212,8 @@ export class StudyEntry {
 }
 
 const KINDS = ['text', 'image', 'link', 'audio', 'sticker', 'video', 'hyperlink', 'shape', 'table', 'youtube'];
-const ASSET_RE = /^[a-f0-9-]{36}\.(png|m4a)$/;
+const ASSET_RE = /^([a-f0-9-]{36}\.(png|m4a)|tape-\d\d\.png)$/;
+const BUILTIN_RE = /^tape-\d\d\.png$/;   // masking tapes shipped in web/assets/stickers (Android v1.32.0)
 const MP4_RE = /^[a-f0-9-]{36}\.mp4$/;
 const YT_RE = /^[A-Za-z0-9_-]{11}$/;
 // Java \S = anything but [ \t\n\x0B\f\r]
@@ -222,7 +223,7 @@ export class PageElement {
   static DEFAULT_TEXT_SIZE = Math.fround(.027);
   static DEFAULT_TEXT_COLOR = 0xFF1C1C1E | 0;
   /** sans=고딕, serif=명조, mono=고정폭, hand=손글씨체 */
-  static FONTS = ['sans', 'serif', 'mono', 'hand'];
+  static FONTS = ['sans', 'medium', 'light', 'black', 'condensed', 'serif', 'mono', 'typewriter', 'hand', 'casual'];
   /** Markers of list lines are plain text (Android v1.29.0): '• ', '1. ', '☐ ' / '☑ '. */
   static BULLET = '• '; static CHECK = '☐ '; static CHECKED = '☑ ';
   constructor() {
@@ -237,12 +238,14 @@ export class PageElement {
     this.align = 0; this.underline = false; this.strike = false;
     /** Pictures: stretched to fill the box (width and height independent) instead of keeping the original ratio. */
     this.stretch = false;
+    /** Opacity 0.05..1 of pictures, stickers, shapes and tables (Android v1.32.0 key `alpha`). */
+    this.alpha = 1;
   }
   toJson() {
     return { rot: f(this.rot), page: i32(this.page), kind: this.kind, text: this.text, asset: this.asset,
       left: f(this.left), top: f(this.top), right: f(this.right), bottom: f(this.bottom),
       textSize: f(this.textSize), color: i32(this.color), font: this.font, bold: !!this.bold, italic: !!this.italic,
-      align: i32(this.align), underline: !!this.underline, strike: !!this.strike, stretch: !!this.stretch };
+      align: i32(this.align), underline: !!this.underline, strike: !!this.strike, stretch: !!this.stretch, alpha: f(this.alpha) };
   }
   /** Same checks as Java (throws JSONException '잘못된 노트 요소'). Also reads the Windows v3.0 keys (align as 'left'|'center'|'right', list, checked[]). */
   static fromJson(o) {
@@ -261,6 +264,7 @@ export class PageElement {
     e.underline = optBoolean(o, 'underline', false);
     e.strike = optBoolean(o, 'strike', false);
     e.stretch = optBoolean(o, 'stretch', false);
+    e.alpha = optFloat(o, 'alpha', 1); if (!Number.isFinite(e.alpha) || e.alpha > 1) e.alpha = 1; if (e.alpha < .05) e.alpha = .05;
     if (e.kind === 'text') PageElement.migrateLegacyList(e, o);
     if (!PageElement.valid(e)) throw new JSONException('잘못된 노트 요소');
     if (!Number.isFinite(e.textSize) || e.textSize < f(.004) || e.textSize > f(.3)) e.textSize = PageElement.DEFAULT_TEXT_SIZE;
@@ -554,7 +558,7 @@ export class AnnotationStore {
     if (!AnnotationStore.validAssetName(name)) throw new Error('invalid asset name: ' + name);
     return (await AnnotationStore.assetsDir()) + '\\' + name;
   }
-  static async hasAsset(name) { try { return await host.exists(await AnnotationStore.assetPath(name)); } catch (e) { return false; } }
+  static async hasAsset(name) { if (BUILTIN_RE.test(name)) return true; try { return await host.exists(await AnnotationStore.assetPath(name)); } catch (e) { return false; } }
   /** bytes: Uint8Array | ArrayBuffer | Blob */
   static async saveAsset(name, bytes) {
     const path = await AnnotationStore.assetPath(name);
@@ -568,12 +572,14 @@ export class AnnotationStore {
   }
   static async readAsset(name) { return host.readBytes(await AnnotationStore.assetPath(name)); }
   static async deleteAsset(name) {
+    if (BUILTIN_RE.test(name)) return;
     try { const p = await AnnotationStore.assetPath(name); if (await host.exists(p)) await host.delete(p); } catch (e) { /* */ }
     urlCache.delete(name);
     try { (await import('./painter.js')).AnnotationPainter.forgetImage(name); } catch (e) { /* */ }
   }
   /** URL usable in <img>/<video>/<audio>/fetch (host fs.url; supports Range). */
   static async assetUrl(name) {
+    if (BUILTIN_RE.test(name)) return new URL('../assets/stickers/' + name, import.meta.url).href;
     if (urlCache.has(name)) return urlCache.get(name);
     const url = await host.call('fs.url', { path: await AnnotationStore.assetPath(name) });
     urlCache.set(name, url);

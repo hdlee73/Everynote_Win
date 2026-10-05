@@ -58,7 +58,7 @@ await page.click('[data-tag="text_style_toggle"]'); await page.waitForTimeout(15
 check('Aa opens font + colour rows (+ rainbow chip)', await ev(() => getComputedStyle(app.inlineBar.querySelector('.m3-inline-panel')).display !== 'none') && (await page.locator('[data-tag="text_colors"] [data-tag="color_more"]').count()) === 1);
 await shot('04c-inline-bar-open');
 // v3 toolbar: icon-only formatting buttons (tooltips + aria-labels)
-const tb = await ev(() => { const b = [...app.inlineBar.querySelectorAll('.m3-tbtn,.m3-ib')].filter(x => x.dataset.tag !== 'text_style_toggle'); return { n: b.length, textless: b.every(x => x.textContent.trim() === '' && x.querySelector('svg') && x.title && x.getAttribute('aria-label')) }; });
+const tb = await ev(() => { const b = [...app.inlineBar.querySelectorAll('.m3-tbtn,.m3-ib')].filter(x => x.dataset.tag !== 'text_style_toggle'); return { n: b.length, textless: b.every(x => (x.textContent.trim() === '' || x.dataset.tag === 'text_bold') && (x.querySelector('svg') || x.dataset.tag === 'text_bold') && x.title && x.getAttribute('aria-label')) }; });
 check('typing toolbar: align/list/underline/B/I are icon buttons with tooltips', tb.n >= 13 && tb.textless, JSON.stringify(tb));
 check('bold/size from toolbar applied to element', await ev(() => app.inlineElement.bold === true && app.inlineBar.querySelector('[data-tag="text_bold"]').classList.contains('on')));
 await page.click('[data-tag="text_underline"]'); await page.click('[data-tag="text_align_center"]'); await page.click('[data-tag="text_strike"]');
@@ -88,7 +88,7 @@ await page.keyboard.press('Control+A'); await page.click('[data-tag="text_list_b
 check('Enter in a bullet list starts "• "', await ev(() => app.inlineEdit.value.endsWith('\n• x')), await ev(() => JSON.stringify(app.inlineEdit.value)));
 await page.keyboard.press('Control+A'); await page.click('[data-tag="text_list_bullet"]');   // all bullets -> removed
 await page.keyboard.press('Control+A'); await page.click('[data-tag="text_list_bullet"]'); await page.click('[data-tag="text_align_left"]'); await page.click('[data-tag="text_underline"]'); await page.click('[data-tag="text_strike"]');
-await page.click('[data-tag="text_fonts"] .m2-seg-chip:nth-child(2)'); await page.click('[data-tag="text_colors"] .m2-dot:nth-child(3)');
+await page.click('[data-tag="text_fonts"]'); await page.click('.m3-fontrow[data-font="serif"]'); await page.click('[data-tag="text_colors"] .m2-dot:nth-child(3)');
 await shot('05-inline-styled');
 check('size 18pt', (await ev(() => app.inlineSize.textContent)) === '18pt', await ev(() => app.inlineSize.textContent));
 // box near the top of the viewport: bar goes below; handles stay on screen

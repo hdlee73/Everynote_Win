@@ -1,14 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="256" height="256">
+  <title>Everynote</title>
   <defs>
-    <linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5AC8FA"/><stop offset="1" stop-color="#0A6CFF"/></linearGradient>
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="108" y2="108">
+      <stop offset="0" stop-color="#5B7CFA"/>
+      <stop offset="1" stop-color="#2B3A9B"/>
+    </linearGradient>
   </defs>
-  <rect x="1" y="1" width="62" height="62" rx="15" fill="url(#b)"/>
-  <path d="M19,14h18l10,10v26a4,4 0 0,1 -4,4H19a4,4 0 0,1 -4,-4V18a4,4 0 0,1 4,-4z" fill="#fff"/>
-  <path d="M37,14v7a3,3 0 0,0 3,3h7z" fill="#B9D6FF"/>
-  <path d="M21,32h15M21,38h11" stroke="#9CC4FF" stroke-width="3" stroke-linecap="round"/>
-  <g transform="translate(32,49) rotate(-45)">
-    <path d="M0,0L6,-3.4V3.4z" fill="#FFE2B0"/><path d="M0,0L2.2,-1.1V1.1z" fill="#1C1C1E"/>
-    <rect x="6" y="-3.4" width="15" height="6.8" fill="#FFCC00"/><rect x="21" y="-3.4" width="2.6" height="6.8" fill="#B8BCC6"/>
-    <rect x="23.6" y="-3.4" width="4.4" height="6.8" rx="2" fill="#FF3B30"/>
+  <rect width="108" height="108" rx="24" fill="url(#bg)"/>
+  <g transform="translate(54 54) scale(1.28) translate(-54 -54)">
+    <path fill="#1B2670" fill-opacity="0.35" d="M34,29h24l12,12v41a5,5 0 0,1 -5,5H34a5,5 0 0,1 -5,-5V34a5,5 0 0,1 5,-5z"/>
+    <path fill="#FFFFFF" d="M34,26h24l12,12v41a5,5 0 0,1 -5,5H34a5,5 0 0,1 -5,-5V31a5,5 0 0,1 5,-5z"/>
+    <path fill="#D9E1FB" d="M58,26v8a4,4 0 0,0 4,4h8z"/>
+    <path fill="#C3CDEE" d="M37.5,45h24a2,2 0 0,1 0,4h-24a2,2 0 0,1 0,-4zM37.5,54h18a2,2 0 0,1 0,4h-18a2,2 0 0,1 0,-4zM37.5,63h12a2,2 0 0,1 0,4h-12a2,2 0 0,1 0,-4z"/>
+    <g transform="rotate(40 68 60)">
+      <path fill="#FF8FA3" d="M63.5,36a4.5,4.5 0 0,1 9,0v4h-9z"/>
+      <path fill="#C9CED8" d="M63.5,40h9v4h-9z"/>
+      <path fill="#FFC53D" d="M63.5,44h9v22h-9z"/>
+      <path fill="#F29D0B" d="M68,44h4.5v22H68z"/>
+      <path fill="#F7DDB5" d="M63.5,66h9l-4.5,10z"/>
+      <path fill="#2B2F45" d="M66.2,71.5h3.6L68,76z"/>
+    </g>
   </g>
 </svg>

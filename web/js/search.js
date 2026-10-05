@@ -62,8 +62,11 @@ export class Line {
     for (let i = 0; i < n; i++) {
       const wordEnd = i + 1 < n ? this.wordStart[i + 1] - 1 : this.text.length;
       if (wordEnd > start && this.wordStart[i] < end) {
-        l = Math.min(l, this.wordLeft[i]);
-        r = Math.max(r, this.wordRight[i]);
+        // a "word" from the PDF may be a whole text run: narrow the box to the matched characters (Android v1.32.0)
+        const len = Math.max(1, wordEnd - this.wordStart[i]), span = this.wordRight[i] - this.wordLeft[i];
+        const from = Math.max(start, this.wordStart[i]), to = Math.min(end, wordEnd);
+        l = Math.min(l, this.wordLeft[i] + span * (from - this.wordStart[i]) / len);
+        r = Math.max(r, this.wordLeft[i] + span * (to - this.wordStart[i]) / len);
       }
     }
     if (r < 0) {

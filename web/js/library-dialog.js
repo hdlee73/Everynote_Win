@@ -127,24 +127,67 @@ const stripPdf = n => n.replace(/\.pdf$/i, '');
 
 // ================================================================= PaperChoiceView =================================================================
 const TEMPLATE_LABEL = 'PDF·이미지 서식 고르기';
+let templateDir = null;   // <data>\\templates, known after the first host.info()
+const templateDirReady = () => templateDir ? Promise.resolve(templateDir) : host.info().then(i => (templateDir = i.data.replace(/[\\/]+$/, '') + '\\templates'));
+const BUILTIN_BASE = new URL('../assets/templates/', import.meta.url).href;
+const pdfPreviews = new Map();
 export class PaperChoiceView {
   constructor(activity) {
-    this.kind = 0; this.color = -1;
-    const sel = h('select', { 'aria-label': '종이 형식' }, NotebookFiles.PAPER_NAMES.map((n, i) => h('option', { value: i }, n)));
-    sel.addEventListener('change', () => { this.kind = +sel.value; this.templateButton.style.display = this.kind === NotebookFiles.CUSTOM ? '' : 'none'; this.draw(); });
+    this.kind = 0; this.color = -1; this.selected = -1; this.builtin = null;
+    // Android v1.32.0: the paper list is a menu card (bundled form templates first), not a native select
+    const picker = h('div', { class: 'lib-picker', role: 'button', 'aria-label': '종이 형식', dataset: { tag: 'paper_picker' } });
+    picker.addEventListener('click', () => {
+      const R = AnchoredMenu.Row;
+      AnchoredMenu.show(picker, false, NotebookFiles.PAPER_ORDER.map((k, i) => new R(NotebookFiles.PAPER_NAMES[k], k >= 10 ? 'ic_page' : k === NotebookFiles.CUSTOM ? 'ic_import' : 'ic_note_add', () => this.selectPosition(i))
+        .tint(k >= 10 ? '#007AFF' : k === NotebookFiles.CUSTOM ? '#FF9500' : '#34C759').selected(i === this.selected)), null);
+    });
+    this.picker = picker;
     this.template = null; this._request = null;
     this.templateButton = h('div', { class: 'lib-tplbtn', role: 'button', style: { display: 'none' }, dataset: { tag: 'paper_template' } }, TEMPLATE_LABEL);
     this.templateButton.addEventListener('click', () => this._pickTemplate());
     this.canvas = h('canvas', { 'aria-label': '선택한 종이 미리보기', role: 'img' });
     this.chips = h('div', { class: 'lib-chips' });
-    this.el = h('div', { class: 'lib-paper' }, sel, this.templateButton, this.canvas, this.chips);
-    this.select = sel;
+    this.el = h('div', { class: 'lib-paper' }, picker, this.templateButton, this.canvas, this.chips);
     this.refreshColors();
+    this.selectPosition(0);
     if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => this.draw()).observe(this.canvas);
     requestAnimationFrame(() => this.draw());
   }
+  /** Chooses a paper by its row in the list (the bundled form templates come first). */
+  selectPosition(position) {
+    this.selected = position; this.kind = NotebookFiles.PAPER_ORDER[position];
+    this.picker.textContent = NotebookFiles.PAPER_NAMES[this.kind] + '  ▾';
+    this.templateButton.style.display = this.kind === NotebookFiles.CUSTOM ? '' : 'none';
+    this.builtin = null;
+    if (this.kind >= 10) this._prepareBuiltin(this.kind);
+    this.draw();
+  }
+  /** Chooses a paper by its kind. */
+  selectKind(kind) { const i = NotebookFiles.PAPER_ORDER.indexOf(kind); if (i >= 0) this.selectPosition(i); }
+  /** Copies the bundled form PDF into <data>\\templates once so it behaves like a user-chosen template. */
+  async _prepareBuiltin(kind) {
+    try {
+      const name = NotebookFiles.BUILTIN_TEMPLATES[kind - 10], dir = await templateDirReady(), file = dir + '\\builtin-' + name;
+      if (!(await host.exists(file))) { await host.mkdir(dir); await host.writeBytes(file, new Uint8Array(await (await fetch(BUILTIN_BASE + name)).arrayBuffer())); }
+      if (this.kind === kind) this.builtin = file;
+      this.draw();
+    } catch (e) { if (this.kind === kind) this.builtin = null; }
+  }
+  async _previewOf(key, loader) {
+    if (pdfPreviews.has(key)) return pdfPreviews.get(key);
+    let canvas = null;
+    try {
+      const { PdfDoc } = await import('./pdfdoc.js');
+      const doc = await PdfDoc.open(await loader()); const size = await doc.pageSize(0);
+      canvas = await doc.renderPage(0, 300 / size.w);
+    } catch (e) { canvas = null; }
+    pdfPreviews.set(key, canvas); return canvas;
+  }
   /** NotebookFiles.Paper */
-  paper() { return new Paper(this.kind, this.color, this.template); }
+  paper() {
+    if (this.kind >= 10) { if (!this.builtin) throw new Error('서식 파일을 준비하는 중입니다. 잠시 후 다시 시도하세요'); return new Paper(NotebookFiles.CUSTOM, -1, this.builtin); }
+    return new Paper(this.kind, this.color, this.template);
+  }
   /**
    * Called when the user taps "PDF·이미지 서식 고르기"; the host opens a file picker and answers with setTemplate(path).
    * Without a request handler the view opens the file dialog itself, copies the pick into the app (NotebookFiles.importTemplate) and calls setTemplate.
@@ -182,6 +225,12 @@ export class PaperChoiceView {
     g.strokeStyle = '#BBC4CE'; g.lineWidth = 1 / dpr; g.beginPath();
     g.rect(left, top, w, hh);
     g.stroke();
+    const formFile = this.kind >= 10 ? NotebookFiles.BUILTIN_TEMPLATES[this.kind - 10] : (this.kind === NotebookFiles.CUSTOM && this.template && /\.pdf$/i.test(this.template) ? this.template : null);
+    if (formFile) {
+      const key = this.kind >= 10 ? 'builtin:' + formFile : 'file:' + formFile, drawn = this.kind;
+      if (pdfPreviews.has(key) && pdfPreviews.get(key)) { g.drawImage(pdfPreviews.get(key), left, top, w, hh); g.strokeStyle = '#BBC4CE'; g.strokeRect(left, top, w, hh); return; }
+      if (!pdfPreviews.has(key)) this._previewOf(key, async () => this.kind >= 10 ? new Uint8Array(await (await fetch(BUILTIN_BASE + formFile)).arrayBuffer()) : host.readBytes(formFile)).then(() => { if (this.kind === drawn) this.draw(); });
+    }
     if (this.kind === NotebookFiles.CUSTOM) {
       g.fillStyle = MUTED; g.font = '11px sans-serif'; g.textAlign = 'center';
       g.fillText(this.template ? baseName(this.template) : '서식을 고르세요', (left + right) / 2, (top + bottom) / 2); g.textAlign = 'left';

@@ -596,8 +596,9 @@ const methods = {
     for (const v of this.zoomViews()) this.setZoomOf(v, z);
     this.updateZoomUi();
   },
-  zoomIn() { this.zoomTo(this.getZoomOf(this.pageView) * ZOOM_STEP); },
-  zoomOut() { this.zoomTo(this.getZoomOf(this.pageView) / ZOOM_STEP); },
+  /** Android v1.32.0: +/- move the zoom in 5% steps. */
+  zoomIn() { this.zoomTo(Math.round((this.getZoomOf(this.pageView) + .05) * 20) / 20); },
+  zoomOut() { this.zoomTo(Math.round((this.getZoomOf(this.pageView) - .05) * 20) / 20); },
   resetZoomAll() {
     if (this.renderer == null) return;
     for (const v of this.zoomViews()) { if (typeof v.resetZoom === 'function') v.resetZoom(); else this.setZoomOf(v, 1); }
@@ -698,20 +699,36 @@ const methods = {
   showViewMenu(anchor) {
     if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
     AnchoredMenu.show(anchor, true, [
-      new Row('페이지 미리보기', 'ic_thumbnails', () => this.toggleSidebar()).tint('#007AFF').selected(this.sidebarVisible),
+      new Row('페이지 미리보기', 'ic_sidebar', () => this.toggleSidebar()).tint('#007AFF').selected(this.sidebarVisible),
       new Row('두 쪽 보기', 'ic_book', () => this.toggleTwoPage()).tint('#5856D6').selected(this.twoPage),
       new Row('페이지로 이동', 'ic_page', () => this.goToPage()).tint('#30B0C7'),
       new Row('전체 화면', 'ic_fullscreen', () => this.toggleFullscreen()).tint('#AF52DE'),
-      new Row('여백 자르기', 'ic_scan', () => {
+      new Row('여백 자르기', 'ic_crop', () => {
         this.recentPrefs.putBoolean('crop_margins', !this.cropMargins()); this.applyCrop();
         toast(this.cropMargins() ? '문서 여백을 잘라 화면에 꽉 채웁니다' : '원래 여백을 그대로 보여줍니다');
       }).tint('#34C759').selected(this.cropMargins()),
       new Row('검은 문서 배경', 'ic_circle', () => this.toggleDarkPage()).tint('#3A3A3C').selected(this.darkPage()),
-      new Row('페이지 넘김 설정', 'ic_sliders', () => this.choosePageSwipeDirection()).tint('#8E8E93'),
-      new Row('넘김 효과', 'ic_sliders', () => this.choosePageAnimation()).tint('#8E8E93'),
+      new Row('페이지 넘김 설정', 'ic_swipe', null).tint('#8E8E93').children(this.choiceRows(this.SWIPE_CHOICES, this.swipeMode(), w => this.setSwipeMode(w))),
+      new Row('넘김 효과', 'ic_magic', null).tint('#8E8E93').children(this.choiceRows(this.ANIM_CHOICES, this.pageAnimStyle(), w => this.setPageAnim(w))),
       Row.divider(),
-      new Row('페이지 추가', 'ic_note_add', () => this.choosePageToInsert(this.currentPage)).tint('#34C759'),
+      new Row('페이지 추가', 'ic_page_add', () => this.choosePageToInsert(this.currentPage)).tint('#34C759'),
       new Row('페이지 삭제', 'ic_delete', () => this.confirmDeletePage(this.currentPage)).danger()], null);
+  },
+  SWIPE_CHOICES: ['화살표만 · 드래그 넘김 끄기', '수평 · 좌우로 넘기기', '수직 · 위아래로 넘기기'],
+  ANIM_CHOICES: ['책장 넘김 (종이처럼 접히며 넘어감)', '슬라이드 (밀리며 나타남)', '효과 없음 (바로 전환)'],
+  choiceRows(labels, checked, pick) { return labels.map((l, i) => new Row(l, null, () => pick(i)).selected(i === checked)); },
+  swipeMode() { return !this.swipeEnabled ? 0 : this.verticalPageSwipe ? 2 : 1; },
+  setSwipeMode(which) {
+    this.swipeEnabled = which !== 0; this.verticalPageSwipe = which === 2;
+    for (const v of [this.pageView, this.firstPageView, this.secondPageView]) if (v) { v.setVerticalPageSwipe && v.setVerticalPageSwipe(this.verticalPageSwipe); v.setPageSwipeEnabled && v.setPageSwipeEnabled(this.swipeEnabled); }
+    this.recentPrefs.putBoolean('vertical_page_swipe', this.verticalPageSwipe);
+    this.recentPrefs.putBoolean('page_swipe_enabled_v2', this.swipeEnabled);
+    if (this.syncOtherTools) this.syncOtherTools();
+    toast(this.swipeEnabled ? '스와이프로도 페이지를 넘깁니다' : '본문의 반투명 화살표로 페이지를 넘기세요');
+  },
+  setPageAnim(which) { this.recentPrefs.putInt('page_anim_style', which); toast('넘김 효과: ' + this.ANIM_CHOICES[which].split(' (')[0]); },
+  addDocumentRows() {
+    return [new Row('파일 가져오기', 'ic_import', () => this.choosePdf()).tint('#007AFF'), new Row('저장된 문서 열기', 'ic_folder_open', () => this.showLibrary()).tint('#F5A623'), new Row('새 노트 만들기', 'ic_compose', () => this.newNotebook()).tint('#34C759')];
   },
   rowsOf(category) {
     return this.categoryTiles(category).map(t => {
@@ -724,17 +741,17 @@ const methods = {
   showMainMenu(anchor, above) {
     const doc = this.renderer != null, awake = this.recentPrefs.getBoolean('keep_awake', false);
     const rows = [];
-    rows.push(new Row('문서 추가', 'ic_note_add', () => this.showAddDocumentMenu()).tint('#007AFF'));
+    rows.push(new Row('문서 추가', 'ic_note_add', null).tint('#007AFF').children(this.addDocumentRows()));
     rows.push(new Row('새 노트', 'ic_compose', () => this.newNotebook()).tint('#34C759'));
-    if (this.activeSession != null) rows.push(new Row('이름 변경', 'ic_text', () => this.renameDocument(this.activeSession)).tint('#8E8E93'));
+    if (this.activeSession != null) rows.push(new Row('이름 변경', 'ic_rename', () => this.renameDocument(this.activeSession)).tint('#8E8E93'));
     if (doc) {
       rows.push(Row.divider());
       rows.push(new Row('메모·하이라이트', 'ic_highlight', () => this.showMarkList()).tint('#FF9500'));
       rows.push(new Row('책갈피 목록', 'ic_star', () => this.showBookmarks()).tint('#F5A623'));
       rows.push(new Row('번역 포스트잇', 'ic_translate', () => this.showTranslations()).tint('#AF52DE'));
-      rows.push(new Row('삽입', 'ic_copy', () => AnchoredMenu.show(anchor, above, this.rowsOf(2), null)).tint('#5856D6').submenu());
-      rows.push(new Row('학습·주석', 'ic_scan', () => AnchoredMenu.show(anchor, above, this.rowsOf(3), null)).tint('#30B0C7').submenu());
-      rows.push(new Row('내보내기·백업', 'ic_share', () => AnchoredMenu.show(anchor, above, this.rowsOf(4), null)).tint('#007AFF').submenu());
+      rows.push(new Row('삽입', 'ic_insert', null).children(this.rowsOf(2)).tint('#5856D6'));
+      rows.push(new Row('학습·주석', 'ic_study', null).children(this.rowsOf(3)).tint('#30B0C7'));
+      rows.push(new Row('내보내기·백업', 'ic_share', null).children(this.rowsOf(4)).tint('#007AFF'));
     }
     rows.push(Row.divider());
     rows.push(new Row('화면 켜 둠', 'ic_clock', () => {
@@ -837,15 +854,8 @@ const methods = {
     }
     this.officeToken = null; status.textContent = '문서함에 저장하는 중';
     dialog.getButton(BUTTON_NEGATIVE).classList.add('m-dim-btn');
-    // Android v1.30.0: very wide landscape pages (A3/B4 and up) usually hold two printed pages side by side
     let split = false;
-    if (await office.looksLikeSpread(pdf)) {
-      split = await new Promise(res => new AlertDialog.Builder().setTitle('두 쪽 보기 문서')
-        .setMessage('가로로 넓은 면에 두 쪽이 나란히 들어 있는 문서로 보입니다. 한 쪽씩 나누어 열까요?').setCancelable(false)
-        .setPositiveButton('한 쪽씩 나누기', () => res(true)).setNegativeButton('그대로 열기', () => res(false)).show());
-    }
     status.textContent = '문서함에 저장하는 중';
-    if (split) { try { pdf = await office.splitSpreads(pdf); } catch (e) { split = false; } }   // fall back to the unsplit PDF
     let tmp = null;
     try {
       tmp = await this.tempFile('.pdf'); await host.writeBytes(tmp, pdf);
@@ -1488,7 +1498,7 @@ const methods = {
     this.recentPrefs.putBoolean('dark_page', !this.darkPage()); this.applyDarkPage();
     toast(this.darkPage() ? '문서 배경을 검게 표시합니다. 어두운 글씨 필기는 밝게 보입니다' : '문서를 원래 색으로 표시합니다');
   },
-  cropMargins() { return this.recentPrefs.getBoolean('crop_margins', true); },
+  cropMargins() { return this.recentPrefs.getBoolean('crop_margins', false); },
   /** Trims blank page margins so the printed area fills the screen (not for notebooks, where the margins are writing space). */
   applyCrop() {
     let box = null;
