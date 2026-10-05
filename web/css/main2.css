@@ -222,3 +222,10 @@ body.m2-resizing[data-m2-axis="y"]{cursor:row-resize!important}
 .sync-mode{display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-size:14px}
 .sync-mode small{display:block;font-size:12px;color:#8E8E93;margin-top:2px}
 .sync-mode input{margin-top:3px}
+.sync-dir{display:flex;gap:16px}
+.sync-dirbtn{display:flex;gap:6px;align-items:center;cursor:pointer;font-size:14px}
+.sync-list{max-height:46vh;overflow:auto;border:1px solid rgba(0,0,0,.08);border-radius:10px}
+.sync-row{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;cursor:pointer;font-size:14px;border-bottom:1px solid rgba(0,0,0,.05)}
+.sync-row.off{opacity:.4;cursor:default}
+.sync-row small{display:block;font-size:12px;color:#8E8E93;margin-top:2px}
+.sync-row input{margin-top:3px}

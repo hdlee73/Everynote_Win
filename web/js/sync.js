@@ -1,39 +1,19 @@
-// Same-network device sync (user triggered). The phone runs a tiny HTTP server while its "다른 기기와 동기화" card is open;
-// this side is the client. Documents are matched by the SHA-256 of the PDF bytes. Pure logic: all I/O comes through `env`.
+// Same-network device sync (user triggered, one-way whole-document overwrite). The phone runs a tiny HTTP server while its
+// "다른 기기와 동기화" card is open; this side is the client. The user picks documents (library-relative paths) and a direction:
+//   push = PC -> phone (PDF + notes + referenced images/recordings overwrite the phone's), pull = phone -> PC.
+// Pure logic: all I/O comes through `env`:
 //   env.http({url, method, headers, text, readPath, savePath}) -> {status, text}
+//   env.pcPath(rel) -> absolute path of the library document on this device
+//   env.exportNote(rel) -> sidecar JSON text ; env.importNote(rel, text) ; env.isOpen(rel) -> bool
 //   env.assetPath(name) -> path ; env.hasAsset(name) -> bool
-const LISTS = ['elements', 'studyEntries', 'marks', 'outlines', 'strokes', 'translations'];
 export const ASSET_NAME = /^[a-f0-9-]{36}\.(png|m4a|mp4)$/;
 
-export async function sha256Hex(bytes) {
-  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-  let s = ''; for (const b of d) s += b.toString(16).padStart(2, '0'); return s;
-}
+export class SyncError extends Error {}
 
-/** Key independent of key order and of float formatting noise (numbers rounded to 1e-4). */
-function canon(v) {
-  if (typeof v === 'number') return Number.isInteger(v) ? v : Math.round(v * 1e4) / 1e4;
-  if (Array.isArray(v)) return v.map(canon);
-  if (v && typeof v === 'object') { const o = {}; for (const k of Object.keys(v).sort()) o[k] = canon(v[k]); return o; }
-  return v;
-}
-const key = v => JSON.stringify(canon(v));
-
-/** Union of two sidecar/export JSON texts (items equal after canonicalisation appear once; marks are matched by id).
- *  Deletions are not propagated. Returns JSON text (format header of `local`). */
-export function mergeSidecars(localText, remoteText) {
-  const a = JSON.parse(localText), b = JSON.parse(remoteText);
-  const out = { ...a };
-  for (const name of LISTS) {
-    const seen = new Set(), ids = new Set(), list = [];
-    for (const item of [...(a[name] || []), ...(b[name] || [])]) {
-      if (name === 'marks' && item && item.id) { if (ids.has(item.id)) continue; ids.add(item.id); }
-      const k = key(item); if (seen.has(k)) continue; seen.add(k); list.push(item);
-    }
-    out[name] = list;
-  }
-  out.bookmarks = [...new Set([...(a.bookmarks || []), ...(b.bookmarks || [])])].sort((x, y) => x - y);
-  return JSON.stringify(out, null, 2);
+export function parseAddress(text) {
+  const m = /^\s*(?:http:\/\/)?(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{2,5}))?\s*$/.exec(text || '');
+  if (!m || m[1].split('.').some(n => +n > 255)) return null;
+  return { host: m[1], port: m[2] ? +m[2] : null };
 }
 
 /** Asset file names referenced by sidecar JSON text (images, video thumbs, recordings, mp4 files). */
@@ -46,12 +26,21 @@ export function referencedAssets(text) {
   return s;
 }
 
-export class SyncError extends Error {}
+/** Library-relative path ('folder/name.pdf', slash separated) of an absolute Windows library path, or null when outside the library. */
+export function relPath(root, file) {
+  const r = root.replace(/[\\/]+$/, '').replace(/\//g, '\\'), f = file.replace(/\//g, '\\');
+  if (f.toLowerCase().indexOf(r.toLowerCase() + '\\') !== 0) return null;
+  return f.slice(r.length + 1).split('\\').join('/');
+}
 
-export function parseAddress(text) {
-  const m = /^\s*(?:http:\/\/)?(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{2,5}))?\s*$/.exec(text || '');
-  if (!m || m[1].split('.').some(n => +n > 255)) return null;
-  return { host: m[1], port: m[2] ? +m[2] : null };
+/** Rows for the picker: one per path that exists on at least one device. pc/phone = {size, mtime} | null. */
+export function buildRows(phoneList, pcList) {
+  const map = new Map();
+  for (const d of phoneList) map.set(d.path, { path: d.path, phone: { size: d.size, mtime: d.mtime }, pc: null });
+  for (const d of pcList) { const r = map.get(d.path) || { path: d.path, phone: null, pc: null }; r.pc = { size: d.size, mtime: d.mtime }; map.set(d.path, r); }
+  const rows = [...map.values()];
+  for (const r of rows) r.newer = r.pc && r.phone && Math.abs(r.pc.mtime - r.phone.mtime) > 120000 ? (r.pc.mtime > r.phone.mtime ? 'pc' : 'phone') : null;
+  return rows.sort((a, b) => a.path.localeCompare(b.path, 'ko'));
 }
 
 export class SyncClient {
@@ -66,15 +55,22 @@ export class SyncClient {
     if (r.status === 429) throw new SyncError('코드를 너무 여러 번 틀렸습니다. 휴대폰에서 창을 다시 여세요');
     return r;
   }
-  async docs() {
-    const r = await this.req('/v1/docs'); if (r.status !== 200) throw new SyncError('문서 목록을 받지 못했습니다 (' + r.status + ')');
+  async library() {
+    const r = await this.req('/v1/library'); if (r.status !== 200) throw new SyncError('문서 목록을 받지 못했습니다 (' + r.status + ')');
     return JSON.parse(r.text);
   }
-  async getDoc(id) { const r = await this.req('/v1/doc/' + id); if (r.status === 404) return null; if (r.status !== 200) throw new SyncError('노트를 받지 못했습니다 (' + r.status + ')'); return r.text; }
-  async putDoc(id, text) {
-    const r = await this.req('/v1/doc/' + id, { method: 'PUT', text });
-    if (r.status === 404) throw new SyncError('상대 기기에서 이 문서가 열려 있지 않습니다');
+  static q(rel) { return '?p=' + encodeURIComponent(rel); }
+  async getNote(rel) { const r = await this.req('/v1/note' + SyncClient.q(rel)); if (r.status !== 200) throw new SyncError('노트를 받지 못했습니다 (' + r.status + ')'); return r.text; }
+  async putNote(rel, text) {
+    const r = await this.req('/v1/note' + SyncClient.q(rel), { method: 'PUT', text });
+    if (r.status === 409) throw new SyncError('휴대폰에서 열려 있는 문서입니다');
     if (r.status !== 200) throw new SyncError('노트를 보내지 못했습니다 (' + r.status + ')');
+  }
+  async getPdf(rel, savePath) { const r = await this.req('/v1/pdf' + SyncClient.q(rel), { savePath }); if (r.status !== 200) throw new SyncError('PDF를 받지 못했습니다 (' + r.status + ')'); }
+  async putPdf(rel, readPath) {
+    const r = await this.req('/v1/pdf' + SyncClient.q(rel), { method: 'PUT', readPath });
+    if (r.status === 409) throw new SyncError('휴대폰에서 열려 있는 문서입니다. 닫고 다시 시도하세요');
+    if (r.status !== 200) throw new SyncError('PDF를 보내지 못했습니다 (' + r.status + ')');
   }
   async remoteHas(name) { return (await this.req('/v1/asset/' + name, { method: 'HEAD' })).status === 200; }
   async download(name) {
@@ -87,35 +83,28 @@ export class SyncClient {
   }
 }
 
-/**
- * mode: 'merge' (union of both), 'push' (this device overwrites the other), 'pull' (the other device overwrites this one).
- * local = {json: text of this device's notes, apply(text): replaces this device's notes}.
- * Returns {mode, sent, received} (counts of files); progress(text) optional.
- */
-export async function syncDocument(client, id, local, mode, progress = () => {}) {
-  const remoteJson = await client.getDoc(id);
-  if (remoteJson == null) throw new SyncError('상대 기기에서 이 문서가 열려 있지 않습니다');
-  const localJson = local.json;
-  const next = mode === 'push' ? localJson : mode === 'pull' ? remoteJson : mergeSidecars(localJson, remoteJson);
-  let sent = 0, received = 0;
-  if (mode !== 'push') {
-    const need = [...referencedAssets(remoteJson)];
-    for (let i = 0; i < need.length; i++) {
-      if (await client.env.hasAsset(need[i])) continue;
-      progress(`받는 중 ${i + 1}/${need.length}`);
-      if (await client.download(need[i])) received++;
+/** One document, whole: dir 'push' (this PC overwrites the phone) or 'pull' (the phone overwrites this PC). Returns {files} transferred. */
+export async function transferDocument(client, rel, dir, progress = () => {}) {
+  const env = client.env; let files = 0;
+  if (dir === 'push') {
+    progress('PDF 보내는 중');
+    await client.putPdf(rel, env.pcPath(rel)); files++;
+    const note = await env.exportNote(rel), names = [...referencedAssets(note)];
+    for (let i = 0; i < names.length; i++) {
+      if (!(await env.hasAsset(names[i])) || await client.remoteHas(names[i])) continue;
+      progress(`그림·녹음 보내는 중 ${i + 1}/${names.length}`); await client.upload(names[i]); files++;
     }
-    await local.apply(next);
-  }
-  if (mode !== 'pull') {
-    const mine = [...referencedAssets(next)];
-    for (let i = 0; i < mine.length; i++) {
-      if (!(await client.env.hasAsset(mine[i])) || await client.remoteHas(mine[i])) continue;
-      progress(`보내는 중 ${i + 1}/${mine.length}`);
-      await client.upload(mine[i]); sent++;
+    progress('노트 보내는 중'); await client.putNote(rel, note);
+  } else {
+    if (await env.isOpen(rel)) throw new SyncError('이 PC에서 열려 있는 문서입니다. 닫고 다시 시도하세요');
+    progress('PDF 받는 중');
+    await client.getPdf(rel, env.pcPath(rel)); files++;
+    const note = await client.getNote(rel), names = [...referencedAssets(note)];
+    for (let i = 0; i < names.length; i++) {
+      if (await env.hasAsset(names[i])) continue;
+      progress(`그림·녹음 받는 중 ${i + 1}/${names.length}`); if (await client.download(names[i])) files++;
     }
-    progress('노트 보내는 중');
-    await client.putDoc(id, next);
+    progress('노트 적용 중'); await env.importNote(rel, note);
   }
-  return { mode, sent, received };
+  return { files };
 }
