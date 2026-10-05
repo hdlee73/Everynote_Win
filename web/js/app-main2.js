@@ -18,6 +18,7 @@ import * as Search from './search.js';
 import { ColorPicker } from './ui/colorpicker.js';
 import { printDocument } from './print.js';
 import { showAboutOffline } from './offline.js';
+import { createBackup, restoreBackup, compareVersions, AUTHOR_LINE } from './backup.js';
 import { SyncClient, SyncError, transferDocument, buildRows, relPath } from './sync.js';
 
 // ------------------------------------------------------------------------------------------------------------------ constants
@@ -1244,8 +1245,8 @@ M.onElementTapped = function (element) {
   if (element.kind === 'hyperlink') { this.showHyperlinkMenu(element); return; }
   const kind = element.kind, R = AnchoredMenu.Row, rows = [];
   if (kind === 'link') rows.push(new R('링크 열기', 'ic_link', () => { if (this.validWebUrl(element.text)) this._openExternal(element.text, '링크를 열 앱이 없습니다'); }).tint('#5856D6'));
-  if (kind === 'video') rows.push(new R('재생', 'ic_video', () => this.showVideoPlayer(element)).tint('#FF3B30'));
-  if (kind === 'youtube') rows.push(new R('유튜브에서 열기', 'ic_youtube', () => this.openYoutube(element.text)).tint('#FF0000'));
+  if (kind === 'video') { rows.push(new R('여기서 재생', 'ic_video', () => this.playInline(element)).tint('#FF3B30')); rows.push(new R('크게 보기', 'ic_fullscreen', () => this.showVideoPlayer(element)).tint('#8E8E93')); }
+  if (kind === 'youtube') { rows.push(new R('여기서 재생', 'ic_youtube', () => this.playInline(element)).tint('#FF0000')); rows.push(new R('유튜브 앱·브라우저에서 열기', 'ic_link', () => this.openYoutube(element.text)).tint('#8E8E93')); }
   if (kind === 'shape') rows.push(new R('색·선 굵기', 'ic_palette', () => this.showShapeDialog(element)).tint('#AF52DE'));
   if (kind === 'table') { rows.push(new R('셀 내용 편집', 'ic_table', () => this.editTableCells(element)).tint('#30B0C7')); rows.push(new R('행·열·색상', 'ic_sliders', () => this.showTableDialog(element)).tint('#AF52DE')); }
   if (kind === 'link' || !['youtube', 'shape', 'table', 'image', 'sticker', 'video'].includes(kind)) rows.push(new R('수정', 'ic_compose', () => this.editPageElement(element, false)).tint('#007AFF'));
@@ -1354,25 +1355,68 @@ M.importVideo = async function (source) {
   const name = AnnotationStore.newAssetName('mp4');
   let created = false;
   try {
-    const LIMIT = 600 * 1024 * 1024;
+    const LIMIT = 2048 * 1024 * 1024;
     const target = await AnnotationStore.assetPath(name);
     try {
       if (typeof source === 'string') {
-        const st = await host.stat(source); if (st.size > LIMIT) throw new Error('600MB 이하의 동영상만 넣을 수 있습니다');
+        const st = await host.stat(source); if (st.size > LIMIT) throw new Error('2GB 이하의 동영상만 넣을 수 있습니다');
         await host.copy(source, target);
       } else {
-        if (source.size > LIMIT) throw new Error('600MB 이하의 동영상만 넣을 수 있습니다');
+        if (source.size > LIMIT) throw new Error('2GB 이하의 동영상만 넣을 수 있습니다');
         await host.writeBytes(target, new Uint8Array(await source.arrayBuffer()));
       }
       created = true;
     } catch (e) { try { await AnnotationStore.deleteAsset(name); } catch (e2) { /* ignore */ } throw e; }
     let frame;
     try { frame = await videoPoster(await AnnotationStore.assetUrl(name)); } catch (e) { frame = null; }
-    if (!frame) { await AnnotationStore.deleteAsset(name); throw new Error('동영상을 읽을 수 없습니다'); }
+    if (!frame) { frame = document.createElement('canvas'); frame.width = 640; frame.height = 360; const g = frame.getContext('2d'); g.fillStyle = '#2C2C2E'; g.fillRect(0, 0, 640, 360); }   // unusual codec: keep the video with a plain dark card, it still plays
     const thumb = AnnotationStore.newAssetName('png');
     try { await AnnotationStore.saveAsset(thumb, await canvasPng(frame)); } catch (e) { throw new Error('미리보기 저장 실패'); }
     if (session && this.sessions.includes(session)) { await this.switchDocument(session); this.placementText = name; this.placeOrDrop('video', thumb); }
   } catch (e) { toast('동영상 가져오기 실패: ' + errMsg(e)); }
+};
+/** In-document playback (Android playInline): the player opens right on the element's rectangle; page changes, zoom and closing stop it. */
+M.stopInlinePlayer = function () {
+  const p = this._inlinePlayer; this._inlinePlayer = null;
+  if (!p) return;
+  try { const v = p.querySelector('video'); if (v) { v.pause(); v.removeAttribute('src'); v.load(); } const f = p.querySelector('iframe'); if (f) f.src = 'about:blank'; } catch (e) { /* ignore */ }
+  p.remove();
+};
+M._inlineBox = function (element) {
+  const view = [this.firstPageView, this.secondPageView].find(v => v && v.getPageNumber() === element.page) || this.pageView;
+  if (!view || !view.el) return null;
+  const host = view.el.getBoundingClientRect(), r = view.pageRect();
+  if (r.width() <= 0) return null;
+  let l = host.left + r.left + element.left * r.width(), t = host.top + r.top + element.top * r.height();
+  let w = Math.max(240, (element.right - element.left) * r.width()), hgt = Math.max(135, (element.bottom - element.top) * r.height());
+  w = Math.min(w, window.innerWidth - 16); hgt = Math.min(hgt, window.innerHeight - 16);
+  const cx = host.left + r.left + (element.left + element.right) / 2 * r.width(), cy = host.top + r.top + (element.top + element.bottom) / 2 * r.height();
+  l = Math.max(8, Math.min(window.innerWidth - w - 8, cx - w / 2)); t = Math.max(8, Math.min(window.innerHeight - hgt - 8, cy - hgt / 2));
+  return { l, t, w, h: hgt };
+};
+M.playInline = async function (element) {
+  this.stopInlinePlayer();
+  const box = this._inlineBox(element); if (!box) { toast('재생할 위치를 찾을 수 없습니다'); return; }
+  let media;
+  if (element.kind === 'youtube') {
+    media = h('iframe', { src: 'https://www.youtube.com/embed/' + element.text + '?autoplay=1&playsinline=1&rel=0&modestbranding=1', allow: 'autoplay; encrypted-media; picture-in-picture; fullscreen', allowfullscreen: 'true', referrerpolicy: 'strict-origin-when-cross-origin', style: { width: '100%', height: '100%', border: '0', background: '#000' } });
+  } else {
+    let url;
+    try { if (!(await AnnotationStore.hasAsset(element.text))) throw new Error(); url = await AnnotationStore.assetUrl(element.text); } catch (e) { toast('동영상 파일을 찾을 수 없습니다'); return; }
+    media = h('video', { controls: true, autoplay: true, playsinline: true, style: { width: '100%', height: '100%', background: '#000', objectFit: 'contain' } });
+    media.addEventListener('error', () => toast('이 동영상은 재생할 수 없습니다'));
+    media.src = url;
+  }
+  const close = iconButton('ic_close', '재생 닫기', '#fff', () => this.stopInlinePlayer(), 32, 32);
+  Object.assign(close.style, { position: 'absolute', top: '4px', right: '4px', background: 'rgba(0,0,0,.6)', borderRadius: '16px' });
+  const kids = [media, close];
+  if (element.kind === 'video') {
+    const big = iconButton('ic_fullscreen', '크게 보기', '#fff', () => { this.stopInlinePlayer(); this.showVideoPlayer(element); }, 32, 32);
+    Object.assign(big.style, { position: 'absolute', top: '4px', left: '4px', background: 'rgba(0,0,0,.6)', borderRadius: '16px' }); kids.push(big);
+  }
+  const frame = h('div', { class: 'm2-inline-player', dataset: { tag: 'inline_player' }, style: { position: 'fixed', left: box.l + 'px', top: box.t + 'px', width: box.w + 'px', height: box.h + 'px', background: '#000', zIndex: '900', boxShadow: '0 4px 18px rgba(0,0,0,.35)', borderRadius: '6px', overflow: 'hidden' } }, ...kids);
+  document.body.append(frame); this._inlinePlayer = frame;
+  if (media.play) media.play().catch(() => {});
 };
 M.showVideoPlayer = async function (element) {
   let url;
@@ -1993,7 +2037,7 @@ M.rebuildThumbnails = async function () {
   if (pages.length === 0) { this.thumbnailList.append(h('div', { class: 'm2-empty', dataset: { tag: 'thumb_empty' } }, '즐겨찾기한 페이지가 없습니다.\n\n아래쪽 ★를 누르면\n이곳에 미리보기가 나타납니다.')); return; }
   const aspect = await this.thumbnailAspect();
   if (generation !== this.thumbnailGeneration) return;
-  const pw = this.sidePanelWidth() - 36, ph = Math.round(pw * aspect);
+  const pw = this.sidePanelWidth() - 60, ph = Math.round(pw * aspect);
   for (const page of pages) {
     const item = h('div', { class: 'm2-thumb', dataset: { page } });
     const preview = h('div', { class: 'm2-thumb-img', style: { width: pw + 'px', height: ph + 'px' } });
@@ -2175,6 +2219,83 @@ F.updateThumbnailSelection = function () {
 
 // ---- v3: print / offline notes (implemented in print.js, offline.js) ---------------------------------------------------------
 M.printDocument = function () { return printDocument(this); };
+
+// ---- whole-library backup / restore, app info and update check (Android v1.36.0 parity) ---------------------------------------------------------
+M.backupEnv = function () {
+  const env = this.syncEnv();
+  return { library: this.library, version: this.appVersion(), exportNote: env.exportNote, isOpenPath: async p => this.sessions.some(s => samePath(s.uri, p)) };
+};
+M.startLibraryBackup = async function () {
+  try {
+    if (typeof this.commitInlineText === 'function') this.commitInlineText();
+    const d = new Date(), z = n => String(n).padStart(2, '0');
+    const stamp = `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`;
+    const out = await host.saveDialog('전체 문서 백업', `Everynote-백업-${stamp}.zip`, [{ name: 'Everynote 백업', exts: ['zip'] }]);
+    if (!out) return;
+    const progress = ProgressDialog.show('전체 백업', '문서와 필기를 모으는 중… 잠시 기다려 주세요');
+    try {
+      const n = await createBackup(this.backupEnv(), out); progress.dismiss();
+      alertCard({ title: '백업 완료', message: `문서 ${n}개 (필기·사진·녹음·동영상 포함)\n${out}`, positive: ['확인'], neutral: ['폴더 열기', () => host.reveal(out).catch(() => {})] });
+    } catch (e) { progress.dismiss(); toast('백업 실패: ' + errMsg(e)); }
+  } catch (e) { toast('백업 실패: ' + errMsg(e)); }
+};
+M.startLibraryRestore = async function () {
+  try {
+    const picked = await host.openDialog('백업에서 복원', [{ name: 'Everynote 백업', exts: ['zip'] }], false);
+    if (!picked || !picked.length) return;
+    const zip = picked[0];
+    const run = async overwrite => {
+      const progress = ProgressDialog.show('복원', '문서와 필기를 복원하는 중… 잠시 기다려 주세요');
+      try {
+        const r = await restoreBackup(this.backupEnv(), zip, overwrite); progress.dismiss();
+        alertCard({ title: '복원 완료', message: `문서 ${r.documents}개 · 필기 ${r.notes}개 · 첨부 ${r.assets}개 · 폴더 ${r.folders}개` + (r.skipped ? `\n열려 있어 건너뜀 ${r.skipped}개` : '') + (r.failed ? `\n실패 ${r.failed}개` : ''), positive: ['확인'] });
+      } catch (e) { progress.dismiss(); toast('복원 실패: ' + errMsg(e)); }
+    };
+    alertCard({
+      title: '백업에서 복원',
+      message: '백업의 문서·필기·사진·녹음·동영상을 문서함으로 복원합니다.\n\n• 추가 복원: 기존 문서는 그대로 두고, 같은 이름은 사본 (1)로 추가\n• 덮어쓰기: 같은 위치·이름의 문서를 백업 내용으로 교체 (열려 있는 문서는 건너뜀)',
+      positive: ['추가 복원', () => run(false)], neutral: ['덮어쓰기', () => run(true)], negative: ['취소'],
+    });
+  } catch (e) { toast('복원 실패: ' + errMsg(e)); }
+};
+M.showAbout = function () {
+  const info = h('div', { class: 'm2-about', dataset: { tag: 'about_info' } }, h('div', { class: 'm2-about-name' }, 'Everynote'), h('div', null, '버전 ' + this.appVersion()), h('div', { class: 'm2-about-by' }, AUTHOR_LINE));
+  const status = h('div', { class: 'm2-about-status', dataset: { tag: 'update_status' } });
+  const mk = (key, dflt, label, tag) => {
+    const box = h('input', { type: 'checkbox', dataset: { tag } }); box.checked = this.recentPrefs.getBoolean(key, dflt);
+    box.addEventListener('change', () => this.recentPrefs.putBoolean(key, box.checked));
+    return h('label', { class: 'm2-about-check' }, box, h('span', null, label));
+  };
+  const view = h('div', null, info, status, mk('auto_update_check', true, '앱을 열 때 새 버전 자동 확인', 'auto_update'),
+    mk('auto_update_install', false, '새 버전이 있으면 확인 없이 자동으로 설치', 'auto_update_install'));
+  const dlg = new AlertDialog.Builder().setTitle('앱 정보').setView(view).setPositiveButton('업데이트 확인', null).setNegativeButton('닫기', null).show();
+  rebindButton(dlg, BUTTON_POSITIVE, () => this.checkForUpdate(true, status));
+};
+M.checkForUpdate = async function (manual, status) {
+  const say = t => { if (status) status.textContent = t; else if (manual) toast(t); };
+  say('확인 중…');
+  let r;
+  try { r = await host.updateCheck(); } catch (e) { say('업데이트를 확인하지 못했습니다 (' + errMsg(e) + ')'); return; }
+  if (compareVersions(r.version, this.appVersion()) <= 0) { say('최신 버전입니다 (v' + this.appVersion() + ')'); return; }
+  say('새 버전 v' + r.version + ' 이(가) 있습니다');
+  const direct = !!(r.installed && r.setupUrl);
+  const install = async () => {
+    const progress = ProgressDialog.show('업데이트', '새 버전을 내려받는 중… 완료되면 설치 프로그램이 앱을 닫고 업데이트합니다');
+    try { await host.updateInstall(r.setupUrl); } catch (e) { progress.dismiss(); toast('업데이트 실패: ' + errMsg(e)); }
+  };
+  if (!manual && direct && this.recentPrefs.getBoolean('auto_update_install', false)) { install(); return; }
+  let notes = (r.notes || '').trim(); if (notes.length > 500) notes = notes.slice(0, 500) + '…';
+  alertCard({
+    title: '새 버전 v' + r.version,
+    message: '현재 v' + this.appVersion() + (notes ? '\n\n' + notes : '') + '\n\n' + (direct ? '업데이트하면 설치 프로그램이 앱을 닫고 새 버전으로 바꿉니다. 문서와 필기는 그대로 유지됩니다.' : '내려받기 페이지를 엽니다.'),
+    positive: [direct ? '업데이트' : '내려받기', () => { if (direct) install(); else host.shellOpen(r.exeUrl || r.page).catch(() => {}); }], negative: ['나중에'],
+  });
+};
+M.autoCheckForUpdate = function () {
+  if (!host.native || !this.recentPrefs.getBoolean('auto_update_check', true)) return;
+  const now = Date.now(); if (now - (this.recentPrefs.getFloat('update_checked', 0) || 0) < 20 * 3600 * 1000) return;
+  this.recentPrefs.putFloat('update_checked', now); this.checkForUpdate(false, null);
+};
 M.showAboutOffline = function () { return showAboutOffline(this); };
 
 // ====================================================================================================================

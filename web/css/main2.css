@@ -104,7 +104,7 @@ textarea.field{overflow-y:auto}
 .m2-thumbpanel{background:#F2F2F7}
 .m2-thumblist{padding:14px 8px 96px}
 .m2-sidelist{padding:4px 10px 14px}
-.m2-thumb{display:flex;flex-direction:column;align-items:center;padding:5px 4px 7px;border-radius:8px;cursor:pointer}
+.m2-thumb{display:flex;flex-direction:column;align-items:center;padding:8px 6px 10px;border-radius:8px;cursor:pointer}
 .m2-thumb-img{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.28);flex:none;overflow:hidden}
 .m2-thumb-canvas{display:block;width:100%;height:100%;object-fit:contain}
 .m2-thumb-row{display:flex;align-items:center;height:24px;width:100%}
@@ -234,3 +234,8 @@ body.m2-resizing[data-m2-axis="y"]{cursor:row-resize!important}
 .m2-side-title{display:flex;align-items:center;gap:6px}.m2-side-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .m2-side.narrow .m2-side-head{padding-left:8px}
 .m2-side.narrow .m2-side-btn{width:28px!important;padding-left:3px!important;padding-right:3px!important}
+.m2-about{line-height:1.6;font-size:15px;color:#1C1C1E;user-select:text}
+.m2-about-name{font-size:19px;font-weight:700}
+.m2-about-by{margin-top:10px}
+.m2-about-status{margin:14px 0 6px;font-size:14px;color:#8E8E93;min-height:20px}
+.m2-about-check{display:flex;align-items:center;gap:8px;font-size:14px;padding:4px 0;cursor:pointer}

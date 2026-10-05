@@ -12,6 +12,7 @@ import { AnchoredMenu } from './ui/menu.js';
 import { AlertDialog, showActionSheet as uiActionSheet } from './ui/alert.js';
 import { AnnotationStore } from './store.js';
 import { AnnotationPainter } from './painter.js';
+import { NotebookFiles } from './library.js';
 
 const NAVY = 0xFF1C1C1E | 0, ACCENT = 0xFF007AFF | 0, ACTIVE_BG = 0xFFE5F0FF | 0, ACTIVE_FG = 0xFF007AFF | 0;
 const GRAY = 0xFF8E8E93 | 0, DANGER = 0xFFFF3B30 | 0;
@@ -19,6 +20,8 @@ const CATEGORY_TITLES = ['문서', '보기·이동', '필기·삽입', '학습·
 const TEXT_COLORS = [0xFF1C1C1E, 0xFF8E8E93, 0xFF007AFF, 0xFF16835B, 0xFFEA580C, 0xFFFF3B30, 0xFFDB2777, 0xFF7C3AED].map(c => c | 0);
 const FONT_IDS = ['sans', 'medium', 'light', 'black', 'condensed', 'serif', 'mono', 'typewriter', 'hand', 'casual'];
 const FONT_NAMES = ['고딕 (기본)', '고딕 중간', '고딕 얇게', '고딕 굵게', '고딕 좁게', '명조', '고정폭', '타자기', '손글씨', '캐주얼'];
+/** [first rule from the page top, pitch] in pt per paper kind (same table as Android NotebookFiles.ruler). */
+const NOTE_RULERS = { 1: [54, 25], 4: [54, 18], 5: [54, 32], 2: [54, 18], 3: [96, 22], 7: [84, 24], 10: [69.88, 32.6], 11: [116.9, 26.95], 12: [29.49, 26.97] };
 const TEXT_PAGE_POINTS = 595;
 const PAPER_COLORS = [0xFFFFF3A6, 0xFFFFD6E0, 0xFFCFE8FF, 0xFFD5F5D0, 0xFFFFE0B8, 0xFFE6D9FF, 0xFFFFFFFF].map(c => c | 0);
 const SIDE_TITLES = ['검색', '미리보기', '개요', '음성 녹음'];
@@ -103,6 +106,8 @@ const methods = {
         t.push(tile('필기 백업 파일 불러오기', 'ic_import', run('importSidecar')));
         t.push(tile('원본 파일 내보내기', 'ic_original', run('exportOriginal')));
         t.push(tile('다른 기기와 동기화', 'ic_sync', run('showDeviceSync')));
+        t.push(tile('전체 문서 백업', 'ic_backup', run('startLibraryBackup')));
+        t.push(tile('백업에서 복원', 'ic_import', run('startLibraryRestore')));
         break;
     }
     return t;
@@ -121,7 +126,8 @@ const methods = {
     sections.push(section('인쇄', [
       tile('인쇄', 'ic_print', () => this.callUi2('printDocument'))]));
     sections.push(section('도움말', [tile('사용법', 'ic_outline', () => this.showHelp()),
-      tile('오프라인 사용 안내', 'ic_wifi_off', () => this.callUi2('showAboutOffline'))]));
+      tile('오프라인 사용 안내', 'ic_wifi_off', () => this.callUi2('showAboutOffline')),
+      tile('앱 정보·업데이트', 'ic_more_vert', () => this.callUi2('showAbout'))]));
     return this.showSheet('메뉴', sections);
   },
   // ================================================================== lasso shape bar
@@ -197,15 +203,16 @@ const methods = {
     e.color = prefs.getInt('text_color', AnnotationStore.PageElement.DEFAULT_TEXT_COLOR);
     const size = prefs.getFloat('text_size', AnnotationStore.PageElement.DEFAULT_TEXT_SIZE);
     e.textSize = size < .004 || size > .3 ? AnnotationStore.PageElement.DEFAULT_TEXT_SIZE : size;
+    e.lineSpacing = prefs.getFloat('text_line', 0); if (e.lineSpacing < .8 || e.lineSpacing > 4) e.lineSpacing = 0;
   },
   saveTextStyle(e) {
     prefs.putString('text_font', e.font); prefs.putBoolean('text_bold', e.bold); prefs.putBoolean('text_italic', e.italic);
-    prefs.putInt('text_color', e.color); prefs.putFloat('text_size', e.textSize);
+    prefs.putInt('text_color', e.color); prefs.putFloat('text_size', e.textSize); prefs.putFloat('text_line', e.lineSpacing || 0);
   },
   /** Resizes the box height so the whole text is visible with the element's own width, size and typeface. */
   fitTextElement(e) {
     const view = this.viewForPage(e.page); const aspect = view ? view.pageAspect() : 1.414;
-    let height = AnnotationPainter.fitHeight(e.text, e.right - e.left, e.textSize, aspect, AnnotationPainter.typeface(e.font, e.bold, e.italic));
+    let height = AnnotationPainter.fitHeight(e.text, e.right - e.left, e.textSize, aspect, AnnotationPainter.typeface(e.font, e.bold, e.italic), e.line());
     height = Math.min(.98, height);
     if (e.top + height > .99) e.top = Math.max(0, .99 - height);
     e.bottom = e.top + height;
@@ -278,10 +285,12 @@ const methods = {
     const width = Math.max(80, Math.round((e.right - e.left) * page.width()));
     const px = Math.max(9, page.width() * e.textSize);
     let changed = false;
-    if (Math.abs((this._inlinePx || 0) - px) > .4) { this._inlinePx = px; edit.style.fontSize = px + 'px'; edit.style.lineHeight = (px * 1.35) + 'px'; changed = true; }
+    if (Math.abs((this._inlinePx || 0) - px) > .4 || Math.abs((this._inlineLine || 0) - e.line()) > .001) { this._inlineLine = e.line(); this._inlinePx = px; edit.style.fontSize = px + 'px'; edit.style.lineHeight = (px * e.line()) + 'px'; changed = true; }
     if (edit.style.paddingLeft !== '3px') { edit.style.paddingLeft = '3px'; changed = true; }
     if (edit.style.left !== left + 'px') edit.style.left = left + 'px';
-    if (edit.style.top !== top + 'px') edit.style.top = top + 'px';
+    // CSS centres a line inside its line box; the painter keeps the first baseline at box.top + size, so shift the editor by the extra half-leading
+    const editTop = Math.round(top - (e.line() - 1.35) * px / 2);
+    if (edit.style.top !== editTop + 'px') edit.style.top = editTop + 'px';
     if (edit.style.width !== width + 'px') { edit.style.width = width + 'px'; changed = true; }
     if (changed || this._inlineDirty) { this._inlineDirty = false; edit.style.height = 'auto'; edit.style.height = edit.scrollHeight + 2 + 'px'; }
     const height = edit.offsetHeight;
@@ -322,6 +331,7 @@ const methods = {
     edit.style.textDecoration = [e.underline ? 'underline' : '', e.strike ? 'line-through' : ''].filter(Boolean).join(' ') || 'none';
     if (this._inlineSync) this._inlineSync();
     if (this.inlineSize) this.inlineSize.textContent = this.pointsOf(e) + 'pt';
+    if (this.inlineLine) this.inlineLine.textContent = e.line().toFixed(2);
     this._inlineDirty = true; this.positionInlineText();
   },
   // ---- list markers typed as plain text ('• ', '1. ', '☐ '/'☑ ') exactly like Android v1.29.0, so they survive export and backups
@@ -364,6 +374,31 @@ const methods = {
     if (!this.inlineElement || !AnnotationStore.PageElement.FONTS.includes(id)) return;
     this.inlineElement.font = id; if (this.inlineFontLabel) this.inlineFontLabel(); this.applyInlineStyle();
   },
+  changeInlineLine(delta) {
+    const e = this.inlineElement; if (!e) return;
+    const next = Math.max(.8, Math.min(4, Math.round((e.line() + delta) * 20) / 20));
+    e.lineSpacing = Math.abs(next - AnnotationStore.PageElement.DEFAULT_LINE) < .001 ? 0 : next; this.applyInlineStyle();
+  },
+  /** Picks a ruled paper and sets the line spacing to its rule pitch, then moves the box so the first line sits on the nearest rule. */
+  chooseNoteRuler() {
+    const e = this.inlineElement; if (!e) return;
+    const kinds = [], own = this.activeSession && this.library.managed(this.activeSession.uri) ? this.library.paper(this.activeSession.uri) : null;
+    if (own && NOTE_RULERS[own.kind]) kinds.push(own.kind);
+    for (const k of [10, 11, 12, 1, 4, 5, 2, 3, 7]) if (!kinds.includes(k)) kinds.push(k);
+    const names = kinds.map((k, i) => NotebookFiles.PAPER_NAMES[k] + (i === 0 && own && NOTE_RULERS[own.kind] ? '  (현재 노트)' : ''));
+    new AlertDialog.Builder().setTitle('노트 줄에 맞추기').setItems(names, (d, which) => this.fitInlineToRuler(e, kinds[which])).setNegativeButton('취소').show();
+  },
+  fitInlineToRuler(e, kind) {
+    const r = NOTE_RULERS[kind]; if (!r) return;
+    const sizePt = e.textSize * TEXT_PAGE_POINTS, pitch = r[1]; let k = 1; while (pitch * k / sizePt < 1 && k < 6) k++;
+    e.lineSpacing = Math.max(.8, Math.min(4, pitch * k / sizePt));
+    const view = this.viewForPage(e.page), aspect = view ? view.pageAspect() : 1.414, heightPt = TEXT_PAGE_POINTS * aspect;
+    const baseline = e.top * heightPt + sizePt, n = Math.max(0, Math.round((baseline + .22 * sizePt - r[0]) / pitch));
+    const top = (r[0] + n * pitch - .22 * sizePt - sizePt) / heightPt, hh = e.bottom - e.top;
+    e.top = Math.max(0, Math.min(.99 - hh, top)); e.bottom = e.top + hh;
+    this.applyInlineStyle(); this.fitTextElement(e); this.positionInlineText();
+    this.toast('줄간격 ' + e.line().toFixed(2) + ' · ' + NotebookFiles.PAPER_NAMES[kind] + ' 줄에 맞춤');
+  },
   changeInlineSize(delta) {
     if (!this.inlineElement) return;
     const points = Math.max(8, Math.min(72, this.pointsOf(this.inlineElement) + delta));
@@ -391,6 +426,11 @@ const methods = {
     panel.append(faces);
     const palette = this.swatches(TEXT_COLORS, () => e.color | 0xFF000000, c => { e.color = c | 0xFF000000; this.applyInlineStyle(); }, 26, 1);
     palette.dataset.tag = 'text_colors'; palette.style.padding = '2px 0'; palette.style.height = '34px'; panel.append(palette);
+    const lineRow = h('div', { class: 'm3-inline-row m3-line-row', dataset: { tag: 'text_line_row' } });
+    this.inlineLine = h('div', { class: 'm3-inline-size', dataset: { tag: 'text_line' } });
+    const fit = h('button', { class: 'm3-fit-ruler', type: 'button', 'aria-label': '노트 줄에 맞추기', dataset: { tag: 'text_fit_ruler' } }, '노트 줄에 맞추기');
+    fit.addEventListener('mousedown', ev => ev.preventDefault()); fit.addEventListener('click', () => this.chooseNoteRuler());
+    panel.append(lineRow);
     const tbtn = (content, label, tag, onClick) => {
       const b = h('button', { class: 'm3-tbtn', type: 'button', 'aria-label': label, title: label, 'aria-pressed': 'false', dataset: { tag } }, content);
       b.addEventListener('mousedown', ev => ev.preventDefault());     // keep the caret in the text box
@@ -408,6 +448,9 @@ const methods = {
     const minus = tbtn(icon('ic_minus', 18, 'currentColor'), '글자 작게', 'text_smaller', () => this.changeInlineSize(-1));
     const plus = tbtn(icon('ic_plus', 18, 'currentColor'), '글자 크게', 'text_bigger', () => this.changeInlineSize(1));
     this.inlineSize = h('div', { class: 'm3-inline-size', dataset: { tag: 'text_size' } });
+    const lm = tbtn(icon('ic_minus', 18, 'currentColor'), '줄간격 좁게', 'text_line_less', () => this.changeInlineLine(-.05));
+    const lp = tbtn(icon('ic_plus', 18, 'currentColor'), '줄간격 넓게', 'text_line_more', () => this.changeInlineLine(.05));
+    lineRow.append(h('div', { class: 'm3-line-label' }, '줄간격'), lm, this.inlineLine, lp, fit);
     row.append(style, bold, italic, underline, strike, h('div', { class: 'm3-sep' }), minus, this.inlineSize, plus, h('div', { style: { flex: '1' } }));
     row.append(iconButton('ic_delete', '글상자 삭제', DANGER, () => this.deleteInlineText(), 34, 34, 7));
     const done = iconButton('ic_check', '입력 완료', 0xFFFFFFFF | 0, () => this.commitInlineText(), 34, 34, 7);
@@ -433,7 +476,7 @@ const methods = {
     if (this._inlineRaf) cancelAnimationFrame(this._inlineRaf); this._inlineRaf = 0;
     for (const v of [this.inlineEdit, this.inlineMove, this.inlineResize, this.inlineDelete, this.inlineBar]) if (v) v.remove();
     if (this.inlineEdit && document.activeElement === this.inlineEdit) this.inlineEdit.blur();
-    this.inlineEdit = null; this._inlineSync = null; this.inlineMove = this.inlineResize = this.inlineDelete = null; this.inlineBar = null; this.inlineSize = null;
+    this.inlineEdit = null; this._inlineSync = null; this.inlineMove = this.inlineResize = this.inlineDelete = null; this.inlineBar = null; this.inlineSize = null; this.inlineLine = null; this._inlineLine = 0;
     this.inlineElement = null; this.inlineStore = null; this.inlineView = null; this._inlinePx = 0;
   },
   /** Saves the text being typed (an empty new box is dropped; emptying an old box deletes it). */
@@ -677,7 +720,7 @@ export function initMain3(app) {
   dflt('inlineFresh', false); dflt('recordingStarted', 0); dflt('recordingPage', 0);
   app.lassoShape = prefs.getInt('lasso_shape', 0);
   app._appVersion = ''; app._destroyed = false;
-  host.info().then(i => { app._appVersion = (i && i.version) || ''; }).catch(() => {});
+  host.info().then(i => { app._appVersion = (i && i.version) || ''; setTimeout(() => { try { if (!app._destroyed && app.autoCheckForUpdate) app.autoCheckForUpdate(); } catch { /* ignore */ } }, 5000); }).catch(() => {});
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') app.onStop(); });
   window.addEventListener('pagehide', () => app.onDestroy());
 }

@@ -221,6 +221,7 @@ const LINK_RE = /^(https?:\/\/[^ \t\n\x0B\f\r]+|page:[0-9]{1,6}|doc:[^ \t\n\x0B\
 
 export class PageElement {
   static DEFAULT_TEXT_SIZE = Math.fround(.027);
+  static DEFAULT_LINE = 1.35;
   static DEFAULT_TEXT_COLOR = 0xFF1C1C1E | 0;
   /** sans=고딕, serif=명조, mono=고정폭, hand=손글씨체 */
   static FONTS = ['sans', 'medium', 'light', 'black', 'condensed', 'serif', 'mono', 'typewriter', 'hand', 'casual'];
@@ -240,12 +241,18 @@ export class PageElement {
     this.stretch = false;
     /** Opacity 0.05..1 of pictures, stickers, shapes and tables (Android v1.32.0 key `alpha`). */
     this.alpha = 1;
+    /** Typing boxes: line step as a multiple of the font size (Android v1.36.0 key `lineSpacing`); 0 = default 1.35. */
+    this.lineSpacing = 0;
   }
+  /** Effective line step. */
+  line() { return this.lineSpacing >= .8 && this.lineSpacing <= 4 ? this.lineSpacing : PageElement.DEFAULT_LINE; }
   toJson() {
-    return { rot: f(this.rot), page: i32(this.page), kind: this.kind, text: this.text, asset: this.asset,
+    const o = { rot: f(this.rot), page: i32(this.page), kind: this.kind, text: this.text, asset: this.asset,
       left: f(this.left), top: f(this.top), right: f(this.right), bottom: f(this.bottom),
       textSize: f(this.textSize), color: i32(this.color), font: this.font, bold: !!this.bold, italic: !!this.italic,
       align: i32(this.align), underline: !!this.underline, strike: !!this.strike, stretch: !!this.stretch, alpha: f(this.alpha) };
+    if (this.lineSpacing > 0) o.lineSpacing = f(this.lineSpacing);   // written only when set, so older sidecars stay byte-identical
+    return o;
   }
   /** Same checks as Java (throws JSONException '잘못된 노트 요소'). Also reads the Windows v3.0 keys (align as 'left'|'center'|'right', list, checked[]). */
   static fromJson(o) {
@@ -264,6 +271,7 @@ export class PageElement {
     e.underline = optBoolean(o, 'underline', false);
     e.strike = optBoolean(o, 'strike', false);
     e.stretch = optBoolean(o, 'stretch', false);
+    e.lineSpacing = optFloat(o, 'lineSpacing', 0); if (!Number.isFinite(e.lineSpacing) || e.lineSpacing < .8 || e.lineSpacing > 4) e.lineSpacing = 0;
     e.alpha = optFloat(o, 'alpha', 1); if (!Number.isFinite(e.alpha) || e.alpha > 1) e.alpha = 1; if (e.alpha < .05) e.alpha = .05;
     if (e.kind === 'text') PageElement.migrateLegacyList(e, o);
     if (!PageElement.valid(e)) throw new JSONException('잘못된 노트 요소');
