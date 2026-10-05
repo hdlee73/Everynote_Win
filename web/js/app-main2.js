@@ -33,7 +33,8 @@ export const FONT_IDS = ['sans', 'medium', 'light', 'black', 'condensed', 'serif
 export const FONT_NAMES = ['고딕 (기본)', '고딕 중간', '고딕 얇게', '고딕 굵게', '고딕 좁게', '명조', '고정폭', '타자기', '손글씨', '캐주얼'];
 export const TEXT_PAGE_POINTS = 595;
 export const PAPER_COLORS = [0xFFFFF3A6, 0xFFFFD6E0, 0xFFCFE8FF, 0xFFD5F5D0, 0xFFFFE0B8, 0xFFE6D9FF, 0xFFFFFFFF].map(c => c | 0);
-export const SIDE_TITLES = ['🔍 검색', '🖼️ 미리보기', '🔖 개요', '🎙️ 음성 녹음'];
+export const SIDE_TITLES = ['검색', '미리보기', '개요', '음성 녹음'];
+const SIDE_TINTS = ['#30B0C7', '#007AFF', '#007AFF', '#FF3B30'];
 export const SIDE_ICONS = ['ic_search', 'ic_thumbnails', 'ic_outline', 'ic_mic'];
 export const STICKER_TITLES = ['별·하트', '낙엽·꽃', '응원·표시', '메모용', '표정·동물', '날씨·생활'];
 export const STICKER_GROUPS = [
@@ -1029,6 +1030,33 @@ M.renameDocument = function (session) {
   f.input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); btn.click(); } });
   setTimeout(() => { f.input.focus(); f.input.select(); }, 60);
 };
+/** Rename right in the title bar (replaces the old rename dialog on a title tap). */
+M.beginTitleEdit = function () {
+  const session = this.activeSession; if (!session || this._titleEdit) return;
+  if (!this.library.managed(session.uri)) { toast('문서함에 저장한 뒤 이름을 변경하세요'); return; }
+  if (this.onSelectionAdjustStarted) this.onSelectionAdjustStarted();
+  session.store.save();
+  const before = session.uri, input = h('input', { class: 'm-title m-title-edit', type: 'text', spellcheck: 'false', 'aria-label': '문서 이름', dataset: { tag: 'document_title_edit' } });
+  input.value = stripPdf(session.title);
+  this._titleEdit = input;
+  let done = false;
+  const finish = async save => {
+    if (done) return; done = true; this._titleEdit = null;
+    const text = input.value.trim();
+    input.replaceWith(this.titleView); this.titleView.style.display = '';
+    if (!save || !text || text === stripPdf(session.title) || !this.sessions.includes(session)) return;
+    try {
+      const name = NotebookFiles.pdfName(text);
+      await session.store.flush();
+      const after = await this.library.transfer(before, dirName(before), name, true);
+      this.libraryChanged(before, after);
+    } catch (e) { toast('이름을 바꿀 수 없습니다: ' + errMsg(e)); }
+  };
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); } });
+  input.addEventListener('blur', () => finish(true));
+  this.titleView.style.display = 'none'; this.titleView.after(input);
+  input.focus(); input.select();
+};
 M.saveToLibrary = async function () {
   if (!this.activeSession) return;
   if (this.library.managed(this.activeSession.uri)) { this.showLibrary(); return; }
@@ -1749,8 +1777,8 @@ M.buildSidePanel = function () {
   panel.style.display = 'none';
   this.sideTitle = h('div', { class: 'm2-side-title', dataset: { tag: 'side_title' } });
   this.sideMore = iconButton('ic_more_vert', '미리보기 메뉴', NAVY, e => this.showThumbnailMenu(this.sideMore), 36, 48);
-  this.sideMore.style.padding = '12px 6px'; this.sideMore.dataset.tag = 'side_more';
-  const close = iconButton('ic_close', '패널 닫기', NAVY, () => this.closeSidePanel(), 38, 48); close.style.padding = '12px 7px';
+  this.sideMore.style.padding = '12px 6px'; this.sideMore.dataset.tag = 'side_more'; this.sideMore.classList.add('m2-side-btn');
+  const close = iconButton('ic_close', '패널 닫기', NAVY, () => this.closeSidePanel(), 38, 48); close.style.padding = '12px 7px'; close.classList.add('m2-side-btn');
   panel.append(h('div', { class: 'm2-side-head' }, this.sideTitle, this.sideMore, close));
   const tabs = h('div', { class: 'm2-side-tabs' });
   const names = ['검색 탭', '페이지 미리보기 탭', '개요 탭', '음성 녹음 탭'];
@@ -1772,7 +1800,7 @@ M.buildSidePanel = function () {
   attachSplitter(this.sideSplitter, {
     axis: () => 'x', sign: 1, read: () => panel.getBoundingClientRect().width,
     min: () => SPLIT.sideMin, max: () => Math.max(SPLIT.sideMin, Math.min(SPLIT.sideMaxAbs, Math.round(window.innerWidth * .6))),
-    apply: (v, fin) => { panel.style.width = v + 'px'; resizeSoon(); if (fin) { this.recentPrefs.putInt('side_w', Math.round(v)); this.sidePanelResized(); } },
+    apply: (v, fin) => { panel.style.width = v + 'px'; this.fitSideHead(); resizeSoon(); if (fin) { this.recentPrefs.putInt('side_w', Math.round(v)); this.sidePanelResized(); } },
     reset: () => { this.recentPrefs.remove('side_w'); panel.style.width = this.sidePanelWidth() + 'px'; resizeSoon(); this.sidePanelResized(); },
   });
   panel.append(this.sideSplitter);
@@ -1780,6 +1808,17 @@ M.buildSidePanel = function () {
 };
 /** Thumbnails are sized from the panel width: rebuild once a drag has ended. */
 M.sidePanelResized = function () { clearTimeout(this._thumbT); this._thumbT = setTimeout(() => { if (this.sidebarVisible && this.panelTab === 1 && this.rebuildThumbnails) this.rebuildThumbnails(); }, 120); };
+/** Same icon as the matching menu entry (a star while only the favourites are shown) + the word. */
+M.setSideTitle = function (tab) {
+  const star = tab === 1 && !this.showAllThumbnails;
+  this.sideTitle.replaceChildren(icon(star ? 'ic_star' : SIDE_ICONS[tab], 20, star ? '#F5A623' : SIDE_TINTS[tab]), h('span', { class: 'm2-side-label' }, SIDE_TITLES[tab]));
+};
+/** The header never loses its title: narrow panels get smaller buttons and padding, the text shrinks to fit. */
+M.fitSideHead = function () {
+  if (!this.sidePanel) return;
+  this.sidePanel.classList.toggle('narrow', this.sidePanel.getBoundingClientRect().width < 190);
+  const label = this.sideTitle.querySelector('.m2-side-label'); if (label) fitText(label, 8, 15);
+};
 M.selectPanelTab = function (tab) {
   if (!this.sidePanel) this.buildSidePanel();
   const panel = this.sidePanel;
@@ -1789,11 +1828,11 @@ M.selectPanelTab = function (tab) {
   this.thumbnailPanel.style.display = tab === 1 ? 'block' : 'none';
   this.outlineScroll.style.display = tab === 2 ? 'block' : 'none';
   this.recordingScroll.style.display = tab === 3 ? 'block' : 'none';
-  this.sideTitle.textContent = SIDE_TITLES[tab];
+  this.setSideTitle(tab);
   this.sideMore.style.display = tab === 1 ? 'flex' : 'none';
   this.sideTabs.forEach((b, i) => { const on = i === tab; b.style.color = on ? ACTIVE_FG : NAVY; b.style.background = on ? ACTIVE_BG : 'transparent'; });
   const width = this.sidePanelWidth(); panel.style.width = width + 'px';
-  fitText(this.sideTitle, 10, 15);
+  this.fitSideHead();
   if (tab === 0) { this.searchInput.focus(); } else this.hideKeyboard();
   this.rebuildThumbnails(); this.applySearchHighlights();
   window.dispatchEvent(new Event('resize'));

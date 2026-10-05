@@ -21,7 +21,7 @@ const FONT_IDS = ['sans', 'medium', 'light', 'black', 'condensed', 'serif', 'mon
 const FONT_NAMES = ['고딕 (기본)', '고딕 중간', '고딕 얇게', '고딕 굵게', '고딕 좁게', '명조', '고정폭', '타자기', '손글씨', '캐주얼'];
 const TEXT_PAGE_POINTS = 595;
 const PAPER_COLORS = [0xFFFFF3A6, 0xFFFFD6E0, 0xFFCFE8FF, 0xFFD5F5D0, 0xFFFFE0B8, 0xFFE6D9FF, 0xFFFFFFFF].map(c => c | 0);
-const SIDE_TITLES = ['🔍 검색', '🖼️ 미리보기', '🔖 개요', '🎙️ 음성 녹음'];
+const SIDE_TITLES = ['검색', '미리보기', '개요', '음성 녹음'];
 const SIDE_ICONS = ['ic_search', 'ic_thumbnails', 'ic_outline', 'ic_mic'];
 const LASSO_RECT = 1, LASSO_CIRCLE = 2;
 
@@ -114,7 +114,9 @@ const methods = {
     const awake = prefs.getBoolean('keep_awake', false);
     sections.push(section('읽기 편의', [tile('화면 켜 둠', 'ic_clock', () => {
       prefs.putBoolean('keep_awake', !awake); this.applyKeepAwake(); this.toast(!awake ? '읽는 동안 화면이 꺼지지 않습니다' : '화면 자동 꺼짐을 따릅니다');
-    }, { selected: awake })]));
+    }, { selected: awake }),
+      tile('하단 메뉴 플로팅', 'ic_float', () => this.toggleFloatBar(), { selected: this.floatBar() }),
+      tile('전체 화면 메뉴 계속 표시', 'ic_float', () => this.toggleDockPinned(), { selected: this.dockPinned() })]));
     sections.push(section('인쇄', [
       tile('인쇄', 'ic_print', () => this.callUi2('printDocument'))]));
     sections.push(section('도움말', [tile('사용법', 'ic_outline', () => this.showHelp()),

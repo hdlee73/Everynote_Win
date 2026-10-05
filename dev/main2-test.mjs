@@ -106,7 +106,7 @@ check('sheet closed', (await page.locator('.amenu').count()) === 0);
 // ---------------------------------------------------------------- side panel + search
 await ev(() => T.app.selectPanelTab(1)); await shot('14-thumbs'); await page.waitForTimeout(1200); await shot('14b-thumbs');
 check('3 thumbnails', (await page.locator('.m2-thumb').count()) === 3 && (await page.locator('.m2-thumb-canvas').count()) === 3);
-check('title is the unified 미리보기 with an emoji (Android v1.32.0)', (await textOf('.m2-side-title')) === '🖼️ 미리보기');
+check('title is the menu icon + 미리보기 (Android v1.34.0)', (await textOf('.m2-side-title')) === '미리보기' && (await page.locator('.m2-side-title svg').count()) === 1);
 await ev(() => { T.app.showAllThumbnails = true; T.app.selectPanelTab(1); }); await page.waitForTimeout(2500); await shot('15-thumbs-all');
 check('all thumbnails', (await page.locator('.m2-thumb').count()) === 12);
 await ev(() => { T.app.showAllThumbnails = false; T.app.selectPanelTab(2); }); await shot('16-outline');
