@@ -40,6 +40,10 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
   anchor = anchor || document.body;
   if (!isChild) dismissMenu();
   const beside = mode === 1;
+  // a vertical toolbar rail (left/right/floating vertical bottom bar): menus open beside it, never on top of it
+  const rail = anchor.closest ? anchor.closest('.m-bottom.vert') : null;
+  const railRect = rail ? rail.getBoundingClientRect() : null;
+  const railOnRight = railRect ? railRect.left + railRect.width / 2 > window.innerWidth / 2 : false;
   let childMenu = null;
   const screenW = window.innerWidth, screenH = window.innerHeight;
   const card = h('div', { class: 'amenu', dataset: { tag: 'anchored_menu' } });
@@ -72,7 +76,8 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
     list.append(line);
   }
   const scroll = h('div', { class: 'amenu-scroll' }, list);
-  const more = h('div', { class: 'amenu-more', dataset: { tag: 'menu_more' }, role: 'button', 'aria-label': '아래에 더 있음' }, '▾  아래에 더 있음');
+  const more = h('div', { class: 'amenu-more', dataset: { tag: 'menu_more' }, role: 'button', 'aria-label': '아래에 더 있음', title: '아래에 더 있음' });
+  more.innerHTML = '<svg width="22" height="18" viewBox="0 0 22 18" aria-hidden="true"><path d="M6 3.5l5 4.5 5-4.5M6 9.5l5 4.5 5-4.5" fill="none" stroke="#007AFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   more.style.display = 'none';
   const updateMore = () => { more.style.display = scroll.scrollTop + scroll.clientHeight < scroll.scrollHeight - 2 ? '' : 'none'; };
   scroll.addEventListener('scroll', updateMore);
@@ -92,7 +97,8 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
   let sideRight = true;
   if (beside && avoid) {   // a submenu opens right next to its parent, on whichever side has room; narrowed (rows ellipsize) when the window is tight
     const roomRight = screenW - avoid.right - 14, roomLeft = avoid.left - 14;
-    if (roomRight >= w) sideRight = true; else if (roomLeft >= w) sideRight = false;
+    if (railOnRight && roomLeft >= w) sideRight = false;
+    else if (roomRight >= w) sideRight = true; else if (roomLeft >= w) sideRight = false;
     else { sideRight = roomRight >= roomLeft; w = Math.min(screenW - 24, Math.max(Math.min(w, 150), Math.max(roomRight, roomLeft))); }
   }
   card.style.width = w + 'px';
@@ -120,6 +126,11 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
     y = Math.max(margin, Math.min(screenH - hgt - margin, rowTop));
   }
   else if (avoid) [x, y] = placeAvoiding(avoid, w, hgt, screenW, screenH, margin, gap);
+  else if (railRect) {
+    x = railOnRight ? railRect.left - w - gap - 2 : railRect.right + gap + 2;
+    x = Math.max(margin, Math.min(screenW - w - margin, x));
+    y = Math.max(margin, Math.min(screenH - hgt - margin, r.top + r.height / 2 - hgt / 2));
+  }
   if (mode === 2) { x = (screenW - w) / 2; y = Math.max(margin, (screenH - hgt) / 3); }
   card.style.left = x + 'px'; card.style.top = y + 'px'; card.style.visibility = 'visible';
   card.classList.add('in');

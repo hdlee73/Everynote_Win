@@ -35,7 +35,7 @@ const mm=await pg.evaluate(async()=>{app.showMainMenu(document.body,false);await
 check('overflowing menu shows 아래에 더 있음', mm.canScroll&&mm.moreShown, JSON.stringify(mm));
 check('no 하단 메뉴 플로팅 row', !mm.labels.includes('하단 메뉴 플로팅'));
 const i=l=>mm.labels.indexOf(l);
-check('order: 모든 문서 백업·복원 < 사용법 < 오프라인 사용 안내 < 앱 정보', i('모든 문서 백업·복원')>=0&&i('모든 문서 백업·복원')<i('사용법')&&i('사용법')<i('오프라인 사용 안내')&&i('오프라인 사용 안내')<i('앱 정보·업데이트'), JSON.stringify(mm.labels));
+check('order: 사용법 < 오프라인 사용 안내 < 앱 정보 (library backup lives in 내보내기·백업 since v3.10)', i('모든 문서 백업·복원')<0&&i('사용법')>=0&&i('사용법')<i('오프라인 사용 안내')&&i('오프라인 사용 안내')<i('앱 정보·업데이트'), JSON.stringify(mm.labels));
 await pg.keyboard.press('Escape'); await pg.setViewportSize({width:1100,height:800});
 const tools=await pg.evaluate(async()=>{app.showTools();await new Promise(r=>setTimeout(r,400));return [...document.querySelectorAll('.m2-tile-name')].map(e=>e.textContent)});
 check('renamed tiles', tools.includes('하단 메뉴 위치·방향')&&!tools.includes('하단 메뉴 플로팅'), JSON.stringify(tools));

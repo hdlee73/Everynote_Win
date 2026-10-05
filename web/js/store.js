@@ -585,6 +585,8 @@ export class AnnotationStore {
     urlCache.delete(name);
     try { (await import('./painter.js')).AnnotationPainter.forgetImage(name); } catch (e) { /* */ }
   }
+  /** Drop the cached URL after an asset file was replaced on disk (video converted in place). */
+  static forgetAssetUrl(name) { urlCache.delete(name); }
   /** URL usable in <img>/<video>/<audio>/fetch (host fs.url; supports Range). */
   static async assetUrl(name) {
     if (BUILTIN_RE.test(name)) return new URL('../assets/stickers/' + name, import.meta.url).href;

@@ -7,7 +7,7 @@
 <script type="module">
 import { PdfDoc } from '/js/pdfdoc.js';
 import { PdfPageView } from '/js/pageview.js';
-import { AnnotationStore, Mark, InkStroke, TranslationNote } from '/js/store.js';
+import { AnnotationStore, Mark, InkStroke, InkPoint, TranslationNote } from '/js/store.js';
 
 const log = [];
 const L = n => (...a) => { log.push({ n, a }); };
@@ -27,7 +27,7 @@ async function show(i) {
   view.flush();
   return regions.length;
 }
-window.T = { view, store, log, doc, show, Mark, InkStroke, TranslationNote };
+window.T = { view, store, log, doc, show, Mark, InkStroke, InkPoint, TranslationNote };
 await show(0);
 window.READY = true;
 </script></body></html>

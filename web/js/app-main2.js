@@ -1370,11 +1370,44 @@ M.importVideo = async function (source) {
     } catch (e) { try { await AnnotationStore.deleteAsset(name); } catch (e2) { /* ignore */ } throw e; }
     let frame;
     try { frame = await videoPoster(await AnnotationStore.assetUrl(name)); } catch (e) { frame = null; }
+    if (!frame) {   // AVI, WMV, old MOV/MKV codecs...: WebView2 cannot decode them, so convert to MP4 (H.264) with Windows once, here
+      try {
+        await this.convertVideoAsset(name, typeof source === 'string' ? source : null);
+        frame = await videoPoster(await AnnotationStore.assetUrl(name));
+      } catch (e) { frame = null; toast('MP4로 바꾸지 못했습니다: ' + errMsg(e) + ' · 재생할 때 Windows 동영상 앱으로 엽니다'); }
+    }
     if (!frame) { frame = document.createElement('canvas'); frame.width = 640; frame.height = 360; const g = frame.getContext('2d'); g.fillStyle = '#2C2C2E'; g.fillRect(0, 0, 640, 360); }   // unusual codec: keep the video with a plain dark card, it still plays
     const thumb = AnnotationStore.newAssetName('png');
     try { await AnnotationStore.saveAsset(thumb, await canvasPng(frame)); } catch (e) { throw new Error('미리보기 저장 실패'); }
     if (session && this.sessions.includes(session)) { await this.switchDocument(session); this.placementText = name; this.placeOrDrop('video', thumb); }
   } catch (e) { toast('동영상 가져오기 실패: ' + errMsg(e)); }
+};
+/** Converts assets/<name> (or `from`, the original file) to an H.264/AAC MP4 written over assets/<name>, with a progress toast. */
+M.convertVideoAsset = async function (name, from) {
+  const target = await AnnotationStore.assetPath(name), tmp = target.replace(/\.mp4$/i, '') + '.converting.mp4', id = 'v' + Date.now();
+  toast('재생할 수 있도록 MP4로 변환하는 중…');
+  const onProgress = d => { if (d && d.id === id && d.percent % 10 === 0 && d.percent > 0 && d.percent < 100) toast(`MP4로 변환하는 중… ${d.percent}%`); };
+  host.on('media.progress', onProgress);
+  try {
+    await host.call('media.transcode', { id, from: from || target, to: tmp });
+    await host.move(tmp, target);
+  } catch (e) { try { if (await host.exists(tmp)) await host.delete(tmp); } catch (e2) { /* ignore */ } throw e; }
+  finally { host.off('media.progress', onProgress); }
+  AnnotationStore.forgetAssetUrl(name);
+  toast('MP4로 변환했습니다');
+};
+/** A <video> failed to decode: convert the asset once and retry; if Windows cannot convert it either, open it in the default player. */
+M._recoverVideo = async function (element, media) {
+  if (media._recovering || !media.isConnected || !media.error || (media.error.code !== 3 && media.error.code !== 4)) return;   // 3 decode, 4 unsupported format
+  media._recovering = true;
+  try {
+    await this.convertVideoAsset(element.text);
+    if (!media.isConnected) return;
+    media.src = await AnnotationStore.assetUrl(element.text); media.play().catch(() => {});
+  } catch (e) {
+    toast('앱 안에서 재생할 수 없는 형식이라 Windows 동영상 앱으로 엽니다');
+    try { await host.call('media.openExternal', { path: await AnnotationStore.assetPath(element.text) }); } catch (e2) { toast('동영상을 열 수 없습니다: ' + errMsg(e2)); }
+  }
 };
 /** In-document playback (Android playInline): the player opens right on the element's rectangle; page changes, zoom and closing stop it. */
 M.stopInlinePlayer = function () {
@@ -1406,7 +1439,7 @@ M.playInline = async function (element) {
     let url;
     try { if (!(await AnnotationStore.hasAsset(element.text))) throw new Error(); url = await AnnotationStore.assetUrl(element.text); } catch (e) { toast('동영상 파일을 찾을 수 없습니다'); return; }
     media = h('video', { autoplay: true, playsinline: true, style: { width: '100%', height: '100%', background: '#000', objectFit: 'contain' } });
-    media.addEventListener('error', () => toast('이 동영상은 재생할 수 없습니다 (형식 미지원). 다른 앱으로 열어 보세요'));
+    media.addEventListener('error', () => this._recoverVideo(element, media));
     media.src = url;
   }
   const close = iconButton('ic_close', '재생 닫기', '#fff', () => this.stopInlinePlayer(), 32, 32);
@@ -1450,7 +1483,7 @@ M.showVideoPlayer = async function (element) {
   let url;
   try { if (!(await AnnotationStore.hasAsset(element.text))) throw new Error(); url = await AnnotationStore.assetUrl(element.text); } catch (e) { toast('동영상 파일을 찾을 수 없습니다'); return; }
   const video = h('video', { class: 'm2-video', autoplay: true, playsinline: true });
-  video.addEventListener('error', () => toast('이 동영상은 재생할 수 없습니다 (형식 미지원)'));
+  video.addEventListener('error', () => this._recoverVideo(element, video));
   let dlg;
   const frame = h('div', { class: 'm2-videoframe' }, video, this._videoBar(video), iconButton('ic_close', '동영상 닫기', '#fff', () => dlg.dismiss(), 48, 48));
   frame.lastChild.classList.add('m2-video-close');
@@ -1566,7 +1599,7 @@ M.showTableDialog = function (existing) {
   const box = h('div', { class: 'm2-shapebox' });
   const rowsInput = editText({ numeric: true, value: base.rows, center: true, style: { width: '64px' } });
   const colsInput = editText({ numeric: true, value: base.cols, center: true, style: { width: '64px' } });
-  box.append(h('div', { class: 'm2-tbl-size' }, h('span', null, '행 '), rowsInput, h('span', { style: { whiteSpace: 'pre' } }, '   열 '), colsInput));
+  box.append(h('div', { class: 'm2-tbl-size' }, h('span', null, '행'), rowsInput, h('span', { style: { marginLeft: '14px' } }, '열'), colsInput));
   box.append(this.sectionLabel('선 색'), this.colorRow(lineColors, line));
   box.append(this.sectionLabel('머리글 칸 색 (첫 줄)'), this.colorRow(headColors, head));
   box.append(this.sectionLabel('바탕 색'), this.colorRow(fillColors, fill));
@@ -2266,7 +2299,7 @@ M.startLibraryBackup = async function () {
     if (typeof this.commitInlineText === 'function') this.commitInlineText();
     const d = new Date(), z = n => String(n).padStart(2, '0');
     const stamp = `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`;
-    const out = await host.saveDialog('모든 문서 통째로 백업', `Everynote-백업-${stamp}.zip`, [{ name: 'Everynote 백업', exts: ['zip'] }]);
+    const out = await host.saveDialog('모든 문서 백업', `Everynote-백업-${stamp}.zip`, [{ name: 'Everynote 백업', exts: ['zip'] }]);
     if (!out) return;
     const progress = ProgressDialog.show('전체 백업', '문서와 필기를 모으는 중… 잠시 기다려 주세요');
     try {
