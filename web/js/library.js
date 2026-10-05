@@ -182,7 +182,7 @@ async function templateImage(doc, file, cache) {
 }
 
 /** cache: per-operation scratch (parsed template PDF / embedded image) so several pages share one template. */
-async function addPaper(doc, paper, afterIndex = -1, cache = {}) {
+async function addPaper(doc, paper, afterIndex = -1, cache = {}, size = null) {
   const { rgb, pushOperators, setStrokingRgbColor, setLineWidth, setLineCap, LineCapStyle, moveTo, lineTo, stroke } = await pdfLib();
   const n = doc.getPageCount();
   const at = (afterIndex < 0 || afterIndex >= n) ? -1 : afterIndex + 1;
@@ -198,8 +198,8 @@ async function addPaper(doc, paper, afterIndex = -1, cache = {}) {
     if (at < 0) doc.addPage(copy); else doc.insertPage(at, copy);
     return;
   }
-  const page = at < 0 ? doc.addPage([A4_W, A4_H]) : doc.insertPage(at, [A4_W, A4_H]);
-  const width = A4_W, height = A4_H;
+  const width = size ? size[0] : A4_W, height = size ? size[1] : A4_H;
+  const page = at < 0 ? doc.addPage([width, height]) : doc.insertPage(at, [width, height]);
   const r = (paper.color >> 16) & 255, g = (paper.color >> 8) & 255, b = paper.color & 255;
   page.drawRectangle({ x: 0, y: 0, width, height, color: rgb(r / 255, g / 255, b / 255), borderWidth: 0 });
   if (paper.kind === CUSTOM) {
@@ -228,6 +228,18 @@ async function loadForEdit(file, message) {
     if (/encrypt/i.test(String(e && e.message))) throw new IOException(message);
     throw new IOException('PDF를 읽을 수 없습니다');
   }
+}
+
+/** Size of a new page: the reference page's visible size (rotation applied), or A4 portrait (1) / landscape (2). sizeMode 0 = same as the page it follows. */
+function pageSize(doc, refIndex, sizeMode) {
+  if (sizeMode === 1) return [A4_W, A4_H];
+  if (sizeMode === 2) return [A4_H, A4_W];
+  if (refIndex < 0 || refIndex >= doc.getPageCount()) return [A4_W, A4_H];
+  const ref = doc.getPage(refIndex), box = ref.getCropBox ? ref.getCropBox() : ref.getMediaBox();
+  const angle = ((ref.getRotation().angle % 360) + 360) % 360;
+  const w = box.width, h = box.height;
+  if (!(w > 0 && h > 0)) return [A4_W, A4_H];
+  return angle === 90 || angle === 270 ? [h, w] : [w, h];
 }
 
 export const NotebookFiles = {
@@ -295,9 +307,10 @@ export const NotebookFiles = {
     return NotebookFiles._save(doc, file);
   },
   /** Inserts a blank paper page right after afterIndex (the last page when out of range). */
-  async insert(file, paper, afterIndex) {
+  async insert(file, paper, afterIndex, sizeMode = 0) {
     const doc = await loadForEdit(file, '페이지 추가가 허용되지 않는 PDF입니다');
-    await addPaper(doc, paper, Math.min(afterIndex, doc.getPageCount() - 1));
+    const at = Math.min(afterIndex, doc.getPageCount() - 1);
+    await addPaper(doc, paper, at, {}, pageSize(doc, at, sizeMode));
     return NotebookFiles._save(doc, file);
   },
   /** Deletes one page and returns the remaining page count. The last remaining page cannot be deleted. */
@@ -620,7 +633,7 @@ export class LibraryRepository {
 
   // ---- page operations on library notes / PDFs
   async _managedFile(file) { if (!this.managed(file) || !(await isFile(file))) throw new IOException('저장된 PDF가 아닙니다'); }
-  insertPage(file, requested, afterIndex) { return this._sync(async () => { await this._managedFile(file); return NotebookFiles.insert(file, requested, afterIndex); }); }
+  insertPage(file, requested, afterIndex, sizeMode = 0) { return this._sync(async () => { await this._managedFile(file); return NotebookFiles.insert(file, requested, afterIndex, sizeMode); }); }
   deletePage(file, index) { return this._sync(async () => { await this._managedFile(file); return NotebookFiles.delete(file, index); }); }
   append(file, requested) { return this._sync(async () => { await this._managedFile(file); return NotebookFiles.append(file, requested); }); }
 }

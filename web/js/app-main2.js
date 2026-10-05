@@ -484,11 +484,12 @@ M.showMemoDisplayOptions = function (mark) {
   const checked = !mark.visible ? 2 : (mark.minimized ? 1 : 0);
   this.showActionSheet('메모 포스트잇 표시', DISPLAY_CHOICES, checked, w => { mark.visible = w !== 2; mark.minimized = w === 1; this.store.save(); this.redrawPages(); });
 };
-M.showAddDocumentMenu = function () {
-  this.showActionSheet('문서 추가', ['파일 가져오기', '저장된 문서 열기', '새 노트 만들기'], -1, index => {
-    if (index === 0) this.choosePdf(); else if (index === 1) this.showLibrary(); else this.newNotebook();
-  });
+/** Android addDocumentRows: 새 노트 만들기 / 파일 가져오기 / 저장된 문서 열기. */
+M.addDocumentRows = function () {
+  const R = AnchoredMenu.Row;
+  return [new R('새 노트 만들기', 'ic_compose', () => this.newNotebook()).tint('#34C759'), new R('파일 가져오기', 'ic_import', () => this.choosePdf()).tint('#007AFF'), new R('저장된 문서 열기', 'ic_folder_open', () => this.showLibrary()).tint('#F5A623')];
 };
+M.showAddDocumentMenu = function () { AnchoredMenu.showCentered('문서 추가', this.addDocumentRows()); };
 M.showOutlineList = function () {
   if (!this.store) { toast('PDF를 먼저 여세요'); return; }
   if (this.sidebarVisible && this.panelTab === 2) { this.closeSidePanel(); return; }
@@ -942,15 +943,29 @@ M.choosePageToInsert = function (afterIndex) {
   if (!this.activeSession) return;
   const session = this.activeSession;
   if (!this.library.managed(session.uri)) { toast('문서함에 저장한 뒤 페이지를 추가하세요'); return; }
+  // default: a page like the one before it (same size, orientation and paper); "다른 형식으로 페이지 추가" offers other papers and sizes
   const same = this.library.paper(session.uri);
-  if (same != null) { this.insertPage(session, same, afterIndex); return; }
+  this.insertPage(session, same != null ? same : new NotebookFiles.Paper(0, NotebookFiles.WHITE), afterIndex, 0);
+};
+/** Lets the user pick another paper and size for the new page (default: same size as the previous page). */
+M.chooseOtherPageFormat = function (afterIndex) {
+  if (!this.activeSession) return;
+  const session = this.activeSession;
+  if (!this.library.managed(session.uri)) { toast('문서함에 저장한 뒤 페이지를 추가하세요'); return; }
   const paper = new PaperChoiceView(this);
   if (paper.onTemplateRequest) paper.onTemplateRequest(() => this.requestTemplate(paper));
-  alertCard({ title: '추가할 페이지 · p.' + (afterIndex + 1) + ' 뒤', view: paper.el, positive: ['추가', () => { let chosen; try { chosen = paper.paper(); } catch (e) { toast(errMsg(e)); return; } this.insertPage(session, chosen, afterIndex); }], negative: ['취소'] });
+  const name = 'pagesize' + Date.now(), radios = [];
+  const sizes = h('div', { class: 'm2-pagesize', dataset: { tag: 'page_size_choice' }, style: { padding: '4px 22px 4px 22px' } });
+  ['이전 페이지와 같은 크기·방향', 'A4 세로', 'A4 가로'].forEach((label, i) => {
+    const input = h('input', { type: 'radio', name, value: String(i) }); if (i === 0) input.checked = true; radios.push(input);
+    sizes.append(h('label', { style: { display: 'flex', alignItems: 'center', gap: '10px', height: '36px', fontSize: '15px', cursor: 'pointer' } }, input, label));
+  });
+  const note = h('div', { style: { fontSize: '12px', color: '#8E8E93', padding: '0 22px 6px' } }, '서식 PDF를 고르면 그 서식의 크기를 따릅니다');
+  alertCard({ title: '다른 형식으로 추가 · p.' + (afterIndex + 1) + ' 뒤', view: h('div', {}, paper.el, sizes, note), positive: ['추가', () => { let chosen; try { chosen = paper.paper(); } catch (e) { toast(errMsg(e)); return; } this.insertPage(session, chosen, afterIndex, Math.max(0, radios.findIndex(r => r.checked))); }], negative: ['취소'] });
 };
-M.insertPage = function (session, paper, afterIndex) {
+M.insertPage = function (session, paper, afterIndex, sizeMode = 0) {
   const file = session.uri;
-  return this.modifyPages(session, '새 페이지를 추가하는 중…', () => this.library.insertPage(file, paper, afterIndex), () => session.store.insertPageAfter(afterIndex), afterIndex + 1, '페이지 추가 실패');
+  return this.modifyPages(session, '새 페이지를 추가하는 중…', () => this.library.insertPage(file, paper, afterIndex, sizeMode), () => session.store.insertPageAfter(afterIndex), afterIndex + 1, '페이지 추가 실패');
 };
 M.confirmDeletePage = function (index) {
   if (!this.activeSession || !this.renderer) return;
@@ -970,6 +985,7 @@ M.showPageMenu = function (page, anchor) {
   AnchoredMenu.showRightOf(anchor || this.sidePanel, this.sidePanel, [
     new R('이 페이지로 이동', 'ic_page', () => this.showPage(page)).tint('#30B0C7'),
     new R('뒤에 페이지 추가', 'ic_page_add', () => this.choosePageToInsert(page)).tint('#34C759'),
+    new R('다른 형식으로 뒤에 추가', 'ic_page_add', () => this.chooseOtherPageFormat(page)).tint('#34C759'),
     new R('이 페이지 삭제', 'ic_delete', () => this.confirmDeletePage(page)).danger()]);
 };
 /** Runs a file-level page edit, then re-opens the renderer and shifts the annotations to match. */
@@ -1856,6 +1872,7 @@ M.showThumbnailMenu = function (anchor) {
     new R('전체 페이지', 'ic_thumbnails', () => { this.showAllThumbnails = true; this.recentPrefs.putBoolean('thumb_all', true); this.selectPanelTab(1); }).tint('#007AFF').selected(this.showAllThumbnails),
     R.divider(),
     new R('페이지 추가', 'ic_page_add', () => this.chooseAddedPage()).tint('#34C759'),
+    new R('다른 형식으로 페이지 추가', 'ic_page_add', () => this.chooseOtherPageFormat(!this.renderer ? 0 : this.renderer.pageCount - 1)).tint('#34C759'),
     new R('페이지 삭제', 'ic_delete', () => this.confirmDeletePage(this.currentPage)).danger()], null);
 };
 /** Lets a list row be swiped away (either direction) to delete it. iOS Mail style (Android v1.32.0): a red area with a trash icon is revealed

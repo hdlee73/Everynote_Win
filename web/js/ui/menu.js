@@ -36,7 +36,7 @@ export function placeAvoiding(avoid, w, h, screenW, screenH, margin = 8, gap = 6
 
 /** @param anchor HTMLElement  @param above true = above the anchor (toolbar menus), false = below, right aligned
  *  @param avoid optional {left,top,right,bottom} viewport rectangle the card must not cover (the selected text) */
-export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0, isChild = false) {
+export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0, isChild = false, rowRect = null) {
   anchor = anchor || document.body;
   if (!isChild) dismissMenu();
   const beside = mode === 1;
@@ -60,10 +60,11 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
     if (row.selectedV || row.submenuV) line.append(icon(row.submenuV ? 'ic_chevron_right' : 'ic_check_bold', row.submenuV ? 18 : 20, row.submenuV ? GRAY : ACCENT, 'margin-left:8px'));
     line.addEventListener('click', () => {
       if (row.childrenV) {
+        const rr = line.getBoundingClientRect();
         if (childMenu) childMenu.close();
         const b = card.getBoundingClientRect();
         const inner = row.childrenV.map(c => (c.customEl || c.dividerV) ? c : c.copy(() => { close(); if (c.action) c.action(); }));
-        childMenu = show(anchor, above, inner, null, null, { left: b.left, top: b.top, right: b.right, bottom: b.bottom }, 1, true);
+        childMenu = show(anchor, above, inner, null, null, { left: b.left, top: b.top, right: b.right, bottom: b.bottom }, 1, true, { top: rr.top, bottom: rr.bottom });
         return;
       }
       close(); if (row.action) row.action();
@@ -81,7 +82,13 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
     }
     card.append(icons);
   }
-  const w = Math.min(screenW - 24, wide ? 268 : 240);
+  let w = Math.min(screenW - 24, wide ? 268 : 240);
+  let sideRight = true;
+  if (beside && avoid) {   // a submenu opens right next to its parent, on whichever side has room; narrowed (rows ellipsize) when the window is tight
+    const roomRight = screenW - avoid.right - 14, roomLeft = avoid.left - 14;
+    if (roomRight >= w) sideRight = true; else if (roomLeft >= w) sideRight = false;
+    else { sideRight = roomRight >= roomLeft; w = Math.min(screenW - 24, Math.max(Math.min(w, 150), Math.max(roomRight, roomLeft))); }
+  }
   card.style.width = w + 'px';
   const backdrop = h('div', { class: 'amenu-backdrop' });
   if (isChild) backdrop.style.pointerEvents = 'none';
@@ -100,14 +107,10 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
   y = Math.max(margin, Math.min(screenH - hgt - margin, y));
   if (avoid && mode === 3) { x = Math.min(screenW - w - margin, avoid.right + gap); y = Math.max(margin, Math.min(screenH - hgt - margin, r.top + r.height / 2 - hgt / 2)); }
   else if (avoid && beside) {
-    const tries = [[avoid.left - w - gap, avoid.top], [avoid.right + gap, avoid.top], [(avoid.left + avoid.right) / 2 - w / 2, avoid.bottom + gap], [(avoid.left + avoid.right) / 2 - w / 2, avoid.top - hgt - gap]];
-    let placed = false;
-    for (let i = 0; i < tries.length && !placed; i++) {
-      const tx = Math.max(margin, Math.min(screenW - w - margin, tries[i][0])); let ty = tries[i][1];
-      if (ty < 24 || ty + hgt > screenH - margin) { if (i < 2) ty = Math.max(24, Math.min(screenH - hgt - margin, ty)); else continue; }
-      if (tx + w + gap / 2 <= avoid.left || tx >= avoid.right + gap / 2 || ty + hgt + gap / 2 <= avoid.top || ty >= avoid.bottom + gap / 2) { x = tx; y = ty; placed = true; }
-    }
-    if (!placed) [x, y] = placeAvoiding(avoid, w, hgt, screenW, screenH, margin, gap);
+    x = sideRight ? avoid.right + 4 : avoid.left - w - 4;
+    x = Math.max(margin, Math.min(screenW - w - margin, x));
+    const rowTop = rowRect ? rowRect.top - 6 : avoid.top;   // the first child row sits level with the tapped row
+    y = Math.max(margin, Math.min(screenH - hgt - margin, rowTop));
   }
   else if (avoid) [x, y] = placeAvoiding(avoid, w, hgt, screenW, screenH, margin, gap);
   if (mode === 2) { x = (screenW - w) / 2; y = Math.max(margin, (screenH - hgt) / 3); }
