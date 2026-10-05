@@ -31,7 +31,8 @@ const PEN_ICONS = ['ic_pen_ball', 'ic_pen_pencil', 'ic_pen_fountain', 'ic_pen_br
 const WIDTH_ICONS = ['ic_width_1', 'ic_width_2', 'ic_width_3', 'ic_width_4'];
 const WIDTH_NAMES = ['얇게', '보통', '굵게', '최대'];
 const ZOOM_STEP = 1.25;
-const OFFICE_EXTS = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'hwp', 'hwpx'];
+const PICTURE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
+const OFFICE_EXTS = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'hwp', 'hwpx', ...PICTURE_EXTS];
 const sameColor = (a, b) => (a | 0) === (b | 0);
 
 // ------------------------------------------------------------------------------------------------ small helpers
@@ -715,6 +716,7 @@ const methods = {
       new Row('넘김 효과', 'ic_magic', null).tint('#8E8E93').children(this.choiceRows(this.ANIM_CHOICES, this.pageAnimStyle(), w => this.setPageAnim(w))),
       Row.divider(),
       new Row('페이지 추가', 'ic_page_add', () => this.choosePageToInsert(this.currentPage)).tint('#34C759'),
+      new Row('다른 형식으로 페이지 추가', 'ic_page_add', () => this.chooseOtherPageFormat(this.currentPage)).tint('#34C759'),
       new Row('페이지 삭제', 'ic_delete', () => this.confirmDeletePage(this.currentPage)).danger()], null);
   },
   SWIPE_CHOICES: ['화살표만 · 드래그 넘김 끄기', '수평 · 좌우로 넘기기', '수직 · 위아래로 넘기기'],
@@ -730,9 +732,6 @@ const methods = {
     toast(this.swipeEnabled ? '스와이프로도 페이지를 넘깁니다' : '본문의 반투명 화살표로 페이지를 넘기세요');
   },
   setPageAnim(which) { this.recentPrefs.putInt('page_anim_style', which); toast('넘김 효과: ' + this.ANIM_CHOICES[which].split(' (')[0]); },
-  addDocumentRows() {
-    return [new Row('파일 가져오기', 'ic_import', () => this.choosePdf()).tint('#007AFF'), new Row('저장된 문서 열기', 'ic_folder_open', () => this.showLibrary()).tint('#F5A623'), new Row('새 노트 만들기', 'ic_compose', () => this.newNotebook()).tint('#34C759')];
-  },
   rowsOf(category) {
     return this.categoryTiles(category).map(t => {
       const r = new Row(t.label, t.icon, t.action).selected(!!t.selected);
@@ -809,13 +808,51 @@ const methods = {
   // ============================================================ file choosing / routing
   async choosePdf() {
     let files = [];
-    try { files = await host.openDialog('문서 열기', [{ name: 'PDF·Office·한글 문서', exts: OFFICE_EXTS }], true); } catch (e) { toast('문서 열기 실패: ' + (e && e.message || e)); return; }
+    try { files = await host.openDialog('문서 열기', [{ name: 'PDF·Office·한글 문서·이미지', exts: OFFICE_EXTS }], true); } catch (e) { toast('문서 열기 실패: ' + (e && e.message || e)); return; }
     for (const f of files || []) await this.openPdf(f);
   },
   async chooseConvertedPdf() {
     let files = [];
     try { files = await host.openDialog('PDF 가져오기', [{ name: 'PDF', exts: ['pdf'] }], false); } catch (e) { toast('문서 열기 실패: ' + (e && e.message || e)); return; }
     if (files && files[0]) await this.openPdf(files[0]);
+  },
+  isPictureFile(name) { return PICTURE_EXTS.includes((/\.([^.]+)$/.exec(String(name || '')) || [])[1]?.toLowerCase()); },
+  /** A picture becomes a document: one PDF page in the picture's own proportions (a very tall picture is cut into A4-shaped pages), saved to the library. */
+  async convertPicture(source, title) {
+    const key = 'picture:' + source;
+    if (this.importing.has(key)) return;
+    this.importing.add(key);
+    const status = h('div', { class: 'm-statusview' }, '문서로 만드는 중…');
+    const dialog = new AlertDialog.Builder().setTitle('이미지 가져오기').setView(status).setCancelable(false).create();
+    dialog.show();
+    let tmp = null;
+    try {
+      const { PDFDocument } = await import('../vendor/pdflib/pdf-lib.esm.min.js');
+      const bitmap = await createImageBitmap(new Blob([await host.readBytes(source)]));
+      const scale = Math.min(1, 3600 / Math.max(bitmap.width, bitmap.height));
+      const iw = Math.max(1, Math.round(bitmap.width * scale)), ih = Math.max(1, Math.round(bitmap.height * scale));
+      const aspect = ih / iw, pw = aspect < 1 ? 842 : 595;
+      const doc = await PDFDocument.create({ updateMetadata: false });
+      doc.setProducer('Everynote'); doc.setCreator('Everynote');
+      const slice = aspect <= 2.2 ? ih : Math.max(1, Math.round(iw * 1.4142));
+      for (let y = 0; y < ih; y += slice) {
+        const sh = Math.min(slice, ih - y), canvas = document.createElement('canvas');
+        canvas.width = iw; canvas.height = sh;
+        const g = canvas.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, iw, sh);
+        g.drawImage(bitmap, 0, y / scale, bitmap.width, sh / scale, 0, 0, iw, sh);
+        const jpg = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.92));
+        const img = await doc.embedJpg(new Uint8Array(await jpg.arrayBuffer()));
+        const ph = Math.max(1, Math.round(pw * sh / iw));
+        doc.addPage([pw, ph]).drawImage(img, { x: 0, y: 0, width: pw, height: ph });
+      }
+      bitmap.close && bitmap.close();
+      tmp = await this.tempFile('.pdf'); await host.writeBytes(tmp, await doc.save({ useObjectStreams: false }));
+      const base = String(title).replace(/\.[A-Za-z0-9]+$/, '').replace(/[\\/:*?"<>|]/g, '_') || '이미지';
+      const saved = await this.library.importPdf(tmp, base + '.pdf', await this.importDestination());
+      dialog.dismiss(); this.importing.delete(key);
+      await this.openPdf(saved); toast('이미지를 문서로 저장했습니다');
+    } catch (e) { dialog.dismiss(); this.importing.delete(key); toast('이미지 가져오기 실패: ' + (e && e.message || e)); }
+    finally { if (tmp) host.delete(tmp).catch(() => {}); }
   },
   isOfficeDocument(name) { return office.isOfficeDocument(name); },
   canConvertOffice(name) { return office.canConvertOffice(name); },
@@ -930,6 +967,7 @@ const methods = {
       return;
     }
     if (textOnly) { toast('본문 미리보기는 Windows 버전에서 지원하지 않습니다'); return; }
+    if (this.isPictureFile(title) && !this.library.managed(uri)) { await this.convertPicture(uri, title); return; }
     if (!this.library.managed(uri)) {
       const saved = await this.library.imported(uri);
       if (saved) { await this.openPdf(saved, false, requestedPage, activate); return; }
@@ -1037,7 +1075,7 @@ const methods = {
       chip.append(documentIcon, name, close);
       this.tabRow.append(chip); if (active) activeTab = chip;
     }
-    const add = h('div', { class: 'm-tabadd', role: 'button', 'aria-label': '문서 추가', title: '문서 추가' }, '＋');
+    const add = h('div', { class: 'm-tabadd', role: 'button', 'aria-label': '문서 추가', title: '문서 추가' }, mkIcon('ic_plus', 16, argb(ACCENT)));
     add.addEventListener('click', () => this.showAddDocumentMenu());
     this.tabRow.append(add);
     if (activeTab) requestAnimationFrame(() => this.tabStrip.scrollTo({ left: Math.max(0, activeTab.offsetLeft - 8), behavior: 'smooth' }));

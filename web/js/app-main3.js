@@ -63,6 +63,7 @@ const methods = {
         t.push(tile('페이지 미리보기', 'ic_sidebar', run('toggleSidebar'), { selected: this.sidebarVisible }));
         t.push(tile('페이지로 이동', 'ic_page', run('goToPage')));
         t.push(tile('현재 페이지 뒤에 추가', 'ic_page_add', () => this.choosePageToInsert(this.currentPage)));
+        t.push(tile('다른 형식으로 페이지 추가', 'ic_page_add', () => this.chooseOtherPageFormat(this.currentPage)));
         t.push(tile('페이지 삭제', 'ic_delete', () => this.confirmDeletePage(this.currentPage), { tint: DANGER }));
         t.push(tile('두 쪽 보기 · ' + (this.twoPage ? '켜짐' : '꺼짐'), 'ic_book', run('toggleTwoPage'), { selected: this.twoPage }));
         t.push(tile('전체 화면', 'ic_fullscreen', run('toggleFullscreen')));
@@ -738,7 +739,7 @@ const HELP = [
   ["11. 새 노트와 서식",
     "새 노트|문서함에서 새 노트를 만들면 종이 서식을 고릅니다. 백지 · 줄노트(보통·좁게·넓게) · 모눈종이 · 리걸노트 · 점 격자 · 코넬 노트 · 오선지가 있고, 종이 색도 고를 수 있습니다.",
     "내 서식|‘내 PDF·이미지 서식’을 고르면 가지고 있는 PDF의 첫 페이지나 이미지를 모든 페이지의 배경으로 씁니다.",
-    "페이지 추가|노트의 마지막 장에서 다음으로 넘기면 같은 서식의 새 페이지가 붙습니다."],
+    "페이지 추가|‘페이지 추가’는 바로 앞 페이지와 같은 크기·방향·서식(백지, 금감원노트 등)의 새 페이지를 붙입니다. 노트의 마지막 장에서 다음으로 넘겨도 같은 페이지가 붙습니다. ‘다른 형식으로 페이지 추가’에서는 다른 종이와 A4 세로·가로 크기를 고를 수 있습니다."],
   ["12. 음성 녹음 · 검색 · 번역",
     "음성 녹음|개요 패널의 마이크 탭에서 녹음하면 현재 페이지에 ‘▶ 녹음’ 표시가 붙고, 탭하면 재생합니다.",
     "검색|돋보기 아이콘으로 본문 글자를 찾고, 손글씨 필기도 검색됩니다.",

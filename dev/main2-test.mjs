@@ -99,7 +99,7 @@ await ev(() => T.app.showOutlineItem(T.app.store.outlines[0])); await shot('12-o
 
 // ---------------------------------------------------------------- sheets
 await ev(() => T.app.showPageMenu(2)); await shot('13-page-menu');
-check('page menu rows (anchored menu card, Android v1.32.0)', (await page.locator('.amenu .amenu-row').count()) === 3);
+check('page menu rows (anchored menu card, Android v1.32.0)', (await page.locator('.amenu .amenu-row').count()) === 4);
 await page.keyboard.press('Escape'); await page.waitForTimeout(300);
 check('sheet closed', (await page.locator('.amenu').count()) === 0);
 

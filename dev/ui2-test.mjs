@@ -30,7 +30,7 @@ await pg.evaluate(()=>app.showLibrary()); await pg.waitForTimeout(500);
 await pg.click('.lib-compose, [aria-label="새로 만들기"], .lib-new').catch(async()=>{await pg.evaluate(()=>app.libraryDialog.newMenu(app.libraryDialog.compose))});
 await pg.waitForTimeout(400);
 const menu=await pg.evaluate(()=>[...document.querySelectorAll('.amenu .amenu-row')].map(e=>e.textContent.trim()));
-check('library add menu = 문서 추가 card with 3 icon rows', menu.length===3&&menu[0].includes('파일 가져오기')&&menu[1].includes('새 노트 만들기')&&menu[2].includes('폴더 만들기'), JSON.stringify(menu));
+check('library add menu = 문서 추가 card with 3 icon rows', menu.length===3&&menu[0].includes('새 노트 만들기')&&menu[1].includes('파일 가져오기')&&menu[2].includes('폴더 만들기'), JSON.stringify(menu));
 check('rows have icons', await pg.locator('.amenu svg').count()>=3);
 await pg.screenshot({path:'dev/out/ui2-2-libmenu.png'});
 await pg.keyboard.press('Escape'); await pg.evaluate(()=>app.libraryDialog&&app.libraryDialog.dismiss&&app.libraryDialog.dismiss()); await pg.waitForTimeout(300);
