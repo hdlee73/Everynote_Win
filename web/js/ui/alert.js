@@ -61,7 +61,7 @@ export class AlertDialog {
     this.b = b; this.sheet = b.items != null; this.buttons = [null, null, null]; this.titleView = null; this.messageView = null; this.dismissed = false;
     const which = [BUTTON_POSITIVE, BUTTON_NEGATIVE, BUTTON_NEUTRAL];
     for (let i = 0; i < 3; i++) {
-      const el = h('div', { class: 'ad-btn' + (i === 0 ? ' bold' : ''), role: 'button', 'aria-label': b.labels[i] || '' }, b.labels[i] || '');
+      const el = h('div', { class: 'ad-btn' + (i === 0 ? ' bold' : ''), role: 'button', 'aria-label': b.labels[i] || '' }, b.labels[i] ? h('span', { class: 'ad-btn-label' }, b.labels[i]) : '');
       if (b.labels[i] && (i === 1 || b.items != null) && /삭제|비우기/.test(String(b.labels[i]))) el.style.color = '#FF3B30';
       el.addEventListener('click', () => { const l = b.listeners[i]; if (l) l(this, which[i]); this.dismiss(); });
       this.buttons[i] = el;

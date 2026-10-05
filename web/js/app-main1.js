@@ -264,6 +264,7 @@ const methods = {
     this.fingerInk = p.getBoolean('finger_ink', false);
     this.swipeEnabled = p.getBoolean('page_swipe_enabled_v2', true);
     this.twoPage = p.getBoolean('two_page', false);
+    this.selectedColor = (((p.getInt('highlight_alpha', 0x66) & 255) << 24) | (this.selectedColor & 0xFFFFFF)) | 0;
     this.library = new LibraryRepository();
     await this.library.ready;
     this.libraryFolder = this.library.root;
@@ -271,6 +272,7 @@ const methods = {
     this.showAllThumbnails = p.getBoolean('thumb_all', false);
     this.buildUi();
     this.pageView.setLassoShape(this.lassoShape);
+    this.applyEraserRadius();
     this.applyDarkPage();
     this.inkPen = p.getInt('ink_pen', 0);
     this.pageView.setInkPen(this.inkPen);
@@ -488,7 +490,7 @@ const methods = {
     this.barIcon(writeBar, 'ic_book', '읽기 모드', 0xFF007AFF, () => this.setWriteMode(false));
     this.penButton = this.barIcon(writeBar, 'ic_ink', '펜', 0xFF1C1C1E, v => this.penTap(v));
     this.hlButton = this.barIcon(writeBar, 'ic_highlight', '형광펜', 0xFFF5C400, v => this.highlightTap(v));
-    this.eraserButton = this.barIcon(writeBar, 'ic_eraser', '지우개', 0xFFFF6B8A, () => { if (this.renderer == null) toast('문서를 먼저 여세요'); else this.setInkMode(2); });
+    this.eraserButton = this.barIcon(writeBar, 'ic_eraser', '지우개 · 한 번 더 누르면 지울 범위', 0xFFFF6B8A, v => this.eraserTap(v));
     this.lassoButton = this.barIcon(writeBar, 'ic_lasso', '올가미 선택', 0xFFAF52DE, () => this.toggleLasso());
     this.memoButton = this.barIcon(writeBar, 'ic_note_add', '메모 추가', 0xFFFF9500, () => this.toggleMemoMode());
     this.barIcon(writeBar, 'ic_insert', '삽입 · 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
@@ -504,15 +506,15 @@ const methods = {
     // ---- fullscreen dock + handle (overlays of root)
     const dock = this.fullscreenDock = h('div', { class: 'm-dock', dataset: { tag: 'fullscreen_toolbar' } });
     dock.append(
-      this.dockIcon('ic_outline', '전체 화면 개요', NAVY, () => this.showOutlineList()),
-      this.dockIcon('ic_eye', '전체 화면 보기 방법', NAVY, v => this.showViewMenu(v)),
-      this.dockIcon('ic_ink', '전체 화면 필기도구', NAVY, v => this.penTap(v)),
-      this.dockIcon('ic_note_add', '전체 화면 메모 추가', NAVY, () => this.toggleMemoMode()),
-      this.dockIcon('ic_insert', '전체 화면 삽입', NAVY, v => this.showInsertMenu(v)),
-      this.dockIcon('ic_text', '전체 화면 타이핑', NAVY, () => this.toggleTyping()),
-      this.dockIcon('ic_lasso', '전체 화면 올가미', NAVY, () => this.toggleLasso()),
-      this.dockIcon('ic_more_vert', '전체 화면 메뉴', NAVY, v => this.showMainMenu(v, true)),
-      this.fullscreenExit = this.dockIcon('ic_fullscreen_exit', '전체 화면 종료', NAVY, () => this.toggleFullscreen()));
+      this.dockIcon('ic_outline', '전체 화면 개요', 0xFF007AFF, () => this.showOutlineList()),
+      this.dockIcon('ic_eye', '전체 화면 보기 방법', 0xFF30B0C7, v => this.showViewMenu(v)),
+      this.dockIcon('ic_ink', '전체 화면 필기도구', 0xFF5856D6, v => this.penTap(v)),
+      this.dockIcon('ic_note_add', '전체 화면 메모 추가', 0xFFFF9500, () => this.toggleMemoMode()),
+      this.dockIcon('ic_insert', '전체 화면 삽입', 0xFFFF2D55, v => this.showInsertMenu(v)),
+      this.dockIcon('ic_text', '전체 화면 타이핑', 0xFF34C759, () => this.toggleTyping()),
+      this.dockIcon('ic_lasso', '전체 화면 올가미', 0xFFAF52DE, () => this.toggleLasso()),
+      this.dockIcon('ic_more_vert', '전체 화면 메뉴', 0xFF8E8E93, v => this.showMainMenu(v, true)),
+      this.fullscreenExit = this.dockIcon('ic_fullscreen_exit', '전체 화면 종료', 0xFFAF52DE, () => this.toggleFullscreen()));
     this.dockGrip = this.makeGrip(dock, 'dock'); dock.prepend(this.dockGrip);
     root.append(h('div', { class: 'm-dockwrap' }, dock));
     const rearm = () => { if (this.dockShown && !this.dockPinned()) { clearTimeout(this._dockTimer); this._dockTimer = setTimeout(this.dockHider, 6000); } };
@@ -592,7 +594,7 @@ const methods = {
   },
   zoomViews() {
     const a = [this.firstPageView];
-    if (this.twoPage && this.secondPageView && isShown(this.secondPageView)) a.push(this.secondPageView);
+    if (this.twoPage && this.secondPageView && isShown(this.secondPageView) && !this.firstPageView.spreadSide) a.push(this.secondPageView);   // a spread shares one zoom
     return a;
   },
   zoomTo(z) {
@@ -641,6 +643,37 @@ const methods = {
     if (!this.writeMode) { this.setWriteMode(true); return; }
     if (!this.highlightMode && (this.inkMode === 1 || this.inkMode === 3)) this.showPenMenu(anchor); else this.setInkMode(1);
   },
+  eraserTap(anchor) {
+    if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
+    if (this.inkMode === 2 && !this.highlightMode) this.showEraserMenu(anchor); else this.setInkMode(2);
+  },
+  ERASER_SIZES: [8, 14, 22, 32, 48],
+  ERASER_NAMES: ['아주 작게', '작게', '보통', '크게', '아주 크게'],
+  eraserRadius() { return this.recentPrefs.getInt('eraser_radius', 18); },
+  applyEraserRadius() { const r = this.eraserRadius(); for (const v of [this.firstPageView, this.secondPageView]) if (v && v.setEraserRadius) v.setEraserRadius(r); },
+  /** Eraser range (v3.10): five sizes drawn as circles plus a fine slider; the circle also follows the pen / mouse while erasing. */
+  showEraserMenu(anchor) {
+    const box = h('div', { class: 'm-menubox m-eraserbox', dataset: { tag: 'eraser_menu' } });
+    const label = h('div', { class: 'm-oplabel' });
+    const row = h('div', { class: 'm-eraser-row', dataset: { tag: 'eraser_sizes' } });
+    const bar = h('input', { type: 'range', min: 4, max: 60, step: 1, class: 'm-opbar', 'aria-label': '지울 범위', title: '지울 범위', dataset: { tag: 'eraser_radius' } });
+    const set = r => { this.recentPrefs.putInt('eraser_radius', r); this.applyEraserRadius(); refresh(); };
+    const cells = this.ERASER_SIZES.map((r, i) => {
+      const c = h('div', { class: 'm-eraser-cell', role: 'button', 'aria-label': '지울 범위 ' + this.ERASER_NAMES[i], title: this.ERASER_NAMES[i] },
+        h('span', { class: 'm-eraser-dot', style: { width: Math.round(6 + i * 6) + 'px', height: Math.round(6 + i * 6) + 'px' } }));
+      c.addEventListener('click', () => set(r)); row.append(c); return c;
+    });
+    const refresh = () => {
+      const r = this.eraserRadius(); bar.value = r;
+      let best = 0; this.ERASER_SIZES.forEach((x, i) => { if (Math.abs(x - r) < Math.abs(this.ERASER_SIZES[best] - r)) best = i; });
+      cells.forEach((c, i) => c.classList.toggle('on', i === best && Math.abs(this.ERASER_SIZES[i] - r) <= 2));
+      label.textContent = '지울 범위 · 지름 ' + r * 2 + 'px';
+    };
+    bar.addEventListener('input', () => set(+bar.value));
+    refresh();
+    box.append(h('div', { class: 'm-eraser-title' }, label), row, h('div', { class: 'm-opacity' }, bar));
+    AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
+  },
   highlightTap(anchor) {
     if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
     if (this.highlightMode) this.showHighlightMenu(anchor); else this.toggleHighlight();
@@ -685,9 +718,30 @@ const methods = {
   showHighlightMenu(anchor) {
     const hlTint = '#' + ((this.selectedColor | 0) & 0xFFFFFF).toString(16).padStart(6, '0');
     const box = h('div', { class: 'm-menubox', style: { padding: '6px 2px 0' } });
-    box.append(swatchesView(HIGHLIGHT_COLORS, () => this.selectedColor, c => {
-      this.selectedColor = c | 0; this.pageView.setHighlightMode(this.highlightMode, this.selectedColor); this.syncOtherTools(); this.updateInkButton();
-    }, 30, 2));
+    const alpha = () => (this.selectedColor >>> 24) & 255;
+    const applyColor = () => { this.pageView.setHighlightMode(this.highlightMode, this.selectedColor); this.syncOtherTools(); this.updateInkButton(); };
+    const setAlpha = a => {
+      a = Math.max(26, Math.min(255, a | 0)); this.selectedColor = ((a << 24) | (this.selectedColor & 0xFFFFFF)) | 0;
+      this.recentPrefs.putInt('highlight_alpha', a); applyColor(); op.refresh(); presets.refresh();
+    };
+    // swatches compare by colour only: the chosen transparency applies to every colour
+    const sw = swatchesView(HIGHLIGHT_COLORS, () => (this.selectedColor & 0xFFFFFF) | 0x66000000, c => {
+      this.selectedColor = ((alpha() << 24) | (c & 0xFFFFFF)) | 0; applyColor();
+    }, 30, 2, HIGHLIGHT_COLORS);
+    box.append(sw);
+    // transparency (v3.10): slider + quick buttons, kept for the next highlights
+    const op = opacityBar(alpha, setAlpha); op.dataset.tag = 'highlight_opacity'; box.append(op);
+    const presets = h('div', { class: 'm-alpha-row', dataset: { tag: 'highlight_opacity_presets' } });
+    const PRESETS = [[25, '연하게'], [40, '기본'], [60, '진하게'], [85, '아주 진하게']];
+    const chips = PRESETS.map(([pct, name]) => {
+      const a = Math.round(pct * 255 / 100);
+      const c = h('div', { class: 'm-alpha-chip', role: 'button', 'aria-label': '투명도 ' + name + ' ' + pct + '%', title: name + ' ' + pct + '%' },
+        h('span', { class: 'm-alpha-sample', style: { background: argb(((a << 24) | (this.selectedColor & 0xFFFFFF)) >>> 0) } }), h('span', null, pct + '%'));
+      c.addEventListener('click', () => setAlpha(a)); presets.append(c); return [c, a];
+    });
+    presets.refresh = () => chips.forEach(([c, a]) => { c.classList.toggle('on', Math.abs(a - alpha()) <= 2); c.firstChild.style.background = argb(((a << 24) | (this.selectedColor & 0xFFFFFF)) >>> 0); });
+    presets.refresh(); box.append(presets);
+    sw.addEventListener('click', () => presets.refresh());
     // thickness slider (Android v1.30.0): "굵기 N", 0.008 + v * 0.0024, 31 steps
     const label = h('div', { class: 'm-oplabel', dataset: { tag: 'highlight_thick_label' } }, '굵기 ' + Math.round(this.highlightThick * 1000));
     const bar = h('input', { type: 'range', min: 0, max: 30, step: 1, class: 'm-opbar', 'aria-label': '굵기', title: '굵기', dataset: { tag: 'highlight_thick' } });
@@ -755,6 +809,11 @@ const methods = {
       rows.push(new Row('삽입', 'ic_insert', null).children(this.rowsOf(2)).tint('#5856D6'));
       rows.push(new Row('학습·주석', 'ic_study', null).children(this.rowsOf(3)).tint('#30B0C7'));
       rows.push(new Row('내보내기·백업', 'ic_share', null).children(this.rowsOf(4)).tint('#007AFF'));
+    } else {
+      rows.push(Row.divider());
+      rows.push(new Row('내보내기·백업', 'ic_share', null).tint('#007AFF').children([
+        new Row('모든 문서 백업', 'ic_backup', () => this.callUi2('startLibraryBackup')).tint('#007AFF'),
+        new Row('모든 문서 복원', 'ic_import', () => this.callUi2('startLibraryRestore')).tint('#007AFF')]));
     }
     rows.push(Row.divider());
     rows.push(new Row('화면 켜 둠', 'ic_clock', () => {
@@ -764,9 +823,6 @@ const methods = {
     rows.push(new Row('전체 화면 메뉴 계속 표시', 'ic_float', () => this.toggleDockPinned()).tint('#8E8E93').selected(this.dockPinned()));
     if (doc) rows.push(new Row('인쇄', 'ic_print', () => this.callUi2('printDocument')).tint('#007AFF'));
     rows.push(Row.divider());
-    rows.push(new Row('모든 문서 백업·복원', 'ic_backup', null).tint('#007AFF').children([
-      new Row('모든 문서 통째로 백업', 'ic_backup', () => this.callUi2('startLibraryBackup')).tint('#007AFF'),
-      new Row('백업 파일에서 모든 문서 복원', 'ic_import', () => this.callUi2('startLibraryRestore')).tint('#007AFF')]));
     rows.push(new Row('사용법', 'ic_outline', () => this.showHelp()).tint('#8E8E93'));
     rows.push(new Row('오프라인 사용 안내', 'ic_wifi_off', () => this.callUi2('showAboutOffline')).tint('#8E8E93'));
     rows.push(new Row('앱 정보·업데이트', 'ic_more_vert', () => this.callUi2('showAbout')).tint('#8E8E93'));
@@ -1173,6 +1229,7 @@ const methods = {
   },
   _applyPage(session, doc, index, first, second, c1, c2) {
     const store = session.store, two = this.twoPage, count = doc.pageCount;
+    if (this.firstPageView.setSpread) { this.firstPageView.setSpread(two ? 1 : 0, this.secondPageView); this.secondPageView.setSpread(two ? -1 : 0, this.firstPageView); }   // the two pages touch and zoom as one sheet
     this.firstPageView.showPage(c1, first, store.marks, store.strokes, store.translations); this.firstPageView.setAnnotationStore(store);
     if (second >= 0) {
       setVis(this.secondPageView.el, 'visible');
@@ -1738,7 +1795,8 @@ const methods = {
     }
     toast('선택한 내용을 복사했습니다');
   },
-  /** 단어장 (Android v1.28/1.29 copies the English word and opens the 영어 스터디 app): Windows has no such app, so only copy the word. */
+  /** 단어장 (Android v1.28/1.29 copies the English word and opens the 영어 스터디 app): on Windows it copies the word and opens it in the
+   *  Naver English-English dictionary (v3.10) in the default browser. */
   async openDictionary(word) {
     let query = String(word || '').replace(/^[^A-Za-z]+|[^A-Za-z'-]+$/g, '').trim();
     if (query === '') query = String(word || '').trim();
@@ -1748,7 +1806,9 @@ const methods = {
       const ta = h('textarea', { style: { position: 'fixed', left: '-1000px', top: '0' } }); ta.value = query; document.body.append(ta); ta.select();
       try { document.execCommand('copy'); } catch (e2) { /* ignore */ } ta.remove();
     }
-    toast('단어가 복사되었습니다');
+    toast('단어가 복사되었습니다 · 네이버 영영사전을 엽니다');
+    try { await host.shellOpen('https://dict.naver.com/enendict/#/search?query=' + encodeURIComponent(query)); }
+    catch (e) { toast('브라우저를 열 수 없습니다 (단어는 복사되었습니다)'); }
   },
   addOcrHighlights(bounds) {
     for (const b of bounds) {

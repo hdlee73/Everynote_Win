@@ -27,10 +27,11 @@ textarea.field{overflow-y:auto}
 .m2-seg-chip.on{background:#007AFF;color:#fff;font-weight:700}
 .m2-toggle{display:flex;align-items:center;justify-content:center;font-size:15px;border-radius:18px;background:#F2F2F7;color:#1C1C1E;cursor:pointer;-webkit-user-select:none;user-select:none}
 .m2-toggle.on{background:#007AFF;color:#fff}
-.m2-colorrow{display:flex;align-items:center}
-.m2-cdot{flex:1 1 0;height:32px;margin:2px 3px;border-radius:50%;box-sizing:border-box;cursor:pointer;background:#fff}
+.m2-colorrow{display:flex;align-items:center;justify-content:space-between;gap:4px;padding:2px 0}
+.m2-cdot{flex:none;width:30px;height:30px;aspect-ratio:1;margin:2px 0;border-radius:50%;box-sizing:border-box;cursor:pointer;background:#fff;transition:transform .1s}
+.m2-cdot:hover{transform:scale(1.08)}
 .m2-cdot-more{background:conic-gradient(#FF3B30,#FFCC00,#34C759,#00C7BE,#007AFF,#AF52DE,#FF3B30)}
-.m2-seclabel{font-size:12px;color:#8E8E93;padding:10px 0 2px 4px}
+.m2-seclabel{font-size:12px;font-weight:500;color:#8E8E93;padding:12px 0 4px 2px}
 .m2-pill{display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;border-radius:18px;cursor:pointer;-webkit-user-select:none;user-select:none}
 .m2-step{display:flex;align-items:center;justify-content:center;font-size:18px;color:#1C1C1E;background:#F2F2F7;border-radius:18px;cursor:pointer;-webkit-user-select:none;user-select:none}
 .m2-dbtn{display:flex;align-items:center;justify-content:center;height:48px;padding:0 12px;font-size:16px;cursor:pointer;white-space:nowrap;-webkit-user-select:none;user-select:none}
@@ -80,7 +81,9 @@ textarea.field{overflow-y:auto}
 .m2-shape-btn{flex:1 1 0;margin:3px;border-radius:10px;font-size:13px;display:flex;align-items:center;justify-content:center;background:#F2F2F7;color:#1C1C1E;cursor:pointer;-webkit-user-select:none;user-select:none}
 .m2-shape-btn.on{background:#E5F0FF;color:#007AFF}
 .m2-seek{width:100%;accent-color:#007AFF;margin:8px 0 4px}
-.m2-tbl-size{display:flex;align-items:center;font-size:14px}
+.m2-tbl-size{display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;color:#3A3A3C;padding:2px 0 4px}
+.m2-tbl-size .field{width:72px!important}
+.ad-card:has(.m2-shapebox){width:min(calc(100vw - 32px),400px)}
 .m2-cells{display:flex;flex-direction:column;padding:4px 10px;width:max-content}
 .m2-cell-row{display:flex}
 .m2-cell-row .field{padding:8px 10px}

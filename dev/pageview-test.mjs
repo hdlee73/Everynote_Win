@@ -656,6 +656,36 @@ await clearLog();
   await ev(() => { T.store.elements.length = 0; T.view.selectElement(null); T.view.invalidate(); });
 }
 
+// --- v3.10: memo resize / rotate with the MOUSE (not only finger and pen) ----------------------------------------------
+{
+  await ev(() => { T.view.setInkTool(0, 0xFF1C1C1E | 0, 0.004); T.view.selectElement(null); const m = new T.Mark(); m.page = 0; m.left = .55; m.right = .6; m.top = .2; m.bottom = .22; m.noteOnly = true; m.note = '마우스 메모'; T.store.marks.push(m); T.mm = m; T.view.selectedMemo = null; T.view.invalidate(); T.view.flush(); });
+  const mbx = () => ev(() => { const b = T.view.memoHitBoxes.get(T.mm); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; });
+  let q = await mbx(); const M = { type: 'mouse', id: 1 };
+  await drag([[(q.l + q.r) / 2, (q.t + q.b) / 2], [(q.l + q.r) / 2, (q.t + q.b) / 2]], M);
+  check('mouse click selects the memo', await ev(() => T.view.selectedMemo === T.mm));
+  await ev(() => { T.view.invalidate(); T.view.flush(); }); q = await mbx();
+  await drag(line(q.r, q.b, q.r + 60, q.b + 40, 8), M);
+  const sz = await ev(() => [T.mm.boxW, T.mm.boxH]);
+  check('mouse drags the memo corner to resize', sz[0] > (q.r - q.l) + 30 && sz[1] > (q.b - q.t) + 20, JSON.stringify(sz));
+  await ev(() => { T.view.invalidate(); T.view.flush(); }); q = await mbx();
+  const knob = [(q.l + q.r) / 2, q.t - 28 * (await ev(() => window.devicePixelRatio ? 1 : 1))];
+  await drag([knob, [q.r + 80, (q.t + q.b) / 2], [q.r + 120, (q.t + q.b) / 2]], M);
+  check('mouse drags the knob to rotate the memo', (await ev(() => T.mm.rot || 0)) > 30, String(await ev(() => T.mm.rot)));
+  await ev(() => { T.view.selectedMemo = null; const i = T.store.marks.indexOf(T.mm); if (i >= 0) T.store.marks.splice(i, 1); T.view.invalidate(); });
+}
+// --- v3.10: eraser range ------------------------------------------------------------------------------------------------
+{
+  await ev(() => { T.store.strokes.length = 0; const S = T.view.strokes; const mk = (x) => { const s = new T.InkStroke(); s.page = 0; s.color = 0xFF1C1C1E | 0; s.width = .004; s.points.push(new T.InkPoint(x, .7, .5), new T.InkPoint(x, .75, .5)); T.store.strokes.push(s); }; mk(.40); mk(.46); mk(.52); T.view.invalidate(); });
+  const cx = px(.46), cy = py(.72), gap = .06 * R.w;
+  await ev(() => { T.view.setInkTool(2, 0xFF1C1C1E | 0, 0.004); T.view.setEraserRadius(8); });
+  await drag([[cx, cy], [cx, cy]], { type: 'pen', id: 71 });
+  check('small eraser removes only the stroke under it', (await ev(() => T.store.strokes.length)) === 2);
+  await ev(r => T.view.setEraserRadius(r), Math.ceil(gap + 6));
+  await drag([[cx, cy], [cx, cy]], { type: 'pen', id: 72 });
+  check('large eraser removes every stroke in its range', (await ev(() => T.store.strokes.length)) === 0, 'r=' + Math.ceil(gap + 6));
+  await ev(() => { T.view.setInkTool(0, 0xFF1C1C1E | 0, 0.004); T.view.setEraserRadius(18); });
+}
+
 // --- dark page, snapshot -----------------------------------------------------------------------------------
 await ev(() => T.view.setDarkPage(true));
 await shot('11-dark');

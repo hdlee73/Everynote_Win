@@ -36,3 +36,7 @@
   display: block;
   pointer-events: none;
 }
+/* two-page spread (v3.10): the pages container paints the backdrop, so each page can be drawn across the seam into the other half */
+.pdf-page-view.pv-spread {
+  background: transparent;
+}

@@ -21,6 +21,8 @@
 //   net.http({url,method,headers,text,readPath,savePath}) -> {status,text}   (plain http to private IPv4 addresses only: device sync)
 //   zip.create({path,entries:[{name,file}|{name,text}]}) -> {count} ; zip.entries({path}) -> [{name,size}] ; zip.readText({path,name}) -> string ; zip.extract({path,name,to})
 //   update.check() -> {version,page,notes,setupUrl,exeUrl,installed,arch} (GitHub releases of this project) ; update.install({url}) downloads the Setup and starts it with /UPDATE
+//   media.openExternal({path})         -> true   default Windows player (extension fixed to the real container)
+//   media.transcode({id,from,to}) -> {path,size}  AVI/WMV/MKV... -> H.264 MP4 via Media Foundation (events media.progress {id,percent})
 //   ocr.recognize({png:b64,lang}) -> {width,height,words:[{text,x,y,w,h,line}]}  (pixel boxes)
 import { baseName, dirName } from './util.js';
 
@@ -121,6 +123,8 @@ const fake = {
       case 'update.check': if (this.updateHandler) return this.updateHandler(a); throw new Error('브라우저에서는 지원하지 않습니다');
       case 'update.install': (this.installed ||= []).push(a.url); return true;
       case 'ocr.recognize': throw new Error('OCR unavailable in browser');
+      case 'media.transcode': if (this.transcodeHandler) return this.transcodeHandler(a); throw new Error('동영상 변환은 Windows 앱에서만 됩니다');
+      case 'media.openExternal': (this.externalOpened ||= []).push(a.path); return true;
       default: throw new Error('unknown host method ' + m);
     }
   },

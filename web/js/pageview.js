@@ -230,6 +230,9 @@ export class PdfPageView {
     this.wheelPageTurn = true;
     this._wheelAcc = 0; this._wheelLast = 0; this._wheelLock = 0;
     this._lastZoom = 1; this._theme = null;
+    /** Two-page spread: 1 = left page (hugs the seam at its right edge), -1 = right page, 0 = single page (centred). */
+    this.spreadSide = 0; this.spreadPartner = null; this._synced = null;
+    this.eraserRadius = 18; this._eraserAt = null;
 
     this.scaleDetector = new ScaleDetector({
       onScaleBegin: () => {
@@ -269,6 +272,8 @@ export class PdfPageView {
     el.addEventListener('pointerup', e => this._onPointerUp(e), opt);
     el.addEventListener('pointercancel', e => this._onPointerCancel(e), opt);
     el.addEventListener('wheel', e => this._onWheel(e), opt);
+    el.addEventListener('pointermove', e => { if (e.pointerType !== 'touch' && !this._ptrs.length && this.inkMode === 2) { this._eraserAt = this._local(e); this.invalidate(); } });
+    el.addEventListener('pointerleave', () => { if (this._eraserAt) { this._eraserAt = null; this.invalidate(); } });
     el.addEventListener('contextmenu', e => this._onContextMenu(e));
     el.addEventListener('dragstart', e => e.preventDefault());
     if (typeof ResizeObserver !== 'undefined') { this._ro = new ResizeObserver(() => this._resize()); this._ro.observe(el); }
@@ -294,8 +299,10 @@ export class PdfPageView {
     this.clampPan();
     this.invalidate();
   }
+  /** CSS px the canvas extends past the seam (one view width) so a zoomed or panned spread is drawn joined across both views. */
+  _spill() { return this.spreadSide ? this.el.clientWidth : 0; }
   _syncCanvas() {
-    const dpr = window.devicePixelRatio || 1, w = this.el.clientWidth, h = this.el.clientHeight;
+    const dpr = window.devicePixelRatio || 1, w = this.el.clientWidth + this._spill(), h = this.el.clientHeight;
     const pw = Math.max(1, Math.round(w * dpr)), ph = Math.max(1, Math.round(h * dpr));
     if (this.canvas.width !== pw || this.canvas.height !== ph) { this.canvas.width = pw; this.canvas.height = ph; }
     return dpr;
@@ -314,16 +321,18 @@ export class PdfPageView {
     if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
     const dpr = this._syncCanvas(), ctx = this._ctx;
     if (!this._theme && this.el.isConnected) this.refreshTheme();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, this.el.clientWidth, this.el.clientHeight);       // the backdrop is the CSS background of el
-    this._paintAll(ctx, this.el.clientWidth, this.el.clientHeight, false);
+    this._syncSpread();
+    const spillL = this.spreadSide < 0 ? this._spill() : 0, spillW = this._spill();
+    ctx.setTransform(dpr, 0, 0, dpr, spillL * dpr, 0);
+    ctx.clearRect(-spillL, 0, this.el.clientWidth + spillW, this.el.clientHeight);       // the backdrop is the CSS background of el (of the spread's parent)
+    this._paintAll(ctx, this.el.clientWidth, this.el.clientHeight, false, spillL, spillW);
     this._checkZoom();
   }
   /** opaque: also paint the backdrop (snapshots); the live canvas is transparent over the CSS backdrop. */
-  _paintAll(ctx, W, H, opaque = true) {
+  _paintAll(ctx, W, H, opaque = true, spillL = 0, spillW = 0) {
     ctx.save();
     if (opaque) { ctx.fillStyle = this.theme().backdrop; ctx.fillRect(0, 0, W, H); }
-    ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+    ctx.beginPath(); ctx.rect(-spillL, 0, W + spillW, H); ctx.clip();
     this.onDraw(ctx);
     ctx.restore();
   }
@@ -335,14 +344,14 @@ export class PdfPageView {
       const g = n => cs.getPropertyValue(n).trim();
       t.backdrop = g('--pv-backdrop') || t.backdrop; t.border = g('--pv-paper-border') || t.border; t.shadow = g('--pv-paper-shadow') || t.shadow;
     } catch (_) { /* keep the fallback */ }
-    this._theme = t; this.el.style.background = t.backdrop; this.invalidate();
+    this._theme = t; this.el.style.background = this.spreadSide ? 'transparent' : t.backdrop; this.invalidate();
     return t;
   }
   theme() { return this._theme || (this.darkPage ? THEME_DARK : THEME_LIGHT); }
   /** The root only carries data-dark-page; css/pageview.css turns it into the backdrop / shadow variables. */
   applyBackground() {
     this.el.dataset.darkPage = this.darkPage ? 'true' : 'false'; this._theme = null;
-    if (this.el.isConnected) this.refreshTheme(); else this.el.style.background = this.theme().backdrop;
+    if (this.el.isConnected) this.refreshTheme(); else this.el.style.background = this.spreadSide ? 'transparent' : this.theme().backdrop;
   }
 
   /** What View.draw(canvas) gives: the visible view on a white (black when dark) underlay. Returns an HTMLCanvasElement of
@@ -422,7 +431,10 @@ export class PdfPageView {
     this.invalidate();
   }
   setDirectTextSelection(enabled) { this.directTextSelection = enabled; this.clearTextSelectionOverlay(); }
+  /** Eraser range: radius in screen px (v3.10, default 18). */
+  setEraserRadius(px) { this.eraserRadius = Math.max(4, Math.min(80, +px || 18)); this.invalidate(); }
   copyToolsFrom(other) {
+    this.eraserRadius = other.eraserRadius;
     this.darkPage = other.darkPage; this._darkBitmap = null; this.applyBackground(); this.directTextSelection = other.directTextSelection;
     this.highlightMode = other.highlightMode; this.memoMode = other.memoMode; this.outlineMode = other.outlineMode; this.highlightColor = other.highlightColor;
     this.highlightFree = other.highlightFree; this.highlightThick = other.highlightThick;
@@ -499,6 +511,34 @@ export class PdfPageView {
     }
     this.panX = this.panY = 0; this.invalidate();
   }
+  /** Two-page spread (left page side = 1, right page side = -1, 0 = off): the pages touch at the seam, and zoom / pan are shared with
+   *  `partner` so the spread zooms and moves as one sheet. */
+  setSpread(side, partner) {
+    side = side > 0 ? 1 : side < 0 ? -1 : 0;
+    this.spreadPartner = side ? partner || null : null;
+    if (side === this.spreadSide) return;
+    this.spreadSide = side; this._synced = null;
+    this.el.classList.toggle('pv-spread', side !== 0);
+    this.el.style.overflow = side ? 'visible' : 'hidden';
+    this.el.style.zIndex = side < 0 ? '1' : '';
+    Object.assign(this.canvas.style, side ? { left: side < 0 ? '-100%' : '0', width: '200%' } : { left: '0', width: '100%' });
+    this.el.style.background = side ? 'transparent' : this.theme().backdrop;
+    if (!side && this.el.parentElement) this.el.parentElement.style.background = '';
+    this.panX = this.panY = 0; this.invalidate();
+  }
+  /** Whichever view of the spread changed its zoom / pan since the last sync hands it to the other one. */
+  _syncSpread() {
+    const o = this.spreadPartner; if (!this.spreadSide || !o || !o.spreadSide) return;
+    if (this.el.parentElement) { const bd = this.theme().backdrop; if (this.el.parentElement.style.background !== bd) this.el.parentElement.style.background = bd; }
+    const mine = this._synced;
+    if (mine && mine.s === this.scale && mine.x === this.panX && mine.y === this.panY) return;
+    if (o.scale !== this.scale || o.panX !== this.panX || o.panY !== this.panY) {
+      o.scale = this.scale; o.panX = this.panX; o.panY = this.panY; o.invalidate(); o._checkZoom();
+    }
+    this._synced = o._synced = { s: this.scale, x: this.panX, y: this.panY };
+  }
+  /** x (view px) of the seam, or null when this view is not part of a spread. */
+  _seamX() { if (!this.spreadSide || !this.bitmap) return null; const r = this.contentRect(); return this.spreadSide > 0 ? r.right : r.left; }
   contentSize() {
     if (!this.bitmap) return [0, 0];
     const [bw, bh] = bitmapSize(this.bitmap);
@@ -506,14 +546,24 @@ export class PdfPageView {
     const base = Math.min(aw / (bw * this.crop.width()), ah / (bh * this.crop.height()));
     return [bw * base * this.scale, bh * base * this.scale];
   }
-  baseLeft(size) { return (this.width - size[0]) / 2 - (this.crop.centerX() - 0.5) * size[0]; }
+  baseLeft(size) {
+    if (this.spreadSide > 0) return this.width - this.crop.right * size[0];
+    if (this.spreadSide < 0) return -this.crop.left * size[0];
+    return (this.width - size[0]) / 2 - (this.crop.centerX() - 0.5) * size[0];
+  }
   baseTop(size) { return (this.height - size[1]) / 2 - (this.crop.centerY() - 0.5) * size[1]; }
   clampPan() {
     if (!this.bitmap) return;
     const size = this.contentSize();
     const pad2 = 2 * this.pagePadding;
     const maxX = Math.max(0, (size[0] * this.crop.width() + pad2 - this.width) / 2), maxY = Math.max(0, (size[1] * this.crop.height() + pad2 - this.height) / 2);
-    this.panX = Math.max(-maxX, Math.min(maxX, this.panX)); this.panY = Math.max(-maxY, Math.min(maxY, this.panY));
+    if (this.spreadSide) {   // keep the whole spread (both pages, seam at panX from the middle) inside the two views
+      const o = this.spreadPartner, ow = o && o.bitmap ? o.contentSize()[0] * o.crop.width() * (this.scale / (o.scale || 1)) : 0, mw = size[0] * this.crop.width();
+      const leftW = this.spreadSide > 0 ? mw : ow, rightW = this.spreadSide > 0 ? ow : mw, half = this.width, pad = this.pagePadding;
+      const a = leftW + pad - half, b = half - pad - rightW;
+      this.panX = Math.max(Math.min(a, b), Math.min(Math.max(a, b), this.panX));
+    } else this.panX = Math.max(-maxX, Math.min(maxX, this.panX));
+    this.panY = Math.max(-maxY, Math.min(maxY, this.panY));
     if (this.scale <= 1) this.panX = this.panY = 0;
   }
   /** Where the page is drawn inside this view (follows zoom and pan), in view px. */
@@ -545,7 +595,7 @@ export class PdfPageView {
   /** Current zoom: 1 = whole page fitted in the view ("100%"), 0.4..4. */
   getZoom() { return this.scale; }
   /** Sets the zoom (clamped 0.4..4) keeping the view point (fx, fy) (default: view centre) fixed. Fires onZoomChanged. */
-  setZoom(z, fx = this.width / 2, fy = this.height / 2) {
+  setZoom(z, fx = this.spreadSide > 0 ? this.width : this.spreadSide < 0 ? 0 : this.width / 2, fy = this.height / 2) {
     z = Number(z); if (!Number.isFinite(z)) return this.scale;
     z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
     if (!this.bitmap) { this.scale = z; this._checkZoom(); return z; }
@@ -786,6 +836,11 @@ export class PdfPageView {
       ctx.fillStyle = argb(0x222563EB); ctx.fill(path);
       ctx.lineWidth = 2 * DP; ctx.strokeStyle = argb(0xFF007AFF); ctx.setLineDash([8, 5]); ctx.lineDashOffset = 0; ctx.lineCap = 'butt'; ctx.stroke(path); ctx.setLineDash([]);
     }
+    if (this._eraserAt && this.inkMode === 2) {   // eraser range preview (follows the pen / mouse)
+      const [ex, ey] = this._eraserAt, r = Math.max(4, this.eraserRadius || 18);
+      ctx.beginPath(); ctx.arc(ex, ey, r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,107,138,.12)'; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,59,48,.75)'; ctx.stroke();
+    }
   }
 
   _searchRect(b, dest, pad) { return new RectF(dest.left + b.left * dest.width() - pad, dest.top + b.top * dest.height() - pad, dest.left + b.right * dest.width() + pad, dest.top + b.bottom * dest.height() + pad); }
@@ -877,14 +932,16 @@ export class PdfPageView {
     const b = this._stBox(o);
     if (!b || o.page !== this.page || o.minimized) { this.selSticky = null; this.stDrag = 0; return false; }
     const action = e.action, d = DP;
-    if (action === DOWN && e.pointerCount === 1 && !this.isStylus(e)) {
+    if (action === DOWN && e.pointerCount === 1) {
+      // handles (resize / rotate / delete) work with a finger, a pen and the mouse (v3.10); dragging the body needs a finger or no active pen tool
+      const touch = !this.isStylus(e), mouse = e.toolType === 'mouse';
       const [x, y] = o.rot ? PdfPageView.unrotate(e.x, e.y, b.centerX(), b.centerY(), o.rot) : [e.x, e.y];
       let hit = 0;
       if (Math.hypot(x - (b.right + 14 * d), y - (b.top - 28 * d)) <= 20 * d) hit = 7;
       else if (Math.hypot(x - b.centerX(), y - (b.top - 28 * d)) <= 20 * d) hit = 5;
       else if (Math.hypot(x - b.left, y - b.top) <= 22 * d) hit = 1; else if (Math.hypot(x - b.right, y - b.top) <= 22 * d) hit = 2;
       else if (Math.hypot(x - b.left, y - b.bottom) <= 22 * d) hit = 3; else if (Math.hypot(x - b.right, y - b.bottom) <= 22 * d) hit = 4;
-      else if (b.contains(x, y)) hit = 6;
+      else if (b.contains(x, y) && (touch || !this._toolActive())) hit = 6;
       if (hit === 0) return false;
       this.stDrag = hit; this.stMoved = false; this.stStartX = e.x; this.stStartY = e.y; this.stW0 = b.width() / d; this.stH0 = b.height() / d; this.stAx0 = o.right; this.stAy0 = o.top;
       if (hit !== 7) this._L('onSelectionAdjustStarted');
@@ -1087,11 +1144,21 @@ export class PdfPageView {
   }
   _eraseAt(e, dest) {
     if (!this.strokes || dest.width() === 0) return;
-    const x = (e.x - dest.left) / dest.width(), y = (e.y - dest.top) / dest.height(), threshold = Math.max(0.012, 18 / dest.width());
+    const x = (e.x - dest.left) / dest.width(), y = (e.y - dest.top) / dest.height(), dw = dest.width(), dh = dest.height();
+    const r = Math.max(4, this.eraserRadius || 18);   // eraser range in screen px (setEraserRadius)
+    this._eraserAt = [e.x, e.y];
+    let removed = 0;
     for (let i = this.strokes.length - 1; i >= 0; i--) {
       const s = this.strokes[i]; if (s.page !== this.page) continue;
-      for (const p of s.points) if (Math.hypot(p.x - x, p.y - y) <= threshold) { this.strokes.splice(i, 1); this._L('onInkChanged'); this.invalidate(); return; }
+      const pts = s.points; let hit = false;
+      for (let k = 0; k < pts.length && !hit; k++) {   // points and the segments between them, so a wide eraser also catches fast, sparse strokes
+        const a = pts[k], b = pts[k + 1] || a, ax = (a.x - x) * dw, ay = (a.y - y) * dh, vx = (b.x - a.x) * dw, vy = (b.y - a.y) * dh, L2 = vx * vx + vy * vy;
+        const t = L2 > 0 ? Math.max(0, Math.min(1, -(ax * vx + ay * vy) / L2)) : 0;
+        if (Math.hypot(ax + t * vx, ay + t * vy) <= r) hit = true;
+      }
+      if (hit) { this.strokes.splice(i, 1); removed++; }
     }
+    if (removed) { this._L('onInkChanged'); this.invalidate(); return; }
     if (this.marks) for (let i = this.marks.length - 1; i >= 0; i--) {
       const m = this.marks[i]; if (m.page !== this.page || m.noteOnly) continue;
       const mx = 0.004;
@@ -1145,6 +1212,11 @@ export class PdfPageView {
   }
   _onPointerDown(pe) {
     if (pe.pointerType === 'mouse' && pe.button !== 0) return;
+    const seam = this._ptrs.length === 0 ? this._seamX() : null, o = this.spreadPartner;
+    if (seam != null && o && o.bitmap && !pe._spreadForwarded) {   // zoomed spread: the other page is drawn across the seam inside this view
+      const lx = this._local(pe)[0];
+      if (this.spreadSide > 0 ? lx > seam + 1 : lx < seam - 1) { pe._spreadForwarded = true; o._onPointerDown(pe); return; }
+    }
     pe.preventDefault();
     try { this.el.setPointerCapture(pe.pointerId); } catch (_) { /* ignore */ }
     const stale = this._ptrs.findIndex(p => p.id === pe.pointerId);
@@ -1314,7 +1386,7 @@ export class PdfPageView {
           if (action === CANCEL) { if (this.strokes) { const k = this.strokes.indexOf(this.activeStroke); if (k >= 0) this.strokes.splice(k, 1); } }
           else { this._addInkPoint(e, dest); if (this.activeStroke.points.length) this._L('onInkChanged'); }
         }
-        this.activeStroke = null; this.stylusDrawing = false; this.invalidate(); return true;
+        this.activeStroke = null; this.stylusDrawing = false; if (e.toolType === 'touch') this._eraserAt = null; this.invalidate(); return true;
       }
     }
     if (am === DOWN) {

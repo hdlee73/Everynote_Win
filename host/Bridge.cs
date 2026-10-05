@@ -154,6 +154,12 @@ sealed class Bridge
                     try { c?.Cancel(); } catch { }
                     return true;
                 }
+            case "media.transcode":
+                {
+                    var id = S(a, "id", false);
+                    return await MediaTranscode.TranscodeAsync(PathPolicy.ReadPath(S(a, "from")), PathPolicy.WritePath(S(a, "to")), n => win.PostEvent("media.progress", new { id, percent = n }));
+                }
+            case "media.openExternal": MediaTranscode.OpenExternal(PathPolicy.ReadPath(S(a, "path"))); return true;
             case "ocr.recognize": return await OcrService.RecognizeAsync(S(a, "png"), S(a, "lang", false));
             default: throw new NotSupportedException("unknown host method " + m);
         }
