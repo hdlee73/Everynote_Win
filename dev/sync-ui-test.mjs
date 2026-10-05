@@ -1,0 +1,54 @@
+// UI check of 기기 동기화 (dialog -> merge with a fake phone). usage: node dev/sync-ui-test.mjs  (screenshots dev/out/sync-*.png)
+import {chromium} from '/tmp/npmtest/node_modules/playwright/index.mjs';
+import {serve} from './server.mjs'; import fs from 'fs';
+const PORT=8200+Math.floor(Math.random()*700); const s=await serve(PORT);
+const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
+const pg=await b.newPage({viewport:{width:1100,height:800}});
+const errs=[]; pg.on('pageerror',e=>errs.push('PE '+e.message)); pg.on('console',m=>{if(m.type()==='error'&&!/404/.test(m.text()))errs.push('CE '+m.text())});
+await pg.addInitScript(()=>{Map.prototype.getOrInsertComputed??=function(k,f){if(!this.has(k))this.set(k,f(k));return this.get(k)}});
+await pg.goto(`http://localhost:${PORT}/index.html`); await pg.waitForTimeout(1500);
+const bytes=[...fs.readFileSync('dev/samples/sample-ko.pdf')];
+let fails=0; const check=(n,ok,x='')=>{console.log((ok?'PASS ':'FAIL ')+n+(x?'  '+x:''));if(!ok)fails++};
+await pg.evaluate(async b=>{const {host}=await import('./js/host.js');host._fake.put('C:\\Docs\\sample-ko.pdf',new Uint8Array(b));await app.openPdf('C:\\Docs\\sample-ko.pdf');},bytes);
+await pg.waitForTimeout(1500);
+await pg.evaluate(async()=>{
+  const {host}=await import('./js/host.js'); window.calls=[]; window.putPdf=null;
+  const pdf=new TextEncoder().encode('%PDF-1.4 fake');
+  host._fake.netHandler=async o=>{ calls.push((o.method||'GET')+' '+o.url);
+    if(o.headers['X-Code']!=='123456')return{status:403,text:'wrong code'};
+    const u=new URL(o.url), p=u.searchParams.get('p'), m=o.method||'GET';
+    if(u.pathname==='/v1/library')return{status:200,text:JSON.stringify([{path:'폰문서.pdf',size:12,mtime:Date.now()-3600e3},{path:'폴더/둘.pdf',size:12,mtime:Date.now()}])};
+    if(u.pathname==='/v1/pdf'&&m==='GET'){host._fake.put(o.savePath,pdf);return{status:200,text:''};}
+    if(u.pathname==='/v1/note'&&m==='GET')return{status:200,text:JSON.stringify({format:'PDF Note annotations v2',elements:[],studyEntries:[],marks:[],bookmarks:[0],outlines:[],strokes:[],translations:[]})};
+    if(u.pathname==='/v1/pdf'&&m==='PUT'){putPdf=p;return{status:200,text:'ok'};}
+    if(u.pathname==='/v1/note'&&m==='PUT')return{status:200,text:'ok'};
+    return{status:404,text:''}; };
+});
+await pg.evaluate(()=>app.showDeviceSync()); await pg.waitForTimeout(400);
+await pg.screenshot({path:'dev/out/sync-1-dialog.png'});
+const ins=pg.locator('.sync-view input.lib-in');
+await ins.nth(0).fill('192.168.0.9:40000'); await ins.nth(1).fill('000000');
+await pg.click('.ad-btn:has-text("연결")'); await pg.waitForTimeout(800);
+check('wrong code -> failure card', await pg.locator('.ad-root:has-text("코드가 맞지 않습니다")').count()===1);
+await pg.click('.ad-btn:has-text("다시 시도")'); await pg.waitForTimeout(300);
+const ins2=pg.locator('.sync-view input.lib-in');
+check('address remembered', (await ins2.nth(0).inputValue())==='192.168.0.9:40000');
+await ins2.nth(1).fill('123456'); await pg.click('.ad-btn:has-text("연결")'); await pg.waitForTimeout(1200);
+check('picker lists phone documents', await pg.locator('.sync-row').count()===3);
+await pg.screenshot({path:'dev/out/sync-2-picker.png'});
+check('push disabled for phone-only rows', await pg.locator('.sync-row.off').count()===2);
+await pg.locator('.sync-dirbtn:has-text("휴대폰 → PC") input').check();
+check('pull disables the PC-only row', await pg.locator('.sync-row.off').count()===1);
+await pg.locator('.sync-row:has-text("폰문서.pdf") input').check();
+await pg.screenshot({path:'dev/out/sync-3-pull.png'});
+await pg.click('.ad-btn:has-text("덮어쓰기")'); await pg.waitForTimeout(1500);
+const got=await pg.evaluate(async()=>{const {host}=await import('./js/host.js');return host._fake.files.has('C:\\Users\\dev\\Documents\\PDF Note\\폰문서.pdf')});
+check('PDF written into the library', got);
+check('toast / no failure card', await pg.locator('.ad-root:has-text("실패")').count()===0);
+await pg.evaluate(()=>app.showDeviceSync()); await pg.waitForTimeout(300);
+await pg.locator('.sync-view input.lib-in').nth(1).fill('123456'); await pg.click('.ad-btn:has-text("연결")'); await pg.waitForTimeout(1200);
+await pg.locator('.sync-row:has-text("sample-ko.pdf") input').check(); await pg.click('.ad-btn:has-text("덮어쓰기")'); await pg.waitForTimeout(1500);
+check('push sent the PDF', await pg.evaluate(()=>putPdf==='sample-ko.pdf'), String(await pg.evaluate(()=>putPdf)));
+await pg.evaluate(()=>app.showTools()); await pg.waitForTimeout(300);
+check('tools has sync tile', await pg.locator('.m2-tile[aria-label="다른 기기와 동기화"]').count()===1);
+console.log(errs.join('\n')); console.log(fails?fails+' FAILED':'all passed'); await b.close(); s.close(); process.exit(fails?1:0);

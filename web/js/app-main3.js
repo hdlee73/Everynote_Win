@@ -101,6 +101,7 @@ const methods = {
         t.push(tile('필기 백업 파일 저장', 'ic_backup', run('exportAnnotations')));
         t.push(tile('필기 백업 파일 불러오기', 'ic_import', run('importSidecar')));
         t.push(tile('원본 파일 내보내기', 'ic_original', run('exportOriginal')));
+        t.push(tile('다른 기기와 동기화', 'ic_sync', run('showDeviceSync')));
         break;
     }
     return t;
