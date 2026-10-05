@@ -63,6 +63,8 @@ const bk=await pg.evaluate(async([bytes])=>{
   const st=new AnnotationStore(); await st.open(B); const e=new PageElement(); e.kind='text'; e.text='백업 노트'; e.page=0; e.left=.1;e.top=.1;e.right=.6;e.bottom=.2; e.lineSpacing=2; st.elements.push(e);
   const img=AnnotationStore.newAssetName('png'); await host.mkdir(await AnnotationStore.assetsDir()); host._fake.put(await AnnotationStore.assetPath(img),new Uint8Array([1,2,3]));
   app.library.favorite(B,true);
+  const {builtinTemplate}=await import('./js/backup.js'); const {Paper}=await import('./js/library.js'); const {NotebookFiles}=await import('./js/library.js');
+  app.library._putPaper(B,new Paper(NotebookFiles.CUSTOM,-1,await builtinTemplate('note_lines.pdf')));
   app.library.folderColor(root+'\\folder',0xFFF4B67E|0); await st.save?.();
   const out={}; const env=app.backupEnv(); const zip='C:\\Users\\dev\\Downloads\\bk.zip';
   out.n=await createBackup(env,zip);
@@ -71,12 +73,12 @@ const bk=await pg.evaluate(async([bytes])=>{
   await host.delete(B); await host.delete(await AnnotationStore.assetPath(img)); app.library.favorite(B,false);
   const r=await restoreBackup(env,zip,true); out.r=r;
   const st2=new AnnotationStore(); await st2.open(B); out.note=st2.elements.map(x=>x.text).join('|'); out.line=st2.elements[0]&&st2.elements[0].lineSpacing;
-  out.asset=(await host.stat(await AnnotationStore.assetPath(img))).exists; out.fav=app.library.favorite(B);
+  out.asset=(await host.stat(await AnnotationStore.assetPath(img))).exists; out.fav=app.library.favorite(B); out.paper=(app.library.paper(B)||{}).template||'';
   // add-as-copy keeps the original and adds "B (1).pdf"
   const r2=await restoreBackup(env,zip,false); out.r2=r2; out.copy=(await host.stat(root+'\\folder\\B (1).pdf')).exists;
   return out;},[bytes]);
 check('backup holds manifest first, each doc + notes, assets', bk.first==='everynote-backup.json'&&bk.names.some(n=>n==='docs/0.pdf')&&bk.names.filter(n=>n.startsWith('notes/')).length===bk.n&&bk.names.some(n=>n.startsWith('assets/')), JSON.stringify(bk.names));
-check('restore (overwrite) brings back PDF, notes, asset, favourite', bk.r.documents>=2&&bk.note==='백업 노트'&&bk.line===2&&bk.asset&&bk.fav, JSON.stringify([bk.r,bk.note,bk.asset,bk.fav]));
+check('restore (overwrite) brings back PDF, notes, asset, favourite', bk.r.documents>=2&&bk.note==='백업 노트'&&bk.line===2&&bk.asset&&bk.fav&&bk.paper.endsWith('builtin-note_lines.pdf'), JSON.stringify([bk.r,bk.note,bk.asset,bk.fav,bk.paper]));
 check('restore (add) keeps originals and adds a copy', bk.copy, JSON.stringify(bk.r2));
 
 // 9: app info + update check

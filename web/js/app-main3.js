@@ -22,6 +22,13 @@ const FONT_IDS = ['sans', 'medium', 'light', 'black', 'condensed', 'serif', 'mon
 const FONT_NAMES = ['고딕 (기본)', '고딕 중간', '고딕 얇게', '고딕 굵게', '고딕 좁게', '명조', '고정폭', '타자기', '손글씨', '캐주얼'];
 /** [first rule from the page top, pitch] in pt per paper kind (same table as Android NotebookFiles.ruler). */
 const NOTE_RULERS = { 1: [54, 25], 4: [54, 18], 5: [54, 32], 2: [54, 18], 3: [96, 22], 7: [84, 24], 10: [69.88, 32.6], 11: [116.9, 26.95], 12: [29.49, 26.97] };
+/** Key into NOTE_RULERS for a paper: plain papers by kind, the bundled forms (CUSTOM papers named builtin-*.pdf) as 10-12, else -1. */
+function rulerKind(p) {
+  if (!p) return -1;
+  if (p.kind !== NotebookFiles.CUSTOM) return NOTE_RULERS[p.kind] ? p.kind : -1;
+  const n = String(p.template || '').split(/[\\/]/).pop(), i = NotebookFiles.BUILTIN_TEMPLATES.findIndex(t => n === 'builtin-' + t);
+  return i >= 0 ? 10 + i : -1;
+}
 const TEXT_PAGE_POINTS = 595;
 const PAPER_COLORS = [0xFFFFF3A6, 0xFFFFD6E0, 0xFFCFE8FF, 0xFFD5F5D0, 0xFFFFE0B8, 0xFFE6D9FF, 0xFFFFFFFF].map(c => c | 0);
 const SIDE_TITLES = ['검색', '미리보기', '개요', '음성 녹음'];
@@ -383,9 +390,9 @@ const methods = {
   chooseNoteRuler() {
     const e = this.inlineElement; if (!e) return;
     const kinds = [], own = this.activeSession && this.library.managed(this.activeSession.uri) ? this.library.paper(this.activeSession.uri) : null;
-    if (own && NOTE_RULERS[own.kind]) kinds.push(own.kind);
+    const ownKind = rulerKind(own); if (ownKind > 0) kinds.push(ownKind);
     for (const k of [10, 11, 12, 1, 4, 5, 2, 3, 7]) if (!kinds.includes(k)) kinds.push(k);
-    const names = kinds.map((k, i) => NotebookFiles.PAPER_NAMES[k] + (i === 0 && own && NOTE_RULERS[own.kind] ? '  (현재 노트)' : ''));
+    const names = kinds.map((k, i) => NotebookFiles.PAPER_NAMES[k] + (i === 0 && ownKind > 0 ? '  (현재 노트)' : ''));
     new AlertDialog.Builder().setTitle('노트 줄에 맞추기').setItems(names, (d, which) => this.fitInlineToRuler(e, kinds[which])).setNegativeButton('취소').show();
   },
   fitInlineToRuler(e, kind) {

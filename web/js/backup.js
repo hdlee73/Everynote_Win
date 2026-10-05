@@ -5,6 +5,17 @@ import { host } from './host.js';
 import { AnnotationStore } from './store.js';
 import { NotebookFiles, Paper, joinP } from './library.js';
 import { baseName, dirName } from './util.js';
+
+const BUILTIN_BASE = new URL('../assets/templates/', import.meta.url).href;
+const templateDir = async () => (await host.info()).data.replace(/[\\/]+$/, '') + '\\templates';
+/** The copy of a bundled form template (금감원노트 …) kept in <data>\\templates, created on first use. */
+export async function builtinTemplate(name) {
+  if (!NotebookFiles.BUILTIN_TEMPLATES.includes(name)) throw new Error('서식 이름');
+  const dir = await templateDir(), file = dir + '\\builtin-' + name;
+  if (!(await host.exists(file))) { await host.mkdir(dir); await host.writeBytes(file, new Uint8Array(await (await fetch(BUILTIN_BASE + name)).arrayBuffer())); }
+  return file;
+}
+const extOf = p => { const n = baseName(p), i = n.lastIndexOf('.'); return i > 0 ? n.slice(i + 1).replace(/[^A-Za-z0-9]/g, '') || 'pdf' : 'pdf'; };
 import { ASSET_NAME, relPath } from './sync.js';
 
 export const BACKUP_FORMAT = 'Everynote backup v1';
@@ -34,8 +45,14 @@ export async function createBackup(env, outPath) {
   const entries = [{ name: BACKUP_MANIFEST, text: '' }];
   for (let i = 0; i < docs.length; i++) {
     const d = docs[i], o = { i, path: d.rel, favorite: !!lib.favorite(d.file) };
-    const paper = lib.paper(d.file); if (paper && paper.kind !== NotebookFiles.CUSTOM) o.paper = paper.kind + ':' + paper.color;
+    const paper = lib.paper(d.file), tpl = [];
+    if (paper) {
+      if (paper.kind !== NotebookFiles.CUSTOM) o.paper = paper.kind + ':' + paper.color;
+      else if (paper.template && baseName(paper.template).startsWith('builtin-')) o.paper = 'builtin:' + baseName(paper.template).slice(8) + ':' + paper.color;
+      else if (paper.template && (await host.stat(paper.template)).exists) { const ext = extOf(paper.template); o.paper = 'custom:' + paper.color + ':' + ext; tpl.push({ name: `templates/${i}.${ext}`, file: paper.template }); }
+    }
     manifest.documents.push(o);
+    entries.push(...tpl);
     entries.push({ name: `docs/${i}.pdf`, file: d.file }, { name: `notes/${i}.json`, text: await env.exportNote(d.rel) });
   }
   for (const n of assetNames) entries.push({ name: 'assets/' + n, file: await AnnotationStore.assetPath(n) });
@@ -67,7 +84,16 @@ export async function restoreBackup(env, zipPath, overwrite) {
       await host.mkdir(dirName(target));
       await host.zipExtract(zipPath, `docs/${o.i}.pdf`, target); r.documents++;
       if (o.favorite) lib.favorite(target, true);
-      if (typeof o.paper === 'string' && o.paper) { try { lib._putPaper(target, Paper.parse(o.paper)); } catch { /* unknown paper */ } }
+      if (typeof o.paper === 'string' && o.paper) {
+        try {
+          const q = o.paper.split(':');
+          if (q[0] === 'builtin') lib._putPaper(target, new Paper(NotebookFiles.CUSTOM, parseInt(q[2], 10), await builtinTemplate(q[1])));
+          else if (q[0] === 'custom') {
+            const ext = (q[2] || 'pdf').replace(/[^A-Za-z0-9]/g, '') || 'pdf', entry = `templates/${o.i}.${ext}`;
+            if (names.has(entry)) { const file = (await templateDir()) + `\\restored-${Date.now()}-${o.i}.${ext}`; await host.zipExtract(zipPath, entry, file); lib._putPaper(target, new Paper(NotebookFiles.CUSTOM, parseInt(q[1], 10), file)); }
+          } else lib._putPaper(target, Paper.parse(o.paper));
+        } catch { /* unknown paper */ }
+      }
       if (names.has(`notes/${o.i}.json`)) {
         const text = await host.zipReadText(zipPath, `notes/${o.i}.json`), st = new AnnotationStore();
         try { await st.open(target); await st.importJson(text, Infinity); r.notes++; } catch { r.failed++; }
