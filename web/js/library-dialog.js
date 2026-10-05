@@ -722,10 +722,10 @@ export class LibraryDialog {
   _menu(anchor, rows) { AnchoredMenu.show(anchor, false, rows); }
   newMenu(anchor) {
     const R = AnchoredMenu.Row, target = () => (this.mode === FOLDER ? this.folder : this.repository.root);
-    this._menu(anchor, [
-      new R('새 노트', null, () => { if (this.actions.newNote) this.actions.newNote(target(), () => this.refresh()); }),
-      new R('폴더 만들기', null, () => this.createFolder(target(), () => { this.tree.reload(); this.refresh(); })),
-      new R('파일 가져오기', null, () => { this.dismiss(); if (this.actions.importFiles) this.actions.importFiles(target()); }),
+    AnchoredMenu.showCentered('문서 추가', [
+      new R('파일 가져오기', 'ic_import', () => { this.dismiss(); if (this.actions.importFiles) this.actions.importFiles(target()); }).tint('#007AFF'),
+      new R('새 노트 만들기', 'ic_compose', () => { if (this.actions.newNote) this.actions.newNote(target(), () => this.refresh()); }).tint('#34C759'),
+      new R('폴더 만들기', 'ic_folder_open', () => this.createFolder(target(), () => { this.tree.reload(); this.refresh(); })).tint('#F5A623'),
     ]);
   }
   libraryMenu(anchor) {
