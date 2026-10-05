@@ -62,4 +62,16 @@ await pg.evaluate(()=>{app.toggleDockPinned();app.toggleFullscreen()}); await pg
 check('pinned fullscreen toolbar does not auto-hide', await pg.evaluate(()=>getComputedStyle(app.fullscreenDock).display!=='none'&&getComputedStyle(app.dockGrip).display!=='none'));
 await pg.screenshot({path:'dev/out/ui2-5-dock.png'});
 await pg.evaluate(()=>{app.toggleFullscreen();app.toggleDockPinned()});
+
+// typing toolbar with the side panel open: inside the page area, scrolls sideways when narrower than its content
+await pg.evaluate(()=>{app.selectPanelTab(1);app.sidePanel.style.width='300px';window.dispatchEvent(new Event('resize'))}); await pg.waitForTimeout(300);
+await pg.setViewportSize({width:560,height:800}); await pg.waitForTimeout(300);
+await pg.evaluate(()=>{const e=app.newTextBox(0,.2,.3);app.beginInlineText(e,true)}); await pg.waitForSelector('.m3-inline-text'); await pg.waitForTimeout(300);
+const bar=await pg.evaluate(()=>{const b=app.inlineBar.getBoundingClientRect(),l=app.viewportLayer.getBoundingClientRect();return {l:b.left>=l.left-1,r:b.right<=l.right+1,w:b.width,layer:l.width,scroll:app.inlineBar.scrollWidth>app.inlineBar.clientWidth}});
+check('typing toolbar stays inside the page area', bar.l&&bar.r, JSON.stringify(bar));
+check('narrow toolbar scrolls sideways', bar.scroll||bar.w>=300, JSON.stringify(bar));
+const reach=await pg.evaluate(()=>{const b=app.inlineBar;b.scrollLeft=9999;const done=b.querySelector('[data-tag="text_done"],[aria-label="입력 완료"]');const r=done.getBoundingClientRect(),br=b.getBoundingClientRect();return r.right<=br.right+1&&r.left>=br.left-1});
+check('last button (완료) reachable by scrolling', reach);
+await pg.screenshot({path:'dev/out/ui2-6-narrowbar.png'});
+await pg.evaluate(()=>app.commitInlineText());
 console.log(errs.join('\n')); console.log(fails?fails+' FAILED':'all passed'); await b.close(); s.close(); process.exit(fails?1:0);
