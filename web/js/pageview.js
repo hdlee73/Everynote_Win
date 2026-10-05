@@ -560,6 +560,8 @@ export class PdfPageView {
   /** Multiplies the zoom by f (e.g. 1.25 / 0.8 for the +/- buttons). */
   zoomBy(f, fx, fy) { return this.setZoom(this.scale * f, fx, fy); }
   /** Back to zoom 1 (fit) and centred. */
+  /** Re-applies a zoom and position carried over from the previous page (clamped to this page). */
+  restoreView(scale, px, py) { this.scale = Math.max(0.4, Math.min(4, scale)); this.panX = px; this.panY = py; this.clampPan(); this.invalidate(); this._checkZoom(); }
   resetZoom() { this.scale = 1; this.panX = this.panY = 0; this.invalidate(); this._checkZoom(); return 1; }
   _checkZoom() {
     if (Math.abs(this.scale - this._lastZoom) < 1e-6) return;

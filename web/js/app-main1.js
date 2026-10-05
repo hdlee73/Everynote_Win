@@ -218,7 +218,7 @@ function makePageDrag(app) {
       const target = app.twoPage ? Math.floor(app.currentPage / 2) * 2 + direction * 2 : app.currentPage + direction;
       if (target < 0 || target >= app.renderer.pageCount) return false;
       if (!app.pagesCached(target)) { app.ensurePages(target).catch(() => {}); return false; }   // not rendered yet: plain swipe (animated) instead
-      app.pageAnimating = true;
+      app.pageAnimating = true; app.carryZoom();
       const curl = app.beginCurl(direction, target);
       if (!curl) { app.pageAnimating = app.curlConsumed; return false; }
       app.dragCurl = curl; app.dragSpan = Math.max(120, (curl._w || curl.width || 0) * (app.twoPage ? 0.5 : 1) * 1.1);
@@ -1135,6 +1135,8 @@ const methods = {
       setVis(this.secondPageView.el, 'visible');
       this.secondPageView.showPage(c2, second, store.marks, store.strokes, store.translations); this.secondPageView.setAnnotationStore(store);
     } else { this.secondPageView.clearPage(); setVis(this.secondPageView.el, two ? 'invisible' : 'gone'); }
+    const carry = this._carry; this._carry = null;
+    if (carry) { this.firstPageView.restoreView(carry.scale, carry.x, carry.y); if (second >= 0) this.secondPageView.restoreView(carry.scale, carry.x, carry.y); }
     this.pageView = (two && index !== first) ? this.secondPageView : this.firstPageView;
     this.currentPage = index; session.page = index;
     if (this._textSelectWanted) this.pageView.setDirectTextSelection(true);
@@ -1409,6 +1411,11 @@ const methods = {
   onSelectionAdjustStarted() { const p = this.selectionPopup; if (p) { this.selectionPopup = null; if (p.close) p.close(); else if (p.remove) p.remove(); } },
 
   // ============================================================ page turning
+  /** Remembers the zoom of the page being left so the next page opens at the same zoom and position. */
+  carryZoom() {
+    const v = this.pageView;
+    this._carry = v && Math.abs(v.scale - 1) > 0.001 ? { scale: v.scale, x: v.panX, y: v.panY } : null;
+  },
   resetPageTransforms() {
     for (const v of [this.firstPageView, this.secondPageView]) {
       if (!v) continue;
@@ -1425,7 +1432,7 @@ const methods = {
       if (direction > 0 && this.isNotebook(this.activeSession)) this.appendPage(this.activeSession, this.library.paper(this.activeSession.uri));
       return;
     }
-    this.pageAnimating = true;
+    this.pageAnimating = true; this.carryZoom();
     const style = this.pageAnimStyle();
     if (style === 2) {
       this.showPage(target).then(() => this.resetPageTransforms()).finally(() => { this.pageAnimating = false; });
@@ -1509,7 +1516,8 @@ const methods = {
       if (forward) curl.setup(oldFirst, newSecond, oldSecond, paperBack(mirror(newFirst)), false, 0.5);
       else curl.setup(mirror(oldSecond), mirror(newFirst), mirror(oldFirst), paperBack(newSecond), true, 0.5);
     }
-    const box = h('div', { class: 'm-curl', style: { left: (rl + papers.offsetLeft) + 'px', top: (rt + papers.offsetTop) + 'px', width: w + 'px', height: hh + 'px' } }, curl.el);
+    const box = h('div', { class: 'm-curl', style: { left: '0px', top: '0px', width: '100%', height: '100%' } }, curl.el);   // spans the reading area so the lifted corner can swing out past the page edges
+    curl.setOrigin(rl + papers.offsetLeft, rt + papers.offsetTop, w, hh);
     viewport.insertBefore(box, viewport.children[1] || null);
     curl._box = box; curl._w = w;
     if (curl.resize) curl.resize();
@@ -1517,7 +1525,7 @@ const methods = {
   },
   finishCurl(curl, from, to) {
     animateCurl(curl, from, to, () => {
-      if (to < 0.5) this.showPage(this.curlOrigin);
+      if (to < 0.5) { this.carryZoom(); this.showPage(this.curlOrigin); }
       const box = curl._box; curl.release(); if (box) box.remove();
       this.resetPageTransforms(); this.pageAnimating = false;
     });

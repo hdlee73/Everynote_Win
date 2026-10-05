@@ -111,12 +111,16 @@ export class PageCurlView {
     if (this.el.width !== bw || this.el.height !== bh) { this.el.width = bw; this.el.height = bh; }
   }
 
+  /** Where the page rectangle sits inside this (larger) canvas and its size; the flap may be drawn outside it. */
+  setOrigin(x, y, w, h) { this._ox = x; this._oy = y; this._cw = w; this._ch = h; }
   onDraw(ctx, w, h) {
     const { fixedHalf, under, front, back } = this;
     if (!front || !under || !back || w <= 0 || h <= 0) return;
+    const ox = this._ox || 0, oy = this._oy || 0;
+    if (this._cw > 0 && this._ch > 0) { w = this._cw; h = this._ch; }
     const s = this.spine * w, lw = w - s, t = this._progress;
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-    ctx.save();
+    ctx.save(); ctx.translate(ox, oy);
     if (this.mirrored) { ctx.translate(w / 2, 0); ctx.scale(-1, 1); ctx.translate(-w / 2, 0); }
     if (fixedHalf) ctx.drawImage(fixedHalf, 0, 0, s, h);
     ctx.drawImage(under, s, 0, lw, h);
