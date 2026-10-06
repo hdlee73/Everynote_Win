@@ -31,8 +31,8 @@ function rulerKind(p) {
 }
 const TEXT_PAGE_POINTS = 595;
 const PAPER_COLORS = [0xFFFFF3A6, 0xFFFFD6E0, 0xFFCFE8FF, 0xFFD5F5D0, 0xFFFFE0B8, 0xFFE6D9FF, 0xFFFFFFFF].map(c => c | 0);
-const SIDE_TITLES = ['검색', '미리보기', '개요', '음성 녹음'];
-const SIDE_ICONS = ['ic_search', 'ic_thumbnails', 'ic_outline', 'ic_mic'];
+const SIDE_TITLES = ['검색', '미리보기', '개요', '음성 녹음', '삽입 목록'];
+const SIDE_ICONS = ['ic_search', 'ic_thumbnails', 'ic_outline', 'ic_mic', 'ic_link'];
 const LASSO_RECT = 1, LASSO_CIRCLE = 2;
 
 const css = c => argb(c);

@@ -39,6 +39,7 @@ sealed class WebServer
         [".jpeg"] = "image/jpeg", [".gif"] = "image/gif", [".webp"] = "image/webp", [".ico"] = "image/x-icon",
         [".wasm"] = "application/wasm", [".woff"] = "font/woff", [".woff2"] = "font/woff2", [".ttf"] = "font/ttf",
         [".otf"] = "font/otf", [".ttc"] = "font/collection", [".pdf"] = "application/pdf",
+        [".mp4"] = "video/mp4", [".m4v"] = "video/mp4", [".mov"] = "video/quicktime", [".mkv"] = "video/x-matroska",
         [".mp3"] = "audio/mpeg", [".wav"] = "audio/wav", [".webm"] = "audio/webm", [".m4a"] = "audio/mp4",
         [".ftl"] = "text/plain; charset=utf-8", [".bcmap"] = "application/octet-stream", [".pfb"] = "application/octet-stream",
     };

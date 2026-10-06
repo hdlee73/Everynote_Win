@@ -343,20 +343,10 @@ export class AnnotationPainter {
     } else if (kind === 'table') {
       Shapes.drawTable(c, b, e.text, dw);
     } else if (kind === 'hyperlink') {
-      c.fillStyle = argb(0x24007AFF); AnnotationPainter._roundRect(c, b, b.height() * .12, b.height() * .12); c.fill();
-      const sw = Math.max(1.5, dw * .0028);
+      // only a thin underline marks a link: no blue box and no badge over the text
+      const sw = Math.max(1.2, dw * .0022);
       c.strokeStyle = argb(0xFF007AFF); c.lineWidth = sw; c.lineCap = 'butt';
       c.beginPath(); c.moveTo(b.left, b.bottom - sw); c.lineTo(b.right, b.bottom - sw); c.stroke();
-      if (AnnotationPainter.lastOfGroup(store, e)) {
-        // a small blue badge with an arrow marks the end of every link
-        const rad = Math.max(dw * .011, Math.min(b.height() * .42, dw * .02));
-        const cx = Math.min(d.right - rad, b.right + rad * .3), cy = Math.max(d.top + rad, b.top - rad * .1);
-        c.fillStyle = argb(0xFF007AFF); c.beginPath(); c.arc(cx, cy, rad, 0, Math.PI * 2); c.fill();
-        c.strokeStyle = '#fff'; c.lineWidth = Math.max(1, rad * .26); c.lineCap = 'round'; c.lineJoin = 'round';
-        const k = rad * .38;
-        c.beginPath(); c.moveTo(cx - k, cy + k); c.lineTo(cx + k, cy - k); c.stroke();
-        c.beginPath(); c.moveTo(cx - k * .1, cy - k); c.lineTo(cx + k, cy - k); c.lineTo(cx + k, cy + k * .1); c.stroke();
-      }
     } else if (kind === 'audio') {
       const r = b.height() / 2;
       c.fillStyle = argb(0xFFE5F0FF); AnnotationPainter._roundRect(c, b, r, r); c.fill();

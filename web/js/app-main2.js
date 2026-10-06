@@ -34,9 +34,9 @@ export const FONT_IDS = ['sans', 'medium', 'light', 'black', 'condensed', 'serif
 export const FONT_NAMES = ['고딕 (기본)', '고딕 중간', '고딕 얇게', '고딕 굵게', '고딕 좁게', '명조', '고정폭', '타자기', '손글씨', '캐주얼'];
 export const TEXT_PAGE_POINTS = 595;
 export const PAPER_COLORS = [0xFFFFF3A6, 0xFFFFD6E0, 0xFFCFE8FF, 0xFFD5F5D0, 0xFFFFE0B8, 0xFFE6D9FF, 0xFFFFFFFF].map(c => c | 0);
-export const SIDE_TITLES = ['검색', '미리보기', '개요', '음성 녹음'];
-const SIDE_TINTS = ['#30B0C7', '#007AFF', '#007AFF', '#FF3B30'];
-export const SIDE_ICONS = ['ic_search', 'ic_thumbnails', 'ic_outline', 'ic_mic'];
+export const SIDE_TITLES = ['검색', '미리보기', '개요', '음성 녹음', '삽입 목록'];
+const SIDE_TINTS = ['#30B0C7', '#007AFF', '#007AFF', '#FF3B30', '#5856D6'];
+export const SIDE_ICONS = ['ic_search', 'ic_thumbnails', 'ic_outline', 'ic_mic', 'ic_link'];
 export const STICKER_TITLES = ['별·하트', '낙엽·꽃', '응원·표시', '메모용', '표정·동물', '날씨·생활'];
 export const STICKER_GROUPS = [
   ['⭐', '🌟', '✨', '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '💖', '💯'],
@@ -1242,7 +1242,7 @@ M.createPlacedElement = async function (page, x, y) {
 M.onElementTapped = function (element) {
   if (element.kind === 'audio') { this.showAudioPlayer(element); return; }
   if (element.kind === 'text') { this.beginInlineText(element, false); return; }
-  if (element.kind === 'hyperlink') { this.showHyperlinkMenu(element); return; }
+  if (element.kind === 'hyperlink') { this.openHyperlink(element); return; }
   if (element.kind === 'link' && youtubeId(element.text) != null) { element.kind = 'youtube'; element.text = youtubeId(element.text); this.store.save(); }
   const kind = element.kind, R = AnchoredMenu.Row, rows = [];
   if (kind === 'link') rows.push(new R('링크 열기', 'ic_link', () => { if (this.validWebUrl(element.text)) this._openExternal(element.text, '링크를 열 앱이 없습니다'); }).tint('#5856D6'));
@@ -1293,6 +1293,7 @@ M.deleteElement = function (element) {
   else remove(e => e === element);
   if (element.kind === 'video') AnnotationStore.deleteAsset(element.text).catch(() => {});
   this.store.save(); this.pageView.selectElement(null); this.redrawPages();
+  if (this.sidebarVisible && this.panelTab === 4) this.rebuildInsertions();
 };
 
 // ---- pick / import ------------------------------------------------------------------------------------------------------------------------------
@@ -1337,7 +1338,7 @@ async function videoPoster(url) {
     const v = document.createElement('video'); v.muted = true; v.preload = 'auto'; v.playsInline = true;
     const timer = setTimeout(() => { cleanup(); rej(new Error('timeout')); }, 15000);
     const cleanup = () => { clearTimeout(timer); v.removeAttribute('src'); v.load(); };
-    v.addEventListener('error', () => { cleanup(); rej(new Error('video')); });
+    v.addEventListener('error', () => { cleanup(); rej(Object.assign(new Error('video'), { decode: true })); });   // a decode / format error (not a timeout or a failed seek)
     v.addEventListener('loadedmetadata', () => { try { v.currentTime = Math.min(0.5, (v.duration || 1) / 2); } catch (e) { cleanup(); rej(e); } });
     v.addEventListener('seeked', () => {
       try {
@@ -1368,11 +1369,12 @@ M.importVideo = async function (source) {
       }
       created = true;
     } catch (e) { try { await AnnotationStore.deleteAsset(name); } catch (e2) { /* ignore */ } throw e; }
-    let frame;
-    try { frame = await videoPoster(await AnnotationStore.assetUrl(name)); } catch (e) { frame = null; }
-    if (!frame) {   // AVI, WMV, old MOV/MKV codecs...: WebView2 cannot decode them, so convert to MP4 (H.264) with Windows once, here
+    let frame, undecodable = false;
+    try { frame = await videoPoster(await AnnotationStore.assetUrl(name)); } catch (e) { frame = null; undecodable = !!(e && e.decode); }
+    if (!frame && undecodable) {   // AVI, WMV, old MOV/MKV codecs...: WebView2 cannot decode them, so convert to MP4 (H.264) with Windows once, here (only when the player really reported a decode error, not for a slow or failed preview frame)
       try {
         await this.convertVideoAsset(name, typeof source === 'string' ? source : null);
+        videoConverted(name, true);
         frame = await videoPoster(await AnnotationStore.assetUrl(name));
       } catch (e) { frame = null; toast('MP4로 바꾸지 못했습니다: ' + errMsg(e) + ' · 재생할 때 Windows 동영상 앱으로 엽니다'); }
     }
@@ -1396,18 +1398,28 @@ M.convertVideoAsset = async function (name, from) {
   AnnotationStore.forgetAssetUrl(name);
   toast('MP4로 변환했습니다');
 };
-/** A <video> failed to decode: convert the asset once and retry; if Windows cannot convert it either, open it in the default player. */
+/** Remembers (per video asset, also across restarts) that the file was already converted to H.264/AAC MP4, so it is never converted twice. */
+function videoConverted(name, set) {
+  const key = 'everynote.videoConverted.' + name;
+  try { if (set) localStorage.setItem(key, '1'); else return localStorage.getItem(key) === '1'; } catch (e) { /* storage unavailable */ }
+  return false;
+}
+/** A <video> failed to decode: convert the asset (once only); if it still fails, or Windows cannot convert it, open it in the default player. */
 M._recoverVideo = async function (element, media) {
   if (media._recovering || !media.isConnected || !media.error || (media.error.code !== 3 && media.error.code !== 4)) return;   // 3 decode, 4 unsupported format
   media._recovering = true;
-  try {
-    await this.convertVideoAsset(element.text);
-    if (!media.isConnected) return;
-    media.src = await AnnotationStore.assetUrl(element.text); media.play().catch(() => {});
-  } catch (e) {
+  const name = element.text, openExternal = async () => {
     toast('앱 안에서 재생할 수 없는 형식이라 Windows 동영상 앱으로 엽니다');
-    try { await host.call('media.openExternal', { path: await AnnotationStore.assetPath(element.text) }); } catch (e2) { toast('동영상을 열 수 없습니다: ' + errMsg(e2)); }
-  }
+    try { await host.call('media.openExternal', { path: await AnnotationStore.assetPath(name) }); } catch (e2) { toast('동영상을 열 수 없습니다: ' + errMsg(e2)); }
+  };
+  if (videoConverted(name)) { await openExternal(); return; }   // already MP4 from our own conversion: converting again cannot help
+  try {
+    await this.convertVideoAsset(name);
+    videoConverted(name, true);
+    if (!media.isConnected) return;
+    media._recovering = false;   // a failure of the converted file goes to the default player instead of converting again
+    media.src = await AnnotationStore.assetUrl(name); media.play().catch(() => {});
+  } catch (e) { await openExternal(); }
 };
 /** In-document playback (Android playInline): the player opens right on the element's rectangle; page changes, zoom and closing stop it. */
 M.stopInlinePlayer = function () {
@@ -1791,7 +1803,10 @@ M.createHyperlink = function (selection) {
       if (e.right - e.left < .005 || e.bottom - e.top < .003) continue;
       target.elements.push(e);
     }
-    target.save(); this.redrawPages(); toast('링크를 만들었습니다. 파란 표시가 붙은 글자를 탭하면 열립니다');
+    target.save(); this.redrawPages(); for (const v of [this.firstPageView, this.secondPageView]) if (v && v.stopTextSelection) v.stopTextSelection();
+    this.syncOtherTools && this.syncOtherTools();
+    if (this.sidebarVisible && this.panelTab === 4) this.rebuildInsertions();
+    toast('링크를 만들었습니다. 글자를 클릭하면 바로 열리고, 길게 누르거나 오른쪽 클릭하면 수정·삭제 메뉴가 나옵니다');
   });
 };
 M.chooseLinkTarget = function (done) {
@@ -1857,17 +1872,53 @@ M.openHyperlink = function (element) {
   }
   if (this.validWebUrl(element.text)) this._openExternal(element.text, '링크를 열 앱이 없습니다');
 };
+/** A click / tap follows the link at once; a long press or right click asks what to do with it (the side-panel list offers the same). */
+M.onHyperlinkTapped = function (element, longPress) { if (longPress) this.showHyperlinkMenu(element); else this.openHyperlink(element); };
 M.showHyperlinkMenu = function (element) {
   const title = this.describeLink(element.text);
   listDialog(title.length > 60 ? title.substring(0, 60) + '…' : title, ['열기', '링크 수정', '링크 삭제'], index => {
     if (index === 0) this.openHyperlink(element);
-    else if (index === 1) this.chooseLinkTarget(link => {
-      const old = element.text;
-      for (const e of this.store.elements) if (e.kind === 'hyperlink' && e.page === element.page && e.color === element.color && e.text === old) e.text = link;
-      this.store.save(); this.redrawPages();
-    });
-    else this.deleteElement(element);
+    else if (index === 1) this.editHyperlink(element);
+    else { this.deleteElement(element); toast('링크를 삭제했습니다'); }
   });
+};
+M.editHyperlink = function (element) {
+  this.chooseLinkTarget(link => {
+    const old = element.text;
+    for (const e of this.store.elements) if (e.kind === 'hyperlink' && e.page === element.page && e.color === element.color && e.text === old) e.text = link;
+    this.store.save(); this.redrawPages();
+    if (this.sidebarVisible && this.panelTab === 4) this.rebuildInsertions();
+  });
+};
+// ---- side-panel list of everything inserted in the document: links, pictures, videos, recordings, shapes, tables, typed text
+const INSERT_LABELS = { hyperlink: '링크', link: '웹 링크', audio: '녹음', image: '사진', video: '동영상', youtube: '유튜브', sticker: '스티커', shape: '도형', table: '표' };
+M.rebuildInsertions = function () {
+  const list = this.insertList; if (!list) return;
+  list.textContent = ''; if (!this.store) return;
+  const seen = new Set(), items = [];
+  for (const e of this.store.elements) { if (e.kind === 'hyperlink') { const k = e.page + '|' + e.color + '|' + e.text; if (seen.has(k)) continue; seen.add(k); } items.push(e); }
+  items.sort((a, b) => a.page - b.page || a.top - b.top);
+  list.append(h('div', { class: 'm3-empty', dataset: { tag: 'insert_heading' }, style: { textAlign: 'left', padding: '4px 6px 6px' } }, '삽입한 항목 ' + items.length + '개'));
+  if (!items.length) { list.append(h('div', { class: 'm3-empty' }, '링크·사진·동영상·녹음·도형·표·타이핑을 넣으면 여기에 모여 보입니다.\n항목을 누르면 그 위치로 이동하고, ⋮ 로 열기·수정·삭제를 합니다.')); return; }
+  const go = item => Promise.resolve(this.showPage(item.page)).then(() => { if (this.pageView && this.pageView.focusOnPoint) this.pageView.focusOnPoint((item.left + item.right) / 2, (item.top + item.bottom) / 2); });
+  for (const item of items) {
+    let detail = item.kind === 'hyperlink' ? this.describeLink(item.text) : (item.kind === 'link' || item.kind === 'audio' || !(item.kind in INSERT_LABELS)) ? String(item.text || '').trim() : '';
+    if (detail.length > 40) detail = detail.substring(0, 40) + '…';
+    const row = h('div', { class: 'm3-row', dataset: { tag: 'insert_item' } }, h('div', { class: 'm3-row-text' }, (INSERT_LABELS[item.kind] || '타이핑') + ' · p' + (item.page + 1) + (detail ? '\n' + detail : '')));
+    row.addEventListener('click', () => go(item));
+    { const mb = iconButton('ic_more_vert', '삽입 항목 관리', NAVY, ev => { ev.stopPropagation(); this.showInsertionMenu(item, mb, go); }, 40, 40, 10); row.append(mb); }
+    list.append(row);
+  }
+};
+M.showInsertionMenu = function (item, anchor, go) {
+  const R = AnchoredMenu.Row, rows = [new R('이동', 'ic_page', () => go(item)).tint('#30B0C7')];
+  if (item.kind === 'hyperlink' || item.kind === 'link') rows.push(new R('열기', 'ic_link', () => { if (item.kind === 'hyperlink') this.openHyperlink(item); else if (this.validWebUrl(item.text)) this._openExternal(item.text, '링크를 열 앱이 없습니다'); }).tint('#5856D6'));
+  if (item.kind === 'video' || item.kind === 'youtube') rows.push(new R('재생', 'ic_video', () => Promise.resolve(this.showPage(item.page)).then(() => this.playInline(item))).tint('#FF3B30'));
+  if (item.kind === 'hyperlink') rows.push(new R('수정', 'ic_compose', () => this.editHyperlink(item)).tint('#007AFF'));
+  else if (item.kind === 'link' || item.kind === 'text') rows.push(new R('수정', 'ic_compose', () => Promise.resolve(this.showPage(item.page)).then(() => this.editPageElement(item, false))).tint('#007AFF'));
+  if (item.kind !== 'hyperlink') rows.push(new R('위치·크기', 'ic_fullscreen', () => this.editElementGeometry(item)).tint('#34C759'));
+  rows.push(new R('삭제', 'ic_delete', () => { if (item.kind === 'audio' && this.deleteRecording) this.deleteRecording(item); else this.deleteElement(item); if (this.sidebarVisible && this.panelTab === 4) this.rebuildInsertions(); toast('삭제했습니다'); }).danger());
+  AnchoredMenu.showRightOf(anchor || this.sidePanel, this.sidePanel, rows);
 };
 M.editElementGeometry = function (element) {
   const panel = h('div', { class: 'm2-geo' });
@@ -1910,9 +1961,9 @@ M.buildSidePanel = function () {
   const close = iconButton('ic_close', '패널 닫기', NAVY, () => this.closeSidePanel(), 38, 48); close.style.padding = '12px 7px'; close.classList.add('m2-side-btn');
   panel.append(h('div', { class: 'm2-side-head' }, this.sideTitle, this.sideMore, close));
   const tabs = h('div', { class: 'm2-side-tabs' });
-  const names = ['검색 탭', '페이지 미리보기 탭', '개요 탭', '음성 녹음 탭'];
+  const names = ['검색 탭', '페이지 미리보기 탭', '개요 탭', '음성 녹음 탭', '삽입 목록 탭'];
   this.sideTabs = [];
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 5; i++) {
     const b = iconButton(SIDE_ICONS[i], names[i], NAVY, () => this.selectPanelTab(i), 0, 40);
     b.classList.add('m2-side-tab'); b.dataset.tag = 'side_tab:' + i; this.sideTabs.push(b); tabs.append(b);
   }
@@ -1921,8 +1972,10 @@ M.buildSidePanel = function () {
   this.outlineScroll = h('div', { class: 'm2-sidepane m2-scrollv' }, this.outlineList);
   this.recordingList = h('div', { class: 'm2-sidelist' });
   this.recordingScroll = h('div', { class: 'm2-sidepane m2-scrollv' }, this.recordingList);
+  this.insertList = h('div', { class: 'm2-sidelist' });
+  this.insertScroll = h('div', { class: 'm2-sidepane m2-scrollv' }, this.insertList);
   this.searchPanel.classList.add('m2-sidepane'); this.thumbnailPanel.classList.add('m2-sidepane');
-  this.sideContent = h('div', { class: 'm2-side-content' }, this.searchPanel, this.thumbnailPanel, this.outlineScroll, this.recordingScroll);
+  this.sideContent = h('div', { class: 'm2-side-content' }, this.searchPanel, this.thumbnailPanel, this.outlineScroll, this.recordingScroll, this.insertScroll);
   panel.append(this.sideContent);
   this.sidePanel = panel;
   this.sideSplitter = h('div', { class: 'm2-splitter side', dataset: { tag: 'side_splitter' }, title: '끌어서 너비 조절 (두 번 누르면 기본값)', 'aria-label': '왼쪽 패널 너비 조절', 'aria-orientation': 'vertical' });
@@ -1957,6 +2010,7 @@ M.selectPanelTab = function (tab) {
   this.thumbnailPanel.style.display = tab === 1 ? 'block' : 'none';
   this.outlineScroll.style.display = tab === 2 ? 'block' : 'none';
   this.recordingScroll.style.display = tab === 3 ? 'block' : 'none';
+  this.insertScroll.style.display = tab === 4 ? 'block' : 'none';
   this.setSideTitle(tab);
   this.sideMore.style.display = tab === 1 ? 'flex' : 'none';
   this.sideTabs.forEach((b, i) => { const on = i === tab; b.style.color = on ? ACTIVE_FG : NAVY; b.style.background = on ? ACTIVE_BG : 'transparent'; });
@@ -2098,6 +2152,7 @@ M.rebuildThumbnails = async function () {
   if (!this.sidebarVisible) return;
   if (this.panelTab === 2) { this.rebuildOutlinePanel(); return; }
   if (this.panelTab === 3) { if (this.rebuildRecordings) this.rebuildRecordings(); return; }
+  if (this.panelTab === 4) { this.rebuildInsertions(); return; }
   if (this.panelTab !== 1) return;
   const generation = ++this.thumbnailGeneration;
   this.thumbnailList.textContent = '';
@@ -2377,7 +2432,7 @@ export function initMain2(app) {
   app.importTarget = null; app.importSession = null; app.searchCanceled = null;
   app.studyPanel = null; app.studyRows = null; app.studyHeading = null;
   app.sidePanel = null; app.searchPanel = null; app.searchInput = null; app.searchStatus = null; app.searchList = null; app.searchScroll = null;
-  app.outlineList = null; app.recordingList = null; app.sideTabs = []; app._thumbAspectCache = null;
+  app.outlineList = null; app.recordingList = null; app.insertList = null; app.sideTabs = []; app._thumbAspectCache = null;
   app.showAllThumbnails = app.recentPrefs.getBoolean('thumb_all', false);
   document.addEventListener('paste', e => app.onPasteEvent(e));
   window.addEventListener('resize', () => {
