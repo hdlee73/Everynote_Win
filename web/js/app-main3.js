@@ -89,7 +89,6 @@ const methods = {
         t.push(tile('사진·이미지', 'ic_image', run('insertImage')));
         t.push(tile('스티커', 'ic_sticker', run('showStickerPicker')));
         t.push(tile('동영상', 'ic_video', run('pickVideo')));
-        t.push(tile('하이퍼링크', 'ic_link', run('startHyperlink')));
         t.push(tile('유튜브 링크', 'ic_youtube', run('askYoutube')));
         t.push(tile('음성 녹음', 'ic_mic', run('startRecording')));
         t.push(tile('메모 추가', 'ic_memo', run('toggleMemoMode')));

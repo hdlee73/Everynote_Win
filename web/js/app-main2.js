@@ -641,7 +641,7 @@ function attachSplitter(handle, { axis, sign = 1, read, apply, min, max, commit,
   handle.addEventListener('dblclick', e => { e.preventDefault(); if (reset) reset(); });
   return handle;
 }
-export const SPLIT = { sideMin: 140, sideMaxAbs: 520, studyMinW: 220, studyMinH: 120 };
+export const SPLIT = { sideMin: 168, sideMaxAbs: 520, studyMinW: 220, studyMinH: 120 };
 const resizeSoon = (() => { let raf = 0; return () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; window.dispatchEvent(new Event('resize')); }); }; })();
 
 
@@ -1544,7 +1544,6 @@ M.insertRows = function () {
     new R('표', 'ic_table', () => this.showTableDialog(null)).tint('#30B0C7'),
     new R('동영상', 'ic_video', () => this.pickVideo()).tint('#FF3B30'),
     new R('유튜브 링크', 'ic_youtube', () => this.askYoutube()).tint('#FF0000'),
-    new R('하이퍼링크', 'ic_link', () => this.startHyperlink()).tint('#5856D6'),
   ];
 };
 M.showInsertMenu = function (anchor) {
@@ -1941,9 +1940,9 @@ M.editElementGeometry = function (element) {
 // Side panel: search / page previews / outline (+marks) / recordings
 // ====================================================================================================================
 M.sidePanelWidth = function () {
-  const def = Math.min(190, Math.round(window.innerWidth * .42)), saved = this.recentPrefs ? this.recentPrefs.getInt('side_w', 0) : 0;
+  const def = Math.max(SPLIT.sideMin, Math.min(190, Math.round(window.innerWidth * .42))), saved = this.recentPrefs ? this.recentPrefs.getInt('side_w', 0) : 0;
   const max = Math.max(SPLIT.sideMin, Math.min(SPLIT.sideMaxAbs, Math.round(window.innerWidth * .6)));
-  return saved > 0 ? clamp(saved, Math.min(SPLIT.sideMin, def), max) : def;
+  return saved > 0 ? clamp(saved, SPLIT.sideMin, max) : def;
 };
 M.buildSidePanel = function () {
   if (!this.searchPanel) this.buildSearchPanel();

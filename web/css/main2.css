@@ -97,11 +97,12 @@ textarea.field{overflow-y:auto}
 .m2-video-close:hover{background:rgba(255,255,255,.12)}
 
 /* ---- side panel ---- */
-.m2-side{flex:none;flex-direction:column;height:100%;background:#F8F8F8;min-height:0;overflow:hidden}
+.m2-side{flex:none;min-width:168px;flex-direction:column;height:100%;background:#F8F8F8;min-height:0;overflow:hidden}
 .m2-side-head{display:flex;align-items:center;height:48px;padding-left:12px;flex:none}
 .m2-side-title{flex:1 1 0;min-width:0;height:48px;line-height:48px;font-size:15px;font-weight:700;color:#1C1C1E;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .m2-side-tabs{display:flex;height:46px;padding:0 8px 6px;flex:none}
-.m2-side-tab{flex:1 1 0;width:auto!important;margin:0 2px;padding:8px;border-radius:14px}
+.m2-side-tab{flex:1 1 0;min-width:0;width:auto!important;margin:0 2px;padding:8px;border-radius:14px}
+.m2-side.narrow .m2-side-tabs{padding:0 8px 6px}.m2-side.narrow .m2-side-tab{margin:0 1px;padding:8px 0}
 .m2-side-content{position:relative;flex:1 1 0;min-height:0}
 .m2-sidepane{position:absolute;inset:0}
 .m2-thumbpanel{background:#F2F2F7}
