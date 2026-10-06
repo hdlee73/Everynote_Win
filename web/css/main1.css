@@ -59,7 +59,7 @@
 .m-dock{display:none;height:48px;padding:0 6px;border-radius:24px;background:#fff;box-shadow:0 3px 14px rgba(0,0,0,.22);align-items:center;pointer-events:auto;will-change:transform,opacity}
 .m-dockbtn{width:44px;height:44px;padding:0;border:0;background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:22px;flex:none}
 .m-dockbtn:hover{background:rgba(0,0,0,.05)}
-.m-dockhandle{position:absolute;left:50%;bottom:40px;width:44px;height:5px;margin-left:-22px;border-radius:3px;background:rgba(0,0,0,.4);display:none;z-index:60}
+.m-dockhandle{position:absolute;left:50%;bottom:14px;width:56px;height:28px;margin-left:-28px;border-radius:14px;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;cursor:pointer;z-index:60}
 
 /* ---- tool paint helpers: pen menu pieces ---- */
 .m-seg{display:flex;padding:4px 4px 6px}

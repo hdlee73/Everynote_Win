@@ -883,6 +883,11 @@ export class PdfPageView {
     const d = DP;
     fillRoundRect(ctx, box.left, box.top, box.right, box.bottom, 10 * d, paper);
     fillCircle(ctx, anchorX, anchorY, 6 * d, accent);
+    ctx.save(); ctx.beginPath(); ctx.rect(box.left, box.top, box.width(), box.height()); ctx.clip();   // text never spills out of a small memo
+    try { this._drawStickyText(ctx, box, text, fontSp); } finally { ctx.restore(); }
+  }
+  _drawStickyText(ctx, box, text, fontSp) {
+    const d = DP;
     ctx.fillStyle = argb(0xFF3F3A2D); ctx.font = `${fontSp * d}px ${FONT_SANS}`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     const lineHeight = fontSp * 1.4 * d; const x = box.left + 10 * d; let y = box.top + (fontSp + 9) * d; const max = box.width() - 20 * d;
     for (const paragraph of javaSplit(text == null ? '' : text, '\n')) {
@@ -966,7 +971,7 @@ export class PdfPageView {
       if (this.stDrag >= 1 && this.stDrag <= 4) {
         const rr = -rot * Math.PI / 180, lx = (dx * Math.cos(rr) - dy * Math.sin(rr)) / d, ly = (dx * Math.sin(rr) + dy * Math.cos(rr)) / d;
         const left = this.stDrag === 1 || this.stDrag === 3, top = this.stDrag === 1 || this.stDrag === 2, maxW = Math.min(560, dest.width() / d * .92);
-        const w = Math.max(90, Math.min(maxW, left ? this.stW0 - lx : this.stW0 + lx)), h = Math.max(48, Math.min(700, top ? this.stH0 - ly : this.stH0 + ly));
+        const w = Math.max(44, Math.min(maxW, left ? this.stW0 - lx : this.stW0 + lx)), h = Math.max(26, Math.min(700, top ? this.stH0 - ly : this.stH0 + ly));
         o.boxW = Math.fround(w); o.boxH = Math.fround(h);
         this._stSetAnchor(o, this.stAx0 + (left ? (this.stW0 - w) * d / dest.width() : 0), this.stAy0 + (top ? (this.stH0 - h) * d / dest.height() : 0));
         this.stMoved = true; this.invalidate(); return true;

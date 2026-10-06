@@ -124,6 +124,16 @@ test('shapesAndTablesSurviveSavingAndAreValidated', () => {
   assert.equal(Shapes.hex(-1), 'FFFFFFFF'); assert.equal(Shapes.parseColor('FFFF0000'), 0xFFFF0000 | 0); assert.equal(Shapes.parseColor('00000001'), 1);
 });
 
+test('tableCellColorsSurviveSavingAndResizing', () => {
+  const t = Table.create(2, 2, 0xFF000000 | 0, 0xFFE5F0FF | 0, 0x00FFFFFF); t.cells[1] = 'x'; t.bg[1] = 0xFFFFF4CC | 0; t.bg[3] = 0xFF1C1C1E | 0;
+  const text = t.serialize(); assert.equal(text, '2,2,FF000000,FFE5F0FF,00FFFFFF\n\nx\n\n\n~,FFFFF4CC,,FF1C1C1E');
+  const back = Table.parse(rt(el({ kind: 'table', left: .1, top: .1, right: .9, bottom: .5, text })).text);
+  assert.deepEqual(back.bg.map(c => c >>> 0), [0, 0xFFFFF4CC, 0, 0xFF1C1C1E]); assert.equal(back.cells[1], 'x');
+  const bigger = back.resized(3, 3); assert.equal(bigger.bg[1] >>> 0, 0xFFFFF4CC); assert.equal(bigger.bg[4] >>> 0, 0xFF1C1C1E); assert.equal(bigger.bg.length, 9);
+  assert.equal(Table.create(2, 2, 0, 0, 0).serialize().includes('~'), false);
+  assert.equal(Table.parse('1,1,FF000000,FF000000,FF000000\na\n~zz').bg[0], 0);
+});
+
 // ------------------------------------------------------------------ TypingSearchTest / NotebookFeatureTest / LibraryWorkflowTest
 test('typedTextStylePersistsThroughBackupAndRestore', async () => {
   const store = new AnnotationStore();

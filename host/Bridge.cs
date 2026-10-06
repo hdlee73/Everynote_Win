@@ -463,7 +463,7 @@ sealed class Bridge
         var url = S(a, "url", false);
         if (!string.IsNullOrEmpty(url))
         {
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "mailto"))
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "mailto" && !(u.Scheme == "ms-settings" && (u.AbsoluteUri.StartsWith("ms-settings:speech", StringComparison.OrdinalIgnoreCase) || u.AbsoluteUri.StartsWith("ms-settings:regionlanguage", StringComparison.OrdinalIgnoreCase)))))
                 throw new ArgumentException("허용되지 않는 주소입니다");
             Process.Start(new ProcessStartInfo(u.AbsoluteUri) { UseShellExecute = true });
             return;

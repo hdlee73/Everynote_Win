@@ -110,7 +110,10 @@ check('title is the menu icon + 미리보기 (Android v1.34.0)', (await textOf('
 await ev(() => { T.app.showAllThumbnails = true; T.app.selectPanelTab(1); }); await page.waitForTimeout(2500); await shot('15-thumbs-all');
 check('all thumbnails', (await page.locator('.m2-thumb').count()) === 12);
 await ev(() => { T.app.showAllThumbnails = false; T.app.selectPanelTab(2); }); await shot('16-outline');
-check('outline rows', (await page.locator('.m2-outline').count()) === 2 && (await page.locator('.m2-mark').count()) === 2);
+check('outline rows (outline tab lists outlines only)', (await page.locator('.m2-outline').count()) === 2 && (await page.locator('.m2-mark').count()) === 0);
+await ev(() => { T.app.selectPanelTab(4); });
+check('memo rows are listed in the 삽입 목록 tab', (await page.locator('.m2-mark').count()) === 2);
+await ev(() => { T.app.selectPanelTab(2); });
 await ev(() => T.app.selectPanelTab(0)); await page.fill('.m2-search-in', 'fox'); await page.press('.m2-search-in', 'Enter'); await page.waitForTimeout(2500); await shot('17-search');
 check('search hits', (await ev(() => T.app.searchHits.length)) > 0, String(await ev(() => T.app.searchHits.length)));
 check('search status', (await textOf('.m2-search-status')).startsWith('결과 '), await textOf('.m2-search-status'));
@@ -206,12 +209,11 @@ check('keeping the box size keeps the free size', await ev(() => window.__m.boxW
 // outline panel: 'title (p19)', highlights excluded unless a memo is attached
 await ev(() => { const s = T.app.store; const m = new T.Mark(); m.page = 2; m.left = .1; m.top = .1; m.right = .3; m.bottom = .15; m.color = 0x66FFDE59; m.note = ''; s.marks.push(m); window.__plain = m; T.app.selectPanelTab(2); });
 await page.waitForTimeout(300);
-const ol = await ev(() => ({ outline: [...document.querySelectorAll('.m2-outline')].map(e => e.textContent), marks: document.querySelectorAll('.m2-mark').length, head: document.querySelector('.m2-marks-h').textContent,
-  small: getComputedStyle(document.querySelector('.m2-outline-t')).fontSize, p: getComputedStyle(document.querySelector('.m2-outline-p')).color, markText: document.querySelector('.m2-mark-text').textContent }));
+const ol = await ev(() => { const o = { outline: [...document.querySelectorAll('.m2-outline')].map(e => e.textContent), small: getComputedStyle(document.querySelector('.m2-outline-t')).fontSize, p: getComputedStyle(document.querySelector('.m2-outline-p')).color }; T.app.selectPanelTab(4); o.marks = document.querySelectorAll('.m2-mark').length; o.head = document.querySelector('.m2-marks-h').textContent; o.markText = document.querySelector('.m2-mark-text').textContent; return o; });
 check('outline item text is "제목  (pN)" with a small grey page', ol.outline[0].includes('서론') && /서론\s+\(p2\)/.test(ol.outline[0]) && ol.small === '12.5px' && ol.p === 'rgb(142, 142, 147)', JSON.stringify(ol));
 check('plain highlight (no memo) is not listed; heading says 메모', ol.marks === 2 && ol.head === '메모 2' && /\(p\d+\)/.test(ol.markText), JSON.stringify(ol));
 await shot('39-outline-panel');
-await ev(() => { window.__plain.note = '붙은 메모'; T.app.rebuildOutlinePanel(); });
+await ev(() => { window.__plain.note = '붙은 메모'; T.app.rebuildInsertions(); });
 check('highlight with a memo is listed', (await page.locator('.m2-mark').count()) === 3);
 await ev(() => { const a = T.app.store.marks, i = a.indexOf(window.__plain); a.splice(i, 1); T.app.closeSidePanel(); });
 // colour rows in shape/table dialogs have the rainbow chip; picker result lands in the spec
