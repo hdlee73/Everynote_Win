@@ -112,7 +112,7 @@ check('v1.29 selection popup does not cover the selected text (below / above / b
 await shot('06-selpop-avoid');
 await page.locator('.amenu .amenu-row[aria-label="삽입"]').click(); await page.waitForTimeout(300);
 const rows2 = await page.evaluate(() => [...document.querySelectorAll('.amenu .amenu-row')].map(r => r.getAttribute('aria-label')));
-check('삽입 submenu lists the insert rows (incl. 하이퍼링크) and still avoids the text', rows2.includes('사진·이미지') && rows2.includes('도형') && rows2.includes('하이퍼링크') && await page.evaluate(g => { const c = document.querySelector('.amenu').getBoundingClientRect(); return c.right <= g.s.l + 0.5 || c.left >= g.s.r - 0.5 || c.bottom <= g.s.t + 0.5 || c.top >= g.s.b - 0.5; }, geo), rows2.join());
+check('삽입 submenu lists the insert rows (하이퍼링크 removed) and still avoids the text', rows2.includes('사진·이미지') && rows2.includes('도형') && !rows2.includes('하이퍼링크') && await page.evaluate(g => { const c = document.querySelector('.amenu').getBoundingClientRect(); return c.right <= g.s.l + 0.5 || c.left >= g.s.r - 0.5 || c.bottom <= g.s.t + 0.5 || c.top >= g.s.b - 0.5; }, geo), rows2.join());
 await page.evaluate(() => { window.__cleared = 0; app.showTextSelectionPopup({ text: 'Hello 안녕', bounds: [{ left: .2, top: .3, right: .5, bottom: .34 }], unionBounds: { left: .2, top: .3, right: .5, bottom: .34 } }, 300, 300); });
 await page.waitForTimeout(300);
 // 단어장 (v3.10): copies the word and opens it in the Naver English-English dictionary

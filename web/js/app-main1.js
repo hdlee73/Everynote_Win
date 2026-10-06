@@ -1116,6 +1116,7 @@ const methods = {
         this.renderer = null; this.documentUri = null; this.store = null; this._showGen++;
         this.firstPageView.clearPage(); this.secondPageView.clearPage();
         this.thumbnailList.replaceChildren(); this.refreshStudyPanel(); this.updateTabs(); this.showWelcome();
+        try { this.showLibrary(); } catch (e) { console.error(e); }   // nothing left open: back to the document shelf, as at start
       } else this.switchDocument(this.sessions[Math.max(0, Math.min(oldIndex, this.sessions.length - 1))]);
     } else this.updateTabs();
     this.saveSessionState();
@@ -1626,7 +1627,7 @@ const methods = {
       r.offset(v.el.offsetLeft, v.el.offsetTop);
       if (union == null) union = r.copy(); else union.union(r);
     }
-    if (two) { union.left = 0; union.right = papers.clientWidth; }
+    if (two) { const spine = this.secondPageView.el.offsetLeft, half = Math.min(spine - union.left, union.right - spine); if (half > 0) { union.left = spine - half; union.right = spine + half; } }   // symmetric about the seam, but only as wide as the paper
     return union;
   },
   /** Builds the curl overlay for the page rectangle and switches the pages underneath it; null when it cannot. Needs the target bitmaps cached. */
@@ -1650,7 +1651,7 @@ const methods = {
       if (forward) curl.setup(null, newPage, oldPage, paperBack(mirror(oldPage)), false, 0);
       else curl.setup(null, mirror(newPage), mirror(oldPage), paperBack(oldPage), true, 0);
     } else {
-      const spine = this.secondPageView.el.offsetLeft, half = Math.min(spine, papers.clientWidth - spine);
+      const spine = this.secondPageView.el.offsetLeft, half = w / 2;
       rl = spine - half; w = half * 2;
       const oldFirst = S(spine - half, rt, half, hh), oldSecond = S(spine, rt, half, hh), newFirst = N(spine - half, rt, half, hh), newSecond = N(spine, rt, half, hh);
       if (forward) curl.setup(oldFirst, newSecond, oldSecond, paperBack(mirror(newFirst)), false, 0.5);
