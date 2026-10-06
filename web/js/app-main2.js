@@ -2418,15 +2418,18 @@ M.startLibraryRestore = async function () {
     });
   } catch (e) { toast('복원 실패: ' + errMsg(e)); }
 };
+const RELEASES_URL = 'https://github.com/hdlee73/Everynote_Win/releases';
 M.showAbout = function () {
   const info = h('div', { class: 'm2-about', dataset: { tag: 'about_info' } }, h('div', { class: 'm2-about-name' }, 'Everynote'), h('div', null, '버전 ' + this.appVersion()), h('div', { class: 'm2-about-by' }, AUTHOR_LINE));
+  const releaseLink = h('a', { class: 'm2-about-link', href: RELEASES_URL, dataset: { tag: 'about_releases' } }, '업데이트 정보 (GitHub 릴리스 페이지)');
+  releaseLink.addEventListener('click', e => { e.preventDefault(); host.shellOpen(RELEASES_URL).catch(() => toast('브라우저를 열 수 없습니다')); });
   const status = h('div', { class: 'm2-about-status', dataset: { tag: 'update_status' } });
   const mk = (key, dflt, label, tag) => {
     const box = h('input', { type: 'checkbox', dataset: { tag } }); box.checked = this.recentPrefs.getBoolean(key, dflt);
     box.addEventListener('change', () => this.recentPrefs.putBoolean(key, box.checked));
     return h('label', { class: 'm2-about-check' }, box, h('span', null, label));
   };
-  const view = h('div', null, info, status, mk('auto_update_check', true, '앱을 열 때 새 버전 자동 확인', 'auto_update'),
+  const view = h('div', null, info, releaseLink, status, mk('auto_update_check', true, '앱을 열 때 새 버전 자동 확인', 'auto_update'),
     mk('auto_update_install', false, '새 버전이 있으면 확인 없이 자동으로 설치', 'auto_update_install'));
   const dlg = new AlertDialog.Builder().setTitle('앱 정보').setView(view).setPositiveButton('업데이트 확인', null).setNegativeButton('닫기', null).show();
   rebindButton(dlg, BUTTON_POSITIVE, () => this.checkForUpdate(true, status));
