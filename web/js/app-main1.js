@@ -829,7 +829,8 @@ const methods = {
     rows.push(Row.divider());
     rows.push(new Row('사용법', 'ic_outline', () => this.showHelp()).tint('#8E8E93'));
     rows.push(new Row('오프라인 사용 안내', 'ic_wifi_off', () => this.callUi2('showAboutOffline')).tint('#8E8E93'));
-    rows.push(new Row('앱 정보·업데이트', 'ic_more_vert', () => this.callUi2('showAbout')).tint('#8E8E93'));
+    const upd = this.callUi2('pendingUpdateVersion');
+    rows.push(new Row(upd ? '앱 정보·업데이트 (새 버전 v' + upd + ')' : '앱 정보·업데이트', 'ic_more_vert', () => this.callUi2('showAbout')).tint(upd ? '#007AFF' : '#8E8E93'));
     const shortcuts = [];
     shortcuts.push(new Shortcut('문서함', 'ic_folder_open', false, () => this.showLibrary()));
     shortcuts.push(new Shortcut('문서·필기 검색', 'ic_search', false, () => this.searchDocument()));

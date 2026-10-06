@@ -242,6 +242,7 @@ body.m2-resizing[data-m2-axis="y"]{cursor:row-resize!important}
 .m2-about-name{font-size:19px;font-weight:700}
 .m2-about-by{margin-top:10px}
 .m2-about-link{display:inline-block;margin-top:10px;font-size:14px;color:#007AFF;text-decoration:underline;cursor:pointer}
+.m2-about-new{color:#007AFF;font-weight:600}
 .m2-about-status{margin:14px 0 6px;font-size:14px;color:#8E8E93;min-height:20px}
 .m2-about-check{display:flex;align-items:center;gap:8px;font-size:14px;padding:4px 0;cursor:pointer}
 .m2-vbar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:4px;padding:2px 6px;background:rgba(0,0,0,.72);color:#fff}

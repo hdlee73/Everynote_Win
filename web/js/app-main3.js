@@ -133,7 +133,7 @@ const methods = {
       tile('인쇄', 'ic_print', () => this.callUi2('printDocument'))]));
     sections.push(section('도움말', [tile('사용법', 'ic_outline', () => this.showHelp()),
       tile('오프라인 사용 안내', 'ic_wifi_off', () => this.callUi2('showAboutOffline')),
-      tile('앱 정보·업데이트', 'ic_more_vert', () => this.callUi2('showAbout'))]));
+      tile(this.callUi2('pendingUpdateVersion') ? '앱 정보·업데이트 (새 버전 v' + this.callUi2('pendingUpdateVersion') + ')' : '앱 정보·업데이트', 'ic_more_vert', () => this.callUi2('showAbout'))]));
     return this.showSheet('메뉴', sections);
   },
   // ================================================================== lasso shape bar
@@ -726,7 +726,7 @@ export function initMain3(app) {
   dflt('inlineFresh', false); dflt('recordingStarted', 0); dflt('recordingPage', 0);
   app.lassoShape = prefs.getInt('lasso_shape', 0);
   app._appVersion = ''; app._destroyed = false;
-  host.info().then(i => { app._appVersion = (i && i.version) || ''; setTimeout(() => { try { if (!app._destroyed && app.autoCheckForUpdate) app.autoCheckForUpdate(); } catch { /* ignore */ } }, 5000); }).catch(() => {});
+  host.info().then(i => { app._appVersion = (i && i.version) || ''; setTimeout(() => { try { if (!app._destroyed && app.autoCheckForUpdate) app.autoCheckForUpdate(); } catch { /* ignore */ } }, 5000); setInterval(() => { try { if (!app._destroyed && app.autoCheckForUpdate) app.autoCheckForUpdate(); } catch { /* ignore */ } }, 30 * 60 * 1000); }).catch(() => {});
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') app.onStop(); });
   window.addEventListener('pagehide', () => app.onDestroy());
 }
