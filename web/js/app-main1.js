@@ -526,7 +526,7 @@ const methods = {
     dock.addEventListener('pointerdown', hold); dock.addEventListener('pointerup', rearm); dock.addEventListener('pointercancel', rearm);
     dock.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') hold(); });
     dock.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') rearm(); });
-    this.dockHandle = h('div', { class: 'm-dockhandle', dataset: { tag: 'fullscreen_handle' }, 'aria-label': '도구 모음 열기 · 위로 쓸어올리기' });
+    this.dockHandle = h('div', { class: 'm-dockhandle', dataset: { tag: 'fullscreen_handle' }, 'aria-label': '도구 모음 열기 · 위로 쓸어올리기', title: '도구 모음 열기' }, mkIcon('ic_chevron_up', 20, '#FFFFFF'));
     this.dockHandle.addEventListener('click', () => this.showFullscreenDock(false));
     root.append(this.dockHandle);
 
@@ -585,7 +585,7 @@ const methods = {
     const doc = this.renderer != null;
     if (this.zoomPill) this.zoomPill.style.display = doc ? '' : 'none';
     if (this.addPageButton) this.addPageButton.style.display = doc ? '' : 'none';
-    if (this.welcomeCard) this.welcomeCard.style.display = doc ? 'none' : '';
+    if (this.welcomeCard) this.welcomeCard.style.display = doc || this.openingCount > 0 ? 'none' : '';
     this.updateZoomUi();
   },
 
@@ -1023,6 +1023,12 @@ const methods = {
 
   /** openPdf(uri, textOnly, requestedPage, activate). Resolves when the document is open (or the flow finished). */
   async openPdf(uri, textOnly = false, requestedPage = -1, activate = true) {
+    // keep the empty-state welcome card hidden while a document is loading (it used to flash between the shelf closing and the page appearing)
+    this.openingCount = (this.openingCount | 0) + 1; this.updateFloaters();
+    try { return await this.openPdfNow(uri, textOnly, requestedPage, activate); }
+    finally { this.openingCount--; this.updateFloaters(); }
+  },
+  async openPdfNow(uri, textOnly, requestedPage, activate) {
     const title = this.queryName(uri);
     if (this.isOfficeDocument(title) && !textOnly) {
       const lower = title.toLowerCase();
@@ -1035,7 +1041,7 @@ const methods = {
     if (this.isPictureFile(title) && !this.library.managed(uri)) { await this.convertPicture(uri, title); return; }
     if (!this.library.managed(uri)) {
       const saved = await this.library.imported(uri);
-      if (saved) { await this.openPdf(saved, false, requestedPage, activate); return; }
+      if (saved) { await this.openPdfNow(saved, false, requestedPage, activate); return; }
       await this.importPdfToLibrary(uri, title, requestedPage, activate); return;
     }
     const existing = this.sessions.find(s => samePath(s.uri, uri));
@@ -1440,7 +1446,8 @@ const methods = {
     const d = this.fullscreenDock;
     if (!this.fullscreen || !animate) { d.style.transition = 'none'; d.style.display = 'none'; return; }
     d.style.transition = 'opacity 160ms ease-in-out, transform 160ms ease-in-out'; d.style.opacity = '0'; d.style.transform = 'translateY(60px)';
-    this._dockHideEnd = setTimeout(() => { if (!this.dockShown) d.style.display = 'none'; }, 170);
+    // once the dock is gone a small ⌃ handle stays, so the way back to the menu is visible
+    this._dockHideEnd = setTimeout(() => { if (!this.dockShown) { d.style.display = 'none'; if (this.fullscreen) this.dockHandle.style.display = 'flex'; } }, 170);
   },
   // ---- floating menus: the bottom bar as a draggable pill, the fullscreen toolbar that stays open
   /** 'bottom' | 'float' | 'left' | 'right' (migrates the old float_bar flag). */
@@ -1515,7 +1522,11 @@ const methods = {
     this.fullscreen = !this.fullscreen;
     const disp = this.fullscreen ? 'none' : '';
     this.header.style.display = disp; this.tabStrip.style.display = disp; this.bottomBar.style.display = disp; this.railMargin();
-    if (this.fullscreen) this.showFullscreenDock(true); else this.hideFullscreenDock(false);
+    if (this.fullscreen) {
+      this.showFullscreenDock(true);
+      let hints = 0; try { hints = +localStorage.getItem('everynote.fullscreenHint') || 0; } catch { /* ignore */ }
+      if (hints < 3) { try { localStorage.setItem('everynote.fullscreenHint', String(hints + 1)); } catch { /* ignore */ } toast('메뉴는 화면 아래에서 위로 쓸어올리거나 아래쪽 ⌃ 버튼을 누르면 다시 나옵니다'); }
+    } else this.hideFullscreenDock(false);
     host.call('window.fullscreen', { on: this.fullscreen }).catch(() => {});
   },
   /** Back button == Esc: selection popup (desktop), inline text, search panel, full screen. Returns true when handled. */
@@ -1883,12 +1894,20 @@ const methods = {
       this.speakPending();
     }).show();
   },
+  /** The chosen voice is not installed: say so and offer the Windows settings pages where speech / language packs are downloaded. */
+  offerVoiceDownload() {
+    new AlertDialog.Builder().setTitle('음성이 없습니다')
+      .setMessage('선택한 발음의 음성이 기기에 없습니다.\n설정 > 시간 및 언어 > 음성에서 음성을 추가하거나, 언어 팩(영어(영국)·영어(호주)·한국어)을 설치하면 읽어주기를 쓸 수 있습니다.\nms-settings:speech')
+      .setPositiveButton('음성 설정 열기', () => this._openExternal('ms-settings:speech', '설정을 열 수 없습니다'))
+      .setNeutralButton('언어 설정 열기', () => this._openExternal('ms-settings:regionlanguage', '설정을 열 수 없습니다'))
+      .setNegativeButton('닫기', null).show();
+  },
   async speakPending() {
     if (!this.speech || !this.speechReady || this.speechPending == null) return;
     const lang = this.speechLocale.toLowerCase(), voices = await getVoices();
     const norm = v => String(v.lang).replace('_', '-').toLowerCase();
     const voice = voices.find(v => norm(v) === lang) || (lang.startsWith('ko') ? voices.find(v => norm(v).startsWith('ko')) : null);
-    if (!voice) { toast('선택한 발음의 음성이 기기에 없습니다'); this.speechPending = null; return; }
+    if (!voice) { this.speechPending = null; this.offerVoiceDownload(); return; }
     const text = this.speechPending; this.speechPending = null;
     this.speech.cancel();
     const u = new SpeechSynthesisUtterance(text); u.voice = voice; u.lang = voice.lang;

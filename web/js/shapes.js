@@ -1,6 +1,6 @@
 // Port of Shapes.java: drawing shapes and tables placed on a page.
 // Shape text: "kind|STROKE|FILL|width" (colors as 8 hex digits AARRGGBB).
-// Table text: "rows,cols,LINE,HEAD,FILL" then one line per cell (row-major).
+// Table text: "rows,cols,LINE,HEAD,FILL" then one line per cell (row-major), then an optional "~" line with a per-cell background (8 hex digits, empty = none).
 import { RectF, argb } from './util.js';
 import { AnnotationPainter, Typeface } from './painter.js';
 
@@ -23,16 +23,22 @@ function rr(c, x, y, w, h, rx, ry) {
 }
 
 export class Table {
-  constructor() { this.rows = 3; this.cols = 3; this.line = 0xFF3A3A3C | 0; this.head = 0xFFE5F0FF | 0; this.fill = 0x00FFFFFF; this.cells = []; }
+  constructor() { this.rows = 3; this.cols = 3; this.line = 0xFF3A3A3C | 0; this.head = 0xFFE5F0FF | 0; this.fill = 0x00FFFFFF; this.cells = []; this.bg = []; }
 
   static parse(text) {
     const t = new Table();
-    if (!Shapes.validTable(text)) { t.cells = new Array(9).fill(''); return t; }
+    if (!Shapes.validTable(text)) { t.cells = new Array(9).fill(''); t.bg = new Array(9).fill(0); return t; }
     const lines = text.split('\n'), p = lines[0].split(',');
     t.rows = parseInt(p[0], 10); t.cols = parseInt(p[1], 10);
     t.line = Shapes.parseColor(p[2]); t.head = Shapes.parseColor(p[3]); t.fill = Shapes.parseColor(p[4]);
     t.cells = new Array(t.rows * t.cols);
     for (let i = 0; i < t.cells.length; i++) t.cells[i] = i + 1 < lines.length ? lines[i + 1] : '';
+    t.bg = new Array(t.cells.length).fill(0);
+    const colorLine = t.cells.length + 1;
+    if (colorLine < lines.length && lines[colorLine].startsWith('~')) {
+      const parts = lines[colorLine].substring(1).split(',');
+      for (let i = 0; i < t.bg.length && i < parts.length; i++) if (/^[0-9A-F]{8}$/.test(parts[i])) t.bg[i] = Shapes.parseColor(parts[i]);
+    }
     return t;
   }
 
@@ -40,6 +46,7 @@ export class Table {
     const t = new Table();
     t.rows = rows; t.cols = cols; t.line = line | 0; t.head = head | 0; t.fill = fill | 0;
     t.cells = new Array(rows * cols).fill('');
+    t.bg = new Array(rows * cols).fill(0);
     return t;
   }
 
@@ -47,13 +54,14 @@ export class Table {
   resized(newRows, newCols) {
     const t = Table.create(newRows, newCols, this.line, this.head, this.fill);
     for (let r = 0; r < Math.min(this.rows, newRows); r++)
-      for (let c = 0; c < Math.min(this.cols, newCols); c++) t.cells[r * newCols + c] = this.cells[r * this.cols + c];
+      for (let c = 0; c < Math.min(this.cols, newCols); c++) { t.cells[r * newCols + c] = this.cells[r * this.cols + c]; t.bg[r * newCols + c] = this.bg[r * this.cols + c]; }
     return t;
   }
 
   serialize() {
     let s = `${this.rows},${this.cols},${Shapes.hex(this.line)},${Shapes.hex(this.head)},${Shapes.hex(this.fill)}`;
     for (const cell of this.cells) s += '\n' + (cell == null ? '' : String(cell).replace(/[\n\r]/g, ' '));
+    const bg = this.bg || []; if (bg.some(color => alphaOf(color) !== 0)) s += '\n~' + bg.map(color => (alphaOf(color) !== 0 ? Shapes.hex(color) : '')).join(',');
     return s;
   }
 }
@@ -140,6 +148,11 @@ export class Shapes {
     try {
       if (alphaOf(t.fill) > 0) { c.fillStyle = argb(t.fill); c.fillRect(b.left, b.top, b.width(), b.height()); }
       if (alphaOf(t.head) > 0) { c.fillStyle = argb(t.head); c.fillRect(b.left, b.top, b.width(), ch); }
+      for (let r = 0; r < t.rows; r++) for (let col = 0; col < t.cols; col++) {
+        const color = t.bg[r * t.cols + col];
+        if (alphaOf(color) === 0) continue;
+        c.fillStyle = argb(color); c.fillRect(b.left + col * cw, b.top + r * ch, cw, ch);
+      }
       const width = Math.max(1, pageWidth * .0022);
       c.lineWidth = width; c.strokeStyle = argb(AnnotationPainter.adj(t.line)); c.lineCap = 'butt'; c.lineJoin = 'miter';
       c.strokeRect(b.left, b.top, b.width(), b.height());
@@ -159,8 +172,10 @@ export class Shapes {
         const bold = r === 0 && headLit;
         c.font = Typeface.DEFAULT.css(size, bold);
         const shown = AnnotationPainter.ellipsize(c, s, avail);
-        const lit = (r === 0 && headLit) || (r > 0 && fillLit);
-        c.fillStyle = argb(lit ? 0xFF1C1C1E : AnnotationPainter.adj(0xFF1C1C1E));
+        const cellBg = t.bg[r * t.cols + col], cellLit = alphaOf(cellBg) > 0;
+        const dark = cellLit && (0.299 * ((cellBg >> 16) & 255) + 0.587 * ((cellBg >> 8) & 255) + 0.114 * (cellBg & 255)) < 110;
+        const lit = cellLit || (r === 0 && headLit) || (r > 0 && fillLit);
+        c.fillStyle = argb(dark ? 0xFFFFFFFF : lit ? 0xFF1C1C1E : AnnotationPainter.adj(0xFF1C1C1E));
         c.fillText(shown, b.left + col * cw + size * .3, b.top + r * ch + ch / 2 - (fm.ascent + fm.descent) / 2);
       }
     } finally { c.restore(); }

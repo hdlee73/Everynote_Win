@@ -170,7 +170,7 @@ export const host = {
   async writeBlob(path, blob) { return host.writeBytes(path, new Uint8Array(await blob.arrayBuffer())); },
   openDialog: (title, filters, multi = false) => host.call('dialog.open', { title, filters, multi }),
   saveDialog: (title, name, filters) => host.call('dialog.save', { title, name, filters }),
-  shellOpen: pathOrUrl => host.call('shell.open', /^https?:/i.test(pathOrUrl) ? { url: pathOrUrl } : { path: pathOrUrl }),
+  shellOpen: pathOrUrl => host.call('shell.open', /^(https?|ms-settings):/i.test(pathOrUrl) ? { url: pathOrUrl } : { path: pathOrUrl }),
   netHttp: o => host.call('net.http', o),
   zipCreate: (path, entries) => host.call('zip.create', { path, entries }),
   zipEntries: path => host.call('zip.entries', { path }),

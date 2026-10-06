@@ -1614,6 +1614,15 @@ M.showTableDialog = function (existing) {
   box.append(this.sectionLabel('선 색'), this.colorRow(lineColors, line));
   box.append(this.sectionLabel('머리글 칸 색 (첫 줄)'), this.colorRow(headColors, head));
   box.append(this.sectionLabel('바탕 색'), this.colorRow(fillColors, fill));
+  let painted = base;
+  const paintCells = h('div', { role: 'button', style: { color: ACCENT, fontWeight: '700', fontSize: '15px', padding: '14px 2px 8px', cursor: 'pointer' } }, '셀별 색 지정 …');
+  paintCells.addEventListener('click', () => {
+    let r = 3, c = 3;
+    if (/^\d+$/.test(rowsInput.value.trim()) && /^\d+$/.test(colsInput.value.trim())) { r = parseInt(rowsInput.value.trim(), 10); c = parseInt(colsInput.value.trim(), 10); }
+    r = Math.max(1, Math.min(30, r)); c = Math.max(1, Math.min(12, c));
+    painted = painted.resized(r, c); this.showCellColorEditor(painted, null);
+  });
+  box.append(paintCells);
   alertCard({
     title: existing == null ? '표 만들기' : '표 모양 수정', view: wrapScroll(box, { maxHeight: 'calc(100vh - 220px)' }),
     positive: [existing == null ? '넣기' : '적용', () => {
@@ -1621,12 +1630,38 @@ M.showTableDialog = function (existing) {
       const pr = parseInt(rowsInput.value.trim(), 10), pc = parseInt(colsInput.value.trim(), 10);
       if (Number.isFinite(pr) && Number.isFinite(pc) && /^\d+$/.test(rowsInput.value.trim()) && /^\d+$/.test(colsInput.value.trim())) { r = pr; c = pc; }
       r = Math.max(1, Math.min(30, r)); c = Math.max(1, Math.min(12, c));
-      const t = base.resized(r, c); t.line = line[0]; t.head = head[0]; t.fill = fill[0];
+      const t = painted.resized(r, c); t.line = line[0]; t.head = head[0]; t.fill = fill[0];
       if (existing == null) { this.placementText = t.serialize(); this.placeElement('table', ''); }
       else { existing.text = t.serialize(); this.store.save(); this.redrawPages(); }
     }],
     negative: ['취소'],
   });
+};
+/** Cell-colour painter: pick a colour (the first swatch clears) and click cells to paint them; works on t.bg in place. */
+M.showCellColorEditor = function (t, done) {
+  const palette = [0x00000000, 0xFFFFF4CC, 0xFFFFE3E8, 0xFFE3F7E8, 0xFFE5F0FF, 0xFFEDE3FA, 0xFFD9D9DE, 0xFFFFB3B3, 0xFFFFD6A5, 0xFFB9E6C4, 0xFF9EC9FF, 0xFF1C1C1E].map(toInt);
+  const chosen = [palette[1]];
+  const box = h('div', { class: 'm2-shapebox' });
+  box.append(this.sectionLabel('칠할 색을 고른 뒤 칸을 누르세요 (맨 앞 흰 동그라미 = 색 지우기)'), this.colorRow(palette, chosen));
+  const side = Math.max(30, Math.min(56, Math.floor(280 / t.cols)));
+  const grid = h('div', { class: 'm2-cells', style: { marginTop: '10px' } });
+  for (let r = 0; r < t.rows; r++) {
+    const line = h('div', { class: 'm2-cell-row' });
+    for (let c = 0; c < t.cols; c++) {
+      const index = r * t.cols + c, label = String(t.cells[index] == null ? '' : t.cells[index]).trim();
+      const cell = h('div', { role: 'button', 'aria-label': '셀 ' + (r + 1) + '행 ' + (c + 1) + '열', style: { width: side + 'px', height: side + 'px', boxSizing: 'border-box', border: '1px solid #8E8E93', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', whiteSpace: 'nowrap', cursor: 'pointer' } }, label);
+      const paint = () => {
+        const color = t.bg[index] | 0, on = (color >>> 24) !== 0;
+        cell.style.background = on ? argb(color >>> 0) : '#fff';
+        cell.style.color = on && (0.299 * ((color >> 16) & 255) + 0.587 * ((color >> 8) & 255) + 0.114 * (color & 255)) < 110 ? '#fff' : '#1C1C1E';
+      };
+      paint(); cell.addEventListener('click', () => { t.bg[index] = chosen[0] | 0; paint(); });
+      line.append(cell);
+    }
+    grid.append(line);
+  }
+  box.append(grid);
+  alertCard({ title: '셀 색 지정', view: wrapScroll(box, { maxHeight: 'calc(100vh - 220px)', overflow: 'auto' }), positive: ['확인', () => { if (done) done(); }] });
 };
 M.editTableCells = function (element) {
   const t = Table.parse(element.text);
@@ -1644,6 +1679,7 @@ M.editTableCells = function (element) {
   alertCard({
     title: '표 내용', view: wrapScroll(grid, { maxHeight: 'calc(100vh - 220px)', overflow: 'auto' }),
     positive: ['저장', () => { for (let i = 0; i < inputs.length; i++) t.cells[i] = inputs[i].value; element.text = t.serialize(); this.store.save(); this.redrawPages(); }],
+    neutral: ['셀 색', () => { for (let i = 0; i < inputs.length; i++) t.cells[i] = inputs[i].value; this.showCellColorEditor(t, () => { element.text = t.serialize(); this.store.save(); this.redrawPages(); }); }],
     negative: ['취소'],
   });
 };
@@ -1895,10 +1931,10 @@ M.rebuildInsertions = function () {
   const list = this.insertList; if (!list) return;
   list.textContent = ''; if (!this.store) return;
   const seen = new Set(), items = [];
-  for (const e of this.store.elements) { if (e.kind === 'hyperlink') { const k = e.page + '|' + e.color + '|' + e.text; if (seen.has(k)) continue; seen.add(k); } items.push(e); }
+  for (const e of this.store.elements) { if (e.kind === 'audio') continue; if (e.kind === 'hyperlink') { const k = e.page + '|' + e.color + '|' + e.text; if (seen.has(k)) continue; seen.add(k); } items.push(e); }
   items.sort((a, b) => a.page - b.page || a.top - b.top);
   list.append(h('div', { class: 'm3-empty', dataset: { tag: 'insert_heading' }, style: { textAlign: 'left', padding: '4px 6px 6px' } }, '삽입한 항목 ' + items.length + '개'));
-  if (!items.length) { list.append(h('div', { class: 'm3-empty' }, '링크·사진·동영상·녹음·도형·표·타이핑을 넣으면 여기에 모여 보입니다.\n항목을 누르면 그 위치로 이동하고, ⋮ 로 열기·수정·삭제를 합니다.')); return; }
+  if (!items.length) list.append(h('div', { class: 'm3-empty' }, '링크·사진·동영상·도형·표·타이핑·메모를 넣으면 여기에 모여 보입니다.\n항목을 누르면 그 위치로 이동하고, ⋮ 로 열기·수정·삭제를 합니다.'));
   const go = item => Promise.resolve(this.showPage(item.page)).then(() => { if (this.pageView && this.pageView.focusOnPoint) this.pageView.focusOnPoint((item.left + item.right) / 2, (item.top + item.bottom) / 2); });
   for (const item of items) {
     let detail = item.kind === 'hyperlink' ? this.describeLink(item.text) : (item.kind === 'link' || item.kind === 'audio' || !(item.kind in INSERT_LABELS)) ? String(item.text || '').trim() : '';
@@ -1908,6 +1944,7 @@ M.rebuildInsertions = function () {
     { const mb = iconButton('ic_more_vert', '삽입 항목 관리', NAVY, ev => { ev.stopPropagation(); this.showInsertionMenu(item, mb, go); }, 40, 40, 10); row.append(mb); }
     list.append(row);
   }
+  this.appendMarkList(list);
 };
 M.showInsertionMenu = function (item, anchor, go) {
   const R = AnchoredMenu.Row, rows = [new R('이동', 'ic_page', () => go(item)).tint('#30B0C7')];
@@ -2087,13 +2124,13 @@ M.swipeToDelete = function (row, del) {
   row.addEventListener('pointerup', end); row.addEventListener('pointercancel', end);
   row.addEventListener('click', e => { if (row._swiped) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
 };
-M.rebuildOutlinePanel = function () { this.rebuildOutlineItems(); this.appendMarkList(); };
-/** Lists every highlight and sticky memo of the document under the outline so any annotation is one tap away. */
-M.appendMarkList = function () {
+M.rebuildOutlinePanel = function () { this.rebuildOutlineItems(); };
+/** Lists every highlight with a note and every sticky memo of the document in the 삽입 목록 tab (the outline tab keeps outlines only). */
+M.appendMarkList = function (list) {
   if (!this.store) return;
   const listed = this.store.marks.filter(m => m.noteOnly || (m.note != null && m.note.trim() !== ''));
   if (listed.length === 0) return;
-  this.outlineList.append(h('div', { class: 'm2-marks-h' }, '메모 ' + listed.length));
+  list.append(h('div', { class: 'm2-marks-h' }, '메모 ' + listed.length));
   const marks = [...listed].sort((a, b) => a.page - b.page || a.top - b.top);
   for (const mark of marks) {
     const row = h('div', { class: 'm2-mark', dataset: { tag: 'mark_item' }, role: 'button' });
@@ -2101,8 +2138,8 @@ M.appendMarkList = function () {
     const note = mark.note == null ? '' : mark.note.trim();
     row.append(dot, h('div', { class: 'm2-mark-text' }, (mark.noteOnly ? '메모' : '하이라이트') + ' (p' + (mark.page + 1) + ')' + (note === '' ? '' : '\n' + note)));
     row.addEventListener('click', () => this._goTo(mark.page, (mark.left + mark.right) / 2, (mark.top + mark.bottom) / 2));
-    this.swipeToDelete(row, () => { const a = this.store.marks, i = a.indexOf(mark); if (i >= 0) a.splice(i, 1); this.store.save(); this.redrawPages(); this.rebuildOutlinePanel(); toast('삭제했습니다'); });
-    this.outlineList.append(row);
+    this.swipeToDelete(row, () => { const a = this.store.marks, i = a.indexOf(mark); if (i >= 0) a.splice(i, 1); this.store.save(); this.redrawPages(); this.rebuildInsertions(); toast('삭제했습니다'); });
+    list.append(row);
   }
 };
 M.rebuildOutlineItems = function () {
