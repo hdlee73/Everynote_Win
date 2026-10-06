@@ -204,7 +204,7 @@ function makePageListener(app) {
     }
   };
   for (const n of ['onHighlightCreated', 'onMarkTapped', 'onMemoPointRequested', 'onZoomGestureStarted', 'onPageSwipe', 'onOutlinePointRequested', 'onInkChanged',
-    'onTextSelectionFinished', 'onTranslationTapped', 'onSelectionAdjustStarted', 'onLassoSelectionFinished', 'onElementTapped', 'onZoomChanged', 'onElementDeleted']) {
+    'onTextSelectionFinished', 'onTranslationTapped', 'onSelectionAdjustStarted', 'onLassoSelectionFinished', 'onElementTapped', 'onHyperlinkTapped', 'onZoomChanged', 'onElementDeleted']) {
     l[n] = (...a) => { active(); return app[n](...a); };
   }
   l.onBlankLongPress = (page, x, y, viewX, viewY) => { active(); app.showInsertMenuAt(l.view, page, x, y, viewX, viewY); };
@@ -288,7 +288,10 @@ const methods = {
     try { restored = await this.restoreSession(); } catch (e) { console.error(e); }
     host.log('boot: args=' + JSON.stringify(args) + ' restored=' + restored);
     for (const a of args) { try { await this.openPdf(a); host.log('boot: opened ' + a + ' sessions=' + this.sessions.length); } catch (e) { host.log('boot: open failed ' + (e && e.stack || e)); } }
-    if (!args.length && !restored) this.showWelcome();
+    if (!args.length) {   // started without a file: open the document shelf (a file argument opens that document instead)
+      if (!restored) this.showWelcome();
+      try { this.showLibrary(); } catch (e) { console.error(e); }
+    }
     window.dispatchEvent(new Event('pdfnote-ready'));
   },
 
@@ -307,6 +310,7 @@ const methods = {
     window.addEventListener('pointermove', e => {
       if (this.fullscreen && this.fullscreenDock && !this.dockShown && e.pointerType === 'mouse' && e.clientY >= window.innerHeight - 4) this.showFullscreenDock(false);
     });
+    window.addEventListener('focus', () => this.enforceChrome());
     window.addEventListener('pagehide', () => { try { this.saveSessionState(); AnnotationStore.flushAll(); } catch (e) { /* ignore */ } });
   },
   _documentFiles(dt) { return [...(dt.files || [])].filter(f => OFFICE_EXTS.includes((/\.([^.]+)$/.exec(f.name) || [])[1]?.toLowerCase())); },
@@ -1405,7 +1409,17 @@ const methods = {
   },
 
   // ============================================================ fullscreen
+  /** The bottom menu and the full-screen floating dock never show together: the dock exists only in full screen, the bar only outside it. */
+  enforceChrome() {
+    if (this.bottomBar) this.bottomBar.style.display = this.fullscreen ? 'none' : '';
+    if (!this.fullscreen && this.fullscreenDock) {
+      this.dockShown = false; clearTimeout(this._dockTimer); clearTimeout(this._dockHideEnd);
+      this.fullscreenDock.style.transition = 'none'; this.fullscreenDock.style.display = 'none';
+      if (this.dockHandle) this.dockHandle.style.display = 'none';
+    }
+  },
   showFullscreenDock(brief) {
+    if (!this.fullscreen) { this.enforceChrome(); return; }
     this.dockShown = true;
     this.dockHandle.style.display = 'none';
     clearTimeout(this._dockTimer); clearTimeout(this._dockHideEnd);
@@ -1467,7 +1481,7 @@ const methods = {
     b.classList.toggle('rail-left', place === 'left'); b.classList.toggle('rail-right', place === 'right');
     this.barGrip.style.display = place === 'float' ? '' : 'none';
     if (f) { this.root.append(b); if (place === 'float') this.applyFloatPos(b, vert ? 'barv' : 'bar'); } else this.contentCol.append(b);
-    this.railMargin();
+    this.railMargin(); this.enforceChrome();
   },
   railMargin() {
     const p = this.barPlace(), on = !this.fullscreen;

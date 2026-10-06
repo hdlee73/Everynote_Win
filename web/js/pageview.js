@@ -220,6 +220,7 @@ export class PdfPageView {
     this.selectionStartRegion = null; this.selectionEndRegion = null; this.selectionCandidate = false; this.selectingText = false;
     this.darkPage = false;
     this._beginTimer = 0; this._blankTimer = 0;
+    this._linkHit = null; this._linkTimer = 0; this._linkLong = false;
     this._ptrs = []; this._dirty = false; this._raf = 0;
     this._cw = 0; this._ch = 0;
     /** CSS px kept free around the page at zoom 1 so the backdrop shows around the paper (requirement 4). */
@@ -784,6 +785,7 @@ export class PdfPageView {
     const dest = this.contentRect(), dw = dest.width(), dh = dest.height();
     const th = this.theme();
     ctx.save();                                  // paper: soft shadow under a solid sheet
+    this._clipSeam(ctx, dest);
     ctx.shadowColor = th.shadow; ctx.shadowBlur = 16; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 3;
     ctx.fillStyle = this.darkPage ? '#000' : '#fff';
     ctx.fillRect(dest.left, dest.top, dw, dh);
@@ -791,6 +793,7 @@ export class PdfPageView {
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(this._pageImage(), dest.left, dest.top, dw, dh);
     ctx.save();                                  // hairline paper border (outside the sheet)
+    this._clipSeam(ctx, dest);
     ctx.lineWidth = 1; ctx.strokeStyle = th.border; ctx.strokeRect(dest.left - 0.5, dest.top - 0.5, dw + 1, dh + 1);
     ctx.restore();
     AnnotationPainter.dark = this.darkPage;
@@ -1178,6 +1181,21 @@ export class PdfPageView {
     }
   }
 
+  /** In a spread a page turn may only start on the document (either page), not on the grey surround; a single page is unrestricted. */
+  _onSpreadDocument(x, y) {
+    const o = this.spreadPartner;
+    if (!this.spreadSide || !o || !o.bitmap) return true;
+    if (this.contentRect().contains(x, y)) return true;
+    const a = this.el.getBoundingClientRect(), b = o.el.getBoundingClientRect();
+    return o.contentRect().contains(x + a.left - b.left, y + a.top - b.top);
+  }
+  /** Clip that leaves out the seam side of a spread page, so neither the shadow nor the border draws a dividing line between the two pages. */
+  _clipSeam(ctx, dest) {
+    const o = this.spreadPartner;
+    if (!this.spreadSide || !o || !o.bitmap) return;
+    const big = 1e5, left = this.spreadSide < 0 ? dest.left : -big, right = this.spreadSide > 0 ? dest.right : big;
+    ctx.beginPath(); ctx.rect(left, -big, right - left, 2 * big); ctx.clip();
+  }
   /** May this pointer start a page-turning swipe? Fingers (not while finger-inking) and, in read mode, the mouse (setMouseReadDrag). */
   _swipeEligible(e) {
     if (!this.pageSwipeEnabled || this.directTextSelection || this.lassoMode || this.highlightMode || this.memoMode || this.outlineMode) return false;
@@ -1203,6 +1221,18 @@ export class PdfPageView {
     this._L('onBlankLongPress', this.page, n[0], n[1], this.startX, this.startY);
   }
   _cancelBlankPress() { clearTimeout(this._blankTimer); this._blankTimer = 0; }
+  _cancelLinkPress() { clearTimeout(this._linkTimer); this._linkTimer = 0; }
+  _linkTouchAllowed() { return !this.highlightMode && !this.memoMode && !this.outlineMode && !this.lassoMode && this.inkMode === 0 && !this.directTextSelection; }
+  /** The hyperlink under a point (padded a little so a thin line of text is easy to hit). */
+  _hyperlinkAt(x, y, dest = this.contentRect()) {
+    const st = this.annotationStore; if (!st || dest.width() <= 0 || dest.height() <= 0) return null;
+    const px = 6 * DP / dest.width(), py = 6 * DP / dest.height(), nx = (x - dest.left) / dest.width(), ny = (y - dest.top) / dest.height();
+    for (let i = st.elements.length - 1; i >= 0; i--) {
+      const el = st.elements[i];
+      if (el.page === this.page && el.kind === 'hyperlink' && nx >= el.left - px && nx <= el.right + px && ny >= el.top - py && ny <= el.bottom + py) return el;
+    }
+    return null;
+  }
 
   // ---- Pointer Events -> MotionEvent --------------------------------------------------------------------------
   _local(pe) { const r = this.el.getBoundingClientRect(); return [pe.clientX - r.left, pe.clientY - r.top]; }
@@ -1293,6 +1323,7 @@ export class PdfPageView {
     if (ce.pointerType === 'touch' || !this.bitmap) return;
     const r = this.el.getBoundingClientRect(); const x = ce.clientX - r.left, y = ce.clientY - r.top;
     const d = this.contentRect(); if (d.width() <= 0 || !d.contains(x, y)) return;
+    const link = this._hyperlinkAt(x, y, d); if (link) { this._L('onHyperlinkTapped', link, true); return; }   // right click on a link: its menu
     if (this.textRegionAt(x, y, d)) return;
     const n = this.toPage(x, y);
     this._L('onBlankLongPress', this.page, n[0], n[1], x, y);
@@ -1306,6 +1337,7 @@ export class PdfPageView {
     const stylus = this.isStylus(e);
     const am = e.action;
     if (am === UP || am === CANCEL || am === POINTER_DOWN || (am === MOVE && Math.hypot(e.x - this.startX, e.y - this.startY) > this.touchSlop())) this._cancelBlankPress();
+    if (this._linkHit && (am === CANCEL || am === POINTER_DOWN || (am === MOVE && Math.hypot(e.x - this.startX, e.y - this.startY) > this.touchSlop()))) { this._cancelLinkPress(); this._linkHit = null; }
     if (this._handleMemoGesture(e, dest)) return true;
     if (this._handleElementGesture(e, dest)) return true;
     if (am === DOWN) this.scalingOccurred = false;
@@ -1314,7 +1346,7 @@ export class PdfPageView {
       this._L('onSelectionAdjustStarted');
       const edge = 72 * DP;
       const eligible = this._swipeEligible(e);
-      this.bodySwipeCandidate = eligible && this.scale <= 1; this.edgeStartTime = e.time;
+      this.bodySwipeCandidate = eligible && this.scale <= 1 && this._onSpreadDocument(e.x, e.y); this.edgeStartTime = e.time;
       this.edgeSwipe = eligible && e.toolType !== 'mouse' && this.scale > 1 && (this.verticalPageSwipe ? (e.y < edge || e.y > this.height - edge) : (e.x < edge || e.x > this.width - edge));
       if (this.edgeSwipe) { this.startX = e.x; this.startY = e.y; this.edgeStartTime = e.time; this._cancelBeginTextSelection(); return true; }
     }
@@ -1413,7 +1445,7 @@ export class PdfPageView {
       }
       this.startX = this.currentX = e.x; this.startY = this.currentY = e.y; this.lastX = this.startX; this.lastY = this.startY;
       this.gestureMoved = false; this.scalingOccurred = false;
-      this.bodySwipeCandidate = this._swipeEligible(e) && this.scale <= 1;
+      this.bodySwipeCandidate = this._swipeEligible(e) && this.scale <= 1 && this._onSpreadDocument(e.x, e.y);
       this.drawing = this.highlightMode && dest.contains(this.startX, this.startY);
       if (this.drawing && this.highlightFree) this.freePts = [[this.startX, this.startY]];
       this.selectionStartRegion = (!this.drawing && !this.memoMode && !this.outlineMode && this.inkMode === 0) ? this.textRegionAt(this.startX, this.startY, dest) : null;
@@ -1422,6 +1454,13 @@ export class PdfPageView {
       this._cancelBlankPress();
       if (!this.selectionCandidate && !this.drawing && !this.memoMode && !this.outlineMode && this.inkMode === 0 && !this.lassoMode && !this.directTextSelection && !stylus && this.scale <= 1.05 && dest.contains(this.startX, this.startY))
         this._blankTimer = setTimeout(() => this._fireBlankPress(), 650);
+      // a hyperlink: a tap follows it (also with the mouse), a long press asks for its menu; text under it is not selected
+      this._cancelLinkPress(); this._linkLong = false;
+      this._linkHit = this.scale <= 1.05 && this._linkTouchAllowed() ? this._hyperlinkAt(this.startX, this.startY, dest) : null;
+      if (this._linkHit) {
+        this._cancelBeginTextSelection(); this.selectionCandidate = false; this._cancelBlankPress();
+        this._linkTimer = setTimeout(() => { this._linkTimer = 0; if (this._linkHit) { this._linkLong = true; this._L('onHyperlinkTapped', this._linkHit, true); } }, 500);
+      }
       this.panning = this.scale > 1 && !this.outlineMode && !this.selectionCandidate;
       this.invalidate(); return true;
     }
@@ -1494,6 +1533,12 @@ export class PdfPageView {
       this.clampPan(); this.invalidate(); return true;
     }
     if (am === UP) {
+      this._cancelLinkPress();
+      if (this._linkHit) {
+        const hit = this._linkHit; this._linkHit = null; this._cancelBeginTextSelection(); this.selectionCandidate = false;
+        if (!this._linkLong) this._L('onHyperlinkTapped', hit, false);
+        return true;
+      }
       this._cancelBeginTextSelection();
       if (this.selectingText) {
         this.updateTextSelection(this.nearestTextRegion(e.x, e.y, dest)); const sel = this.finishTextSelection(); this.selectingText = this.selectionCandidate = false;
