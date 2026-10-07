@@ -21,6 +21,7 @@ const settle = async (pg, ms = 1500) => { await pg.waitForTimeout(300); await pg
 const shot = (pg, n) => pg.screenshot({ path: path.join(out, `library-${n}.png`) });
 const log = pg => pg.evaluate('T.log.slice()');
 const names = pg => pg.$$eval('.lib-name', e => e.map(x => x.textContent));
+const more = async (pg, text) => { await pg.click('[aria-label="선택 문서 더 보기"]'); await pg.waitForTimeout(200); await pg.locator('.amenu-row', { hasText: text }).first().click(); };
 const click = (pg, sel, text) => text ? pg.locator(sel, { hasText: text }).first().click() : pg.locator(sel).first().click();
 
 // ---------------------------------------------------------------- wide, folder view, large covers
@@ -74,46 +75,46 @@ pg = await open();
 const L = await pg.evaluate('T.root');
 await pg.locator('.lib-card[data-tag="document:Sample.pdf"]').click({ button: 'right' }); // right click on doc == long press -> selection mode
 await pg.waitForTimeout(300); await shot(pg, '13-selection');
-ok(await pg.locator('.lib-selbar.on').count() === 1, 'selection bar visible');
-ok((await pg.textContent('.lib-selcount')) === '1개 선택', 'selection count');
+ok(await pg.locator('.lib-seltop.on').count() === 1, 'selection bar visible');
+ok((await pg.textContent('.lib-selcount')) === '1개 선택됨', 'selection count');
 await pg.locator('.lib-card[data-tag="document:한국어 샘플.pdf"]').click(); await pg.waitForTimeout(200);
-ok((await pg.textContent('.lib-sub')) === '2개 선택됨', 'subtitle selected');
-await click(pg, '.lib-cmd', '전체'); await pg.waitForTimeout(200); ok((await pg.textContent('.lib-selcount')) === '7개 선택', 'select all ' + await pg.textContent('.lib-selcount'));
+ok((await pg.textContent('.lib-selcount')) === '2개 선택됨', 'title selected');
+await click(pg, '.lib-cmd', '전체 선택'); await pg.waitForTimeout(200); ok((await pg.textContent('.lib-selcount')) === '7개 선택됨', 'select all ' + await pg.textContent('.lib-selcount'));
 await shot(pg, '14-selected-all');
 // unselect all except one: toggle via checkboxes
 await pg.evaluate("T.dlg.selected.clear(); T.dlg.selected.add(T.root+'\\\\Sample.pdf'); T.dlg._render(++T.dlg.generation)"); await pg.waitForTimeout(200);
 // rename
-await click(pg, '.lib-cmd', '이름 변경'); await pg.waitForTimeout(400); await shot(pg, '15-rename');
+await more(pg, '이름 변경'); await pg.waitForTimeout(400); await shot(pg, '15-rename');
 await pg.fill('.ad-card .lib-in', ''); await click(pg, '.ad-btn', '저장'); await pg.waitForTimeout(200);
 ok((await pg.textContent('.lib-err')) === '이름을 입력하세요', 'rename empty error');
 await pg.fill('.ad-card .lib-in', 'a/b'); await click(pg, '.ad-btn', '저장'); await pg.waitForTimeout(500);
 ok((await pg.textContent('.toast')) === '파일 이름에 사용할 수 없는 문자가 있습니다', 'rename invalid -> toast');
 await pg.evaluate("T.dlg.selectionMode=true; T.dlg.selected.add(T.root+'\\\\Sample.pdf'); T.dlg._render(++T.dlg.generation)"); await pg.waitForTimeout(200);
-await click(pg, '.lib-cmd', '이름 변경'); await pg.waitForTimeout(300);
+await more(pg, '이름 변경'); await pg.waitForTimeout(300);
 await pg.fill('.ad-card .lib-in', 'Lecture Notes 2'); await click(pg, '.ad-btn', '저장'); await pg.waitForTimeout(500);
 ok((await pg.textContent('.toast')) === '같은 이름의 PDF가 있습니다', 'rename duplicate -> toast');
 await pg.close();
 
 pg = await open();
 await pg.evaluate("T.dlg.selectionMode=true; T.dlg.selected.add(T.root+'\\\\Sample.pdf'); T.dlg._render(++T.dlg.generation)"); await pg.waitForTimeout(200);
-await click(pg, '.lib-cmd', '이름 변경'); await pg.fill('.ad-card .lib-in', 'Renamed Sample'); await pg.keyboard.press('Enter'); await pg.waitForTimeout(800); await settle(pg);
+await more(pg, '이름 변경'); await pg.fill('.ad-card .lib-in', 'Renamed Sample'); await pg.keyboard.press('Enter'); await pg.waitForTimeout(800); await settle(pg);
 let st = await pg.evaluate(`(async()=>({a:(await T.host.stat(T.root+'\\\\Sample.pdf')).exists,b:(await T.host.stat(T.root+'\\\\Renamed Sample.pdf')).exists,fav:T.library.favorite(T.root+'\\\\Renamed Sample.pdf'),log:T.log}))()`);
 console.log(st); ok(!st.a && st.b && st.fav, 'rename moved file + favorite flag');
 ok(!(await pg.evaluate('T.dlg.selectionMode')), 'selection mode left after rename');
 // favorite toggle
 await pg.evaluate("T.dlg.selectionMode=true; T.dlg.selected.add(T.root+'\\\\한국어 샘플.pdf'); T.dlg._render(++T.dlg.generation)");
-await click(pg, '.lib-cmd', '즐겨찾기'); await pg.waitForTimeout(300);
+await more(pg, '즐겨찾기'); await pg.waitForTimeout(300);
 ok(await pg.evaluate("T.library.favorite(T.root+'\\\\한국어 샘플.pdf')"), 'favorite on'); ok((await pg.textContent('.toast')) === '즐겨찾기에 추가했습니다', 'fav toast');
 // copy into folder via picker
 await pg.evaluate("T.dlg.selectionMode=true; T.dlg.selected.add(T.root+'\\\\한국어 샘플.pdf'); T.dlg._render(++T.dlg.generation)");
-await click(pg, '.lib-cmd', '복사'); await pg.waitForTimeout(700); await shot(pg, '16-picker');
+await more(pg, '복사본'); await pg.waitForTimeout(700); await shot(pg, '16-picker');
 await pg.click('.ad-card .lib-trow .fname >> text=English'); await pg.waitForTimeout(300); await shot(pg, '17-picker-english');
 await click(pg, '.ad-btn', '이곳에 복사'); await pg.waitForTimeout(800);
 st = await pg.evaluate(`(async()=>({src:(await T.host.stat(T.root+'\\\\한국어 샘플.pdf')).exists,dst:(await T.host.stat(T.root+'\\\\English\\\\한국어 샘플.pdf')).exists}))()`);
 ok(st.src && st.dst, 'copy keeps source and creates target');
 // copy to same folder -> (1)
 await pg.evaluate("T.dlg.selectionMode=true; T.dlg.selected.add(T.root+'\\\\한국어 샘플.pdf'); T.dlg._render(++T.dlg.generation)");
-await click(pg, '.lib-cmd', '복사'); await pg.waitForTimeout(500); await click(pg, '.ad-btn', '이곳에 복사'); await pg.waitForTimeout(800);
+await more(pg, '복사본'); await pg.waitForTimeout(500); await click(pg, '.ad-btn', '이곳에 복사'); await pg.waitForTimeout(800);
 ok(await pg.evaluate(`T.host.stat(T.root+'\\\\한국어 샘플 (1).pdf').then(s=>s.exists)`), 'copy into same folder -> (1)');
 // move via picker + create folder inside picker
 await pg.evaluate("T.dlg.selectionMode=true; T.dlg.selected.add(T.root+'\\\\한국어 샘플 (1).pdf'); T.dlg._render(++T.dlg.generation)");
@@ -335,10 +336,10 @@ await pg.evaluate(`(async()=>{ const { AlertDialog } = await import('/web/js/ui/
   window.dlg2 = new AlertDialog.Builder().setTitle('새 노트').setView(pc.el).setPositiveButton('만들기').setNegativeButton('취소').show(); })()`);
 await pg.waitForTimeout(400);
 ok(await pg.locator('.lib-tplbtn').isHidden() === false || true, 'template button state');
-ok((await pg.evaluate('pc2.kind')) === 10 && (await pg.locator('.lib-picker').textContent()).startsWith('금감원노트'), 'default paper is 금감원노트 (Android v1.32.0)');
+ok((await pg.evaluate('pc2.kind')) === 10 && (await pg.locator('.lib-tile.on .lib-tilename').textContent()) === '금감원노트', 'default paper is 금감원노트 (Android v1.32.0)');
 ok((await pg.evaluate('T.NotebookFiles.PAPER_ORDER.slice(0,3).map(k => T.NotebookFiles.PAPER_NAMES[k]).join()')) === '금감원노트,금감원노트_칸나누기,리갈노트', 'list order: 금감원노트, 금감원노트_칸나누기, 리갈노트');
-await pg.locator('.lib-picker').click(); await pg.waitForTimeout(200); await shot(pg, '42b-paper-menu');
-ok((await pg.locator('.amenu .amenu-row').count()) === 13 && (await pg.locator('.amenu .amenu-row').first().textContent()) === '금감원노트', 'paper list is a menu card with 13 rows, 금감원노트 first');
+await shot(pg, '42b-paper-tiles');
+ok((await pg.locator('.lib-tile').count()) === 13 && (await pg.locator('.lib-tile').first().textContent()) === '금감원노트', 'paper list is a tile grid with 13 tiles, 금감원노트 first');
 await pg.keyboard.press('Escape'); await pg.waitForTimeout(150);
 ok(await pg.locator('.lib-tplbtn').isHidden(), 'template button hidden for the bundled form');
 await pg.evaluate('pc2.selectKind(3)'); await pg.waitForTimeout(100);

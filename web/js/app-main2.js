@@ -13,7 +13,8 @@ import { Shapes, Table } from './shapes.js';
 import { AnnotationPainter } from './painter.js';
 import { PdfDoc } from './pdfdoc.js';
 import { NotebookFiles, samePath } from './library.js';
-import { LibraryDialog, PaperChoiceView, ProgressDialog, rebindButton, inputField } from './library-dialog.js';
+import { SettingsView } from './settings.js';
+import { LibraryDialog, PaperChoiceView, ProgressDialog, rebindButton, inputField, defaultNoteStyle } from './library-dialog.js';
 import * as Search from './search.js';
 import { ColorPicker } from './ui/colorpicker.js';
 import { printDocument } from './print.js';
@@ -883,6 +884,7 @@ M.runDeviceSync = async function (client, paths, dir) {
 };
 
 // ---- 758-858: library glue, notebooks, page insert/delete ------------------------------------------------------------------------------
+M.showSettings = function () { new SettingsView(this).show(); };
 M.showLibrary = function () {
   if (this.onSelectionAdjustStarted) this.onSelectionAdjustStarted();
   if (this.store) this.store.save();
@@ -892,6 +894,7 @@ M.showLibrary = function () {
     open: file => this.openPdf(file),
     importFiles: folder => { this.libraryFolder = folder; this.choosePdf(); },
     newNote: (folder, refresh) => this.createNotebook(folder, refresh),
+    settings: () => this.showSettings(),
     changed: (source, target, moved) => { if (moved) this.libraryChanged(source, target); },
     selectedFolder: folder => { this.libraryFolder = folder; },
     removed: files => { for (const s of [...this.sessions]) if (files.some(f => samePath(f, s.uri))) this.closeDocument(s); },
@@ -918,7 +921,7 @@ M.newNotebook = function () { this.createNotebook(this.libraryFolder == null ? t
 M.createNotebook = function (folder, refresh) {
   const panel = h('div');
   const name = inputField({ hint: '노트 이름', text: '새 노트', cls: 'lib-notename' });
-  const paper = new PaperChoiceView(this);
+  const paper = new PaperChoiceView(this, Object.assign(defaultNoteStyle(this.recentPrefs), { layoutChoice: true }));   // 설정 > 기본 노트 스타일 is the first choice
   if (paper.onTemplateRequest) paper.onTemplateRequest(() => this.requestTemplate(paper));
   panel.append(name.view, paper.el);
   const dialog = new AlertDialog.Builder().setTitle('새 노트').setView(panel).setPositiveButton('만들기', null).setNegativeButton('취소', null).create();
@@ -928,7 +931,7 @@ M.createNotebook = function (folder, refresh) {
     try { title = NotebookFiles.name(name.input.value); selected = paper.paper(); } catch (e) { name.setError(errMsg(e)); return; }
     btn.style.pointerEvents = 'none'; btn.style.opacity = '.4';
     try {
-      const file = await this.library.createNote(folder, title, selected);
+      const file = await this.library.createNote(folder, title, selected, paper.landscape);
       dialog.dismiss(); if (refresh) refresh();
       if (this.libraryDialog) { try { this.libraryDialog.dismiss(); } catch (e) { /* already gone */ } }
       this.openPdf(file); toast('마지막 장에서 넘기면 새 페이지가 추가됩니다');
