@@ -243,7 +243,7 @@ check('원본 파일 내보내기 copies the original bytes', orig.same && orig.
 check('toast 원본 파일을 내보냈습니다', (await textOf('.toast')) === '원본 파일을 내보냈습니다');
 // own PDF / image as template: new-note dialog -> host.openDialog -> NotebookFiles.importTemplate -> paper.setTemplate
 await ev(() => { T.host.openDialog = async () => { T.host._fake.put('C:\\Users\\dev\\Downloads\\my-form.pdf', T.bytes); return ['C:\\Users\\dev\\Downloads\\my-form.pdf']; }; T.app.libraryFolder = T.app.library.root; T.app.newNotebook(); }); await page.waitForTimeout(300);
-await page.click('[data-tag=paper_picker]'); await page.click('.amenu-row >> text=내 PDF·이미지 서식'); await page.waitForTimeout(200);
+await page.click('[data-tag="paper_tile:9"]'); await page.waitForTimeout(200);
 await shot('41-new-note-template');
 check('template button appears for 내 PDF·이미지 서식', await page.locator('.lib-paper >> text=PDF·이미지 서식 고르기').isVisible());
 await page.click('.lib-paper >> text=PDF·이미지 서식 고르기'); await page.waitForTimeout(500);
@@ -252,7 +252,7 @@ check('picked template is copied (private copy) and shown', /^서식: .+다시 �
 await page.fill('.lib-notename input', 'V127 서식 노트'); await page.click('.ad-btn >> text=만들기'); await page.waitForTimeout(2500);
 check('note created from own template', await ev(() => T.calls.some(c => c[0] === 'openPdf' && String(c[1]).endsWith('V127 서식 노트.pdf'))));
 await shot('42-template-note');
-await ev(() => T.app.newNotebook()); await page.waitForTimeout(300); await page.click('[data-tag=paper_picker]'); await page.click('.amenu-row >> text=내 PDF·이미지 서식'); await page.click('.ad-btn >> text=만들기'); await page.waitForTimeout(400);
+await ev(() => T.app.newNotebook()); await page.waitForTimeout(300); await page.click('[data-tag="paper_tile:9"]'); await page.click('.ad-btn >> text=만들기'); await page.waitForTimeout(400);
 check('custom paper without a template stays open with an error', (await page.locator('.ad-root').count()) >= 1);
 await page.click('.ad-btn >> text=취소'); await page.waitForTimeout(200);
 

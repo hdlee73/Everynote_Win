@@ -283,7 +283,7 @@ export const NotebookFiles = {
     return file;
   },
   blank(folder, title, pages) { return NotebookFiles.create(folder, title, pages, new Paper(0, -1)); },
-  async create(folder, title, pages, paper) {
+  async create(folder, title, pages, paper, landscape = false) {
     if (pages < 1) throw new IOException('페이지 수가 올바르지 않습니다');
     const { PDFDocument, PDFName, PDFString } = await pdfLib();
     const target = await NotebookFiles.unique(folder, NotebookFiles.pdfName(title));
@@ -295,7 +295,7 @@ export const NotebookFiles = {
       info.set(PDFName.of('PDFNoteNotebook'), PDFString.of('true'));
       info.set(PDFName.of('PDFNotePaper'), PDFString.of(paper.spec().replace(/[\\()]/g, m => '\\' + m)));
       const cache = {};
-      for (let i = 0; i < pages; i++) await addPaper(doc, paper, -1, cache);
+      for (let i = 0; i < pages; i++) await addPaper(doc, paper, -1, cache, landscape ? [A4_H, A4_W] : null);
       await host.writeBytes(temp, await doc.save({ useObjectStreams: false }));
       await NotebookFiles.replace(temp, target);
       return target;
@@ -543,10 +543,10 @@ export class LibraryRepository {
       return result;
     });
   }
-  createNote(parent, title, paper) {
+  createNote(parent, title, paper, landscape = false) {
     return this._sync(async () => {
       await this._folder(parent);
-      const file = await NotebookFiles.create(parent, title, 1, paper);
+      const file = await NotebookFiles.create(parent, title, 1, paper, landscape);
       this._putPaper(file, paper); await this.flush();
       return file;
     });

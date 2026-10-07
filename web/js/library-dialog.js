@@ -131,35 +131,58 @@ let templateDir = null;   // <data>\\templates, known after the first host.info(
 const templateDirReady = () => templateDir ? Promise.resolve(templateDir) : host.info().then(i => (templateDir = i.data.replace(/[\\/]+$/, '') + '\\templates'));
 const BUILTIN_BASE = new URL('../assets/templates/', import.meta.url).href;
 const pdfPreviews = new Map();
+/** The "기본 노트 스타일" setting: paper, colour and orientation that are pre-selected when a new note is made. */
+export function defaultNoteStyle(prefs) {
+  const kind = prefs.getInt('default_paper_kind', 10);
+  return {
+    kind: NotebookFiles.PAPER_ORDER.includes(kind) ? kind : 10,
+    color: NotebookFiles.COLORS.includes(prefs.getInt('default_paper_color', -1)) ? prefs.getInt('default_paper_color', -1) : -1,
+    landscape: prefs.getBoolean('default_paper_landscape', false),
+  };
+}
+export function saveDefaultNoteStyle(prefs, view) {
+  prefs.putInt('default_paper_kind', view.kind); prefs.putInt('default_paper_color', view.color); prefs.putBoolean('default_paper_landscape', view.layoutChoice && view.landscape);
+}
+export function describeNoteStyle(style) {
+  const color = NotebookFiles.COLOR_NAMES[Math.max(0, NotebookFiles.COLORS.indexOf(style.color))];
+  const paperName = style.kind === NotebookFiles.CUSTOM ? '내 PDF·이미지 서식' : NotebookFiles.PAPER_NAMES[style.kind];
+  return paperName + ' · ' + color + (style.landscape && style.kind < 9 ? ' · 가로' : '');
+}
+const TILE_W = 72, TILE_H = 96;
 export class PaperChoiceView {
-  constructor(activity) {
-    this.kind = 0; this.color = -1; this.selected = -1; this.builtin = null;
-    // Android v1.32.0: the paper list is a menu card (bundled form templates first), not a native select
-    const picker = h('div', { class: 'lib-picker', role: 'button', 'aria-label': '종이 형식', dataset: { tag: 'paper_picker' } });
-    picker.addEventListener('click', () => {
-      const R = AnchoredMenu.Row;
-      AnchoredMenu.show(picker, false, NotebookFiles.PAPER_ORDER.map((k, i) => new R(NotebookFiles.PAPER_NAMES[k], k >= 10 ? 'ic_page' : k === NotebookFiles.CUSTOM ? 'ic_import' : 'ic_note_add', () => this.selectPosition(i))
-        .tint(k >= 10 ? '#007AFF' : k === NotebookFiles.CUSTOM ? '#FF9500' : '#34C759').selected(i === this.selected)), null);
+  /** opts: { kind, color, landscape } initial choice (default: first form, white, portrait); layoutChoice: also offer portrait / landscape. */
+  constructor(activity, opts = {}) {
+    this.kind = 10; this.color = opts.color == null ? -1 : opts.color; this.selected = -1; this.builtin = null;
+    this.layoutChoice = !!opts.layoutChoice; this.landscape = this.layoutChoice && !!opts.landscape;
+    // Samsung Notes style: every paper is a small preview tile (bundled form templates first), not a drop-down list
+    this.tiles = [];
+    this.tileGrid = h('div', { class: 'lib-tiles', role: 'radiogroup', 'aria-label': '종이 형식' });
+    NotebookFiles.PAPER_ORDER.forEach((k, i) => {
+      const cv = h('canvas', { class: 'lib-tilecv' });
+      const tile = h('div', { class: 'lib-tile', role: 'radio', 'aria-label': NotebookFiles.PAPER_NAMES[k], dataset: { tag: 'paper_tile:' + k } }, cv, h('div', { class: 'lib-tilename' }, k === NotebookFiles.CUSTOM ? '내 서식' : NotebookFiles.PAPER_NAMES[k]));
+      tile.addEventListener('click', () => this.selectPosition(i));
+      this.tiles.push({ tile, cv, kind: k }); this.tileGrid.append(tile);
     });
-    this.picker = picker;
     this.template = null; this._request = null;
     this.templateButton = h('div', { class: 'lib-tplbtn', role: 'button', style: { display: 'none' }, dataset: { tag: 'paper_template' } }, TEMPLATE_LABEL);
     this.templateButton.addEventListener('click', () => this._pickTemplate());
-    this.canvas = h('canvas', { 'aria-label': '선택한 종이 미리보기', role: 'img' });
     this.chips = h('div', { class: 'lib-chips' });
-    this.el = h('div', { class: 'lib-paper' }, picker, this.templateButton, this.canvas, this.chips);
+    this.layoutRow = h('div', { class: 'lib-layouts' });
+    this.el = h('div', { class: 'lib-paper' }, h('div', { class: 'lib-sec' }, '종이'), this.tileGrid, this.templateButton, h('div', { class: 'lib-sec' }, '색상'), this.chips);
+    if (this.layoutChoice) { this.el.append(h('div', { class: 'lib-sec' }, '레이아웃'), this.layoutRow); this.refreshLayout(); }
     this.refreshColors();
-    this.selectPosition(0);
-    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => this.draw()).observe(this.canvas);
+    const start = NotebookFiles.PAPER_ORDER.indexOf(opts.kind == null ? 10 : opts.kind);
+    this.selectPosition(start >= 0 ? start : 0);
     requestAnimationFrame(() => this.draw());
   }
   /** Chooses a paper by its row in the list (the bundled form templates come first). */
   selectPosition(position) {
     this.selected = position; this.kind = NotebookFiles.PAPER_ORDER[position];
-    this.picker.textContent = NotebookFiles.PAPER_NAMES[this.kind] + '  ▾';
+    this.tiles.forEach((t, i) => { t.tile.classList.toggle('on', i === position); t.tile.setAttribute('aria-checked', i === position ? 'true' : 'false'); });
     this.templateButton.style.display = this.kind === NotebookFiles.CUSTOM ? '' : 'none';
     this.builtin = null;
     if (this.kind >= 10) this._prepareBuiltin(this.kind);
+    this.refreshLayout();
     this.draw();
   }
   /** Chooses a paper by its kind. */
@@ -209,37 +232,49 @@ export class PaperChoiceView {
     this.chips.textContent = '';
     NotebookFiles.COLORS.forEach((c, i) => {
       const on = this.color === c;
-      const chip = h('div', { class: 'lib-chip' + (on ? ' on' : ''), role: 'button', 'aria-label': '배경색 ' + NotebookFiles.COLOR_NAMES[i], dataset: { tag: 'paper_color:' + i }, style: { background: argb(c) } }, on ? icon('ic_check_bold', 18, ACCENT) : null);
+      const chip = h('div', { class: 'lib-chip' + (on ? ' on' : ''), role: 'button', 'aria-label': '배경색 ' + NotebookFiles.COLOR_NAMES[i], title: NotebookFiles.COLOR_NAMES[i], dataset: { tag: 'paper_color:' + i }, style: { background: argb(c) } }, on ? icon('ic_check_bold', 18, c === NotebookFiles.COLORS[8] ? '#fff' : ACCENT) : null);
       chip.addEventListener('click', () => { this.color = c; this.refreshColors(); this.draw(); });
       this.chips.append(chip);
     });
   }
-  draw() {
-    const cv = this.canvas, dpr = window.devicePixelRatio || 1;
-    const W = cv.clientWidth, H = cv.clientHeight || 158;
-    if (!W) return;
-    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  /** portrait / landscape choice (only for generated papers; a form PDF keeps its own page size) */
+  refreshLayout() {
+    if (!this.layoutChoice) return;
+    const form = this.kind >= 10 || this.kind === NotebookFiles.CUSTOM;
+    this.layoutRow.textContent = '';
+    [['기본 (세로)', false], ['가로', true]].forEach(([label, land]) => {
+      const on = this.landscape === land;
+      const box = h('div', { class: 'lib-lay' + (on ? ' on' : '') + (form ? ' off' : ''), role: 'radio', 'aria-checked': on ? 'true' : 'false', 'aria-label': '레이아웃 ' + label, dataset: { tag: 'paper_layout:' + (land ? 'land' : 'port') } },
+        h('div', { class: 'lib-layic' + (land ? ' land' : '') }), h('div', { class: 'lib-laynm' }, label));
+      if (!form) box.addEventListener('click', () => { this.landscape = land; this.refreshLayout(); this.draw(); });
+      this.layoutRow.append(box);
+    });
+    if (form) this.layoutRow.append(h('div', { class: 'lib-laynote' }, '서식 PDF는 서식의 크기를 따릅니다'));
+  }
+  draw() { this.tiles.forEach(t => this._drawTile(t.cv, t.kind)); }
+  _drawTile(cv, kind) {
+    const dpr = window.devicePixelRatio || 1, W = TILE_W, H = TILE_H;
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.width = W + 'px'; cv.style.height = H + 'px';
     const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
-    const hh = H - 12, w = hh * 595 / 842, left = (W - w) / 2, top = 6, right = left + w, bottom = top + hh;
-    g.fillStyle = argb(this.color); g.fillRect(left, top, w, hh);
-    g.strokeStyle = '#BBC4CE'; g.lineWidth = 1 / dpr; g.beginPath();
-    g.rect(left, top, w, hh);
-    g.stroke();
-    const formFile = this.kind >= 10 ? NotebookFiles.BUILTIN_TEMPLATES[this.kind - 10] : (this.kind === NotebookFiles.CUSTOM && this.template && /\.pdf$/i.test(this.template) ? this.template : null);
+    const form = kind >= 10, custom = kind === NotebookFiles.CUSTOM, land = this.landscape && !form && !custom;
+    const ptW = land ? 842 : 595, ptH = land ? 595 : 842;
+    let pw = W - 8, ph = pw * ptH / ptW; if (ph > H - 8) { ph = H - 8; pw = ph * ptW / ptH; }
+    const left = (W - pw) / 2, top = (H - ph) / 2, bottom = top + ph;
+    g.fillStyle = form ? '#FFFFFF' : argb(this.color); g.fillRect(left, top, pw, ph);
+    const border = () => { g.strokeStyle = '#CBD2DA'; g.lineWidth = 1; g.strokeRect(left + .5, top + .5, pw - 1, ph - 1); };
+    const formFile = form ? NotebookFiles.BUILTIN_TEMPLATES[kind - 10] : (custom && this.template && /\.pdf$/i.test(this.template) ? this.template : null);
     if (formFile) {
-      const key = this.kind >= 10 ? 'builtin:' + formFile : 'file:' + formFile, drawn = this.kind;
-      if (pdfPreviews.has(key) && pdfPreviews.get(key)) { g.drawImage(pdfPreviews.get(key), left, top, w, hh); g.strokeStyle = '#BBC4CE'; g.strokeRect(left, top, w, hh); return; }
-      if (!pdfPreviews.has(key)) this._previewOf(key, async () => this.kind >= 10 ? new Uint8Array(await (await fetch(BUILTIN_BASE + formFile)).arrayBuffer()) : host.readBytes(formFile)).then(() => { if (this.kind === drawn) this.draw(); });
+      const key = form ? 'builtin:' + formFile : 'file:' + formFile;
+      if (pdfPreviews.get(key)) { g.drawImage(pdfPreviews.get(key), left, top, pw, ph); border(); return; }
+      if (!pdfPreviews.has(key)) this._previewOf(key, async () => form ? new Uint8Array(await (await fetch(BUILTIN_BASE + formFile)).arrayBuffer()) : host.readBytes(formFile)).then(() => this._drawTile(cv, kind));
+      border(); return;
     }
-    if (this.kind === NotebookFiles.CUSTOM) {
-      g.fillStyle = MUTED; g.font = '11px sans-serif'; g.textAlign = 'center';
-      g.fillText(this.template ? baseName(this.template) : '서식을 고르세요', (left + right) / 2, (top + bottom) / 2); g.textAlign = 'left';
-      return;
-    }
-    const f = hh / 842, fw = w / 595;
-    for (const seg of NotebookFiles.layout(this.kind, 595, 842)) {
+    border();
+    if (custom) { g.fillStyle = MUTED; g.font = '22px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(this.template ? '✓' : '+', W / 2, H / 2); g.textAlign = 'left'; g.textBaseline = 'alphabetic'; return; }
+    const f = ph / ptH, fw = pw / ptW;
+    for (const seg of NotebookFiles.layout(kind, ptW, ptH)) {
       const c = NotebookFiles.ruleColorOn(seg[4], this.color);
-      g.strokeStyle = g.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
+      g.strokeStyle = g.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`; g.lineWidth = 1;
       const x1 = left + seg[0] * fw, y1 = bottom - seg[1] * f, x2 = left + seg[2] * fw, y2 = bottom - seg[3] * f;
       if (seg[4] === 3) { g.beginPath(); g.arc(x1, y1, Math.max(.6, fw * .9), 0, Math.PI * 2); g.fill(); }
       else { g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); }
@@ -402,6 +437,8 @@ export class LibraryDialog {
     this.dismiss();
   }
 
+  openSettings() { if (this.actions.settings) this.actions.settings(); }
+
   // ---------------------------------------------------------------- layout
   _ib(name, label, click, extra = '') {
     const b = h('button', { class: 'lib-ib ' + extra, 'aria-label': label, title: label, type: 'button' }, icon(name, 24, INK));
@@ -418,6 +455,7 @@ export class LibraryDialog {
       const b = this._ib(n, names[i], () => { if (i === 3) this.showTrash(); else this.showMode(i); }, 'sq rb'); rail.append(b); return b;
     });
     rail.append(h('div', { class: 'lib-dots' }), this._ib('ic_folder_open', '폴더 열기', () => this.openDrawer(), 'sq fo'));
+    rail.append(h('div', { class: 'lib-railfill' }), this._ib('ic_settings', '설정', () => this.openSettings(), 'sq st'));
     this.rail = rail;
     // top bar
     const top = h('div', { class: 'lib-top' },
@@ -439,11 +477,12 @@ export class LibraryDialog {
     // shelf
     this.grid = h('div', { class: 'lib-grid' });
     this.shelf = h('div', { class: 'lib-shelf' }, this.grid);
-    // selection bar
-    this.selectionCount = h('div', { class: 'lib-selcount' }, '0개 선택');
+    // selection bar: replaces the top bar while documents are selected (Samsung Notes style: back, "N개 선택됨", icon + label commands, overflow menu)
+    this.selectionCount = h('div', { class: 'lib-selcount' }, '0개 선택됨');
     this.selectionCommands = h('div', { class: 'lib-selcmds' });
-    this.selectionBar = h('div', { class: 'lib-selbar' }, this.selectionCount, this.selectionCommands);
-    this.page = h('div', { class: 'lib-page' }, top, this.searchRow, head, this.shelf, this.selectionBar);
+    this.selectionBar = h('div', { class: 'lib-top lib-seltop' },
+      this._ib('ic_chevron_left', '선택 해제', () => this.onBackPressed()), this.selectionCount, h('div', { class: 'sp' }), this.selectionCommands);
+    this.page = h('div', { class: 'lib-page' }, top, this.selectionBar, this.searchRow, head, this.shelf);
     // FAB
     this.compose = h('div', { class: 'lib-fab', role: 'button', 'aria-label': '새로 만들기', dataset: { tag: 'compose_button' } }, icon('ic_compose', 26, '#E5484D'));
     this.compose.addEventListener('click', () => this.newMenu(this.compose));
@@ -454,16 +493,38 @@ export class LibraryDialog {
 
   rebuildSelectionCommands() {
     this.selectionCommands.textContent = '';
-    for (const action of ['전체', '즐겨찾기', '이름 변경', '공유', '복사', '이동', '삭제']) {
-      if (action === '이름 변경' && this.selected.size !== 1) continue;
-      const c = h('div', { class: 'lib-cmd' + (action === '삭제' ? ' red' : ''), role: 'button', 'aria-label': '선택 문서 ' + action }, action);
-      c.addEventListener('click', () => this.runSelectionCommand(action));
+    const all = this._allSelected();
+    const commands = [['이동', 'ic_move'], ['공유', 'ic_share'], ['삭제', 'ic_delete'], [all ? '모두 해제' : '전체 선택', 'ic_check_circle']];
+    for (const [label, name] of commands) {
+      const c = h('div', { class: 'lib-cmd' + (label === '삭제' ? ' red' : ''), role: 'button', title: label, 'aria-label': '선택 문서 ' + label }, icon(name, 22, label === '삭제' ? '#FF3B30' : INK), h('span', { class: 't' }, label));
+      c.addEventListener('click', () => this.runSelectionCommand(label === '전체 선택' || label === '모두 해제' ? '전체' : label));
       this.selectionCommands.append(c);
     }
+    const more = h('div', { class: 'lib-cmd more', role: 'button', title: '더 보기', 'aria-label': '선택 문서 더 보기' }, icon('ic_more_vert', 22, INK));
+    more.addEventListener('click', e => { e.stopPropagation(); this.selectionMenu(more); });
+    this.selectionCommands.append(more);
+  }
+  _allSelected() {
+    const docs = this._items.filter(f => !this.repository.isDirectory(f));
+    return docs.length > 0 && docs.every(f => this.selected.has(f));
+  }
+  /** ⋮ of the selection bar: the less common commands. */
+  selectionMenu(anchor) {
+    const R = AnchoredMenu.Row, repo = this.repository, files = [...this.selected];
+    const allFavorite = files.length > 0 && files.every(f => repo.favorite(f));
+    const rows = [];
+    if (files.length === 1) rows.push(new R('이름 변경', 'ic_rename', () => this.runSelectionCommand('이름 변경')).tint('#8E8E93'));
+    rows.push(new R('복사본 만들기', 'ic_copy', () => this.runSelectionCommand('복사')).tint('#8E8E93'));
+    rows.push(new R(allFavorite ? '즐겨찾기 해제' : '즐겨찾기에 추가', allFavorite ? 'ic_star' : 'ic_star_outline', () => this.runSelectionCommand('즐겨찾기')).tint('#F5A623'));
+    this._menu(anchor, rows);
   }
   async runSelectionCommand(action) {
     const files = [...this.selected], repo = this.repository;
-    if (action === '전체') { for (const f of await this.items()) if (!repo.isDirectory(f)) this.selected.add(f); this._render(++this.generation); return; }
+    if (action === '전체') {
+      if (this._allSelected()) this.selected.clear();
+      else for (const f of await this.items()) if (!repo.isDirectory(f)) this.selected.add(f);
+      this._render(++this.generation); return;
+    }
     if (!files.length) { toast('문서를 선택하세요'); return; }
     if (action === '즐겨찾기') {
       const allFavorite = files.every(f => repo.favorite(f));
@@ -500,6 +561,7 @@ export class LibraryDialog {
     const manage = h('div', { class: 'lib-manage', role: 'button', 'aria-label': '폴더 관리' }, '폴더 관리');
     manage.addEventListener('click', () => this.folderManageMenu(manage));
     panel.append(manage);
+    panel.append(h('div', { class: 'lib-dots' }), this._drawerRow('ic_settings', '설정', () => { this.closeDrawer(); this.openSettings(); }).el);
     this.drawerWidth = Math.min(320, Math.round(window.innerWidth * .86));
     this.drawer = h('div', { class: 'lib-drawer', dataset: { tag: 'library_drawer' } }, this.drawerScrim, panel);
   }
@@ -598,7 +660,7 @@ export class LibraryDialog {
     this.heading.textContent = title;
     let folders = 0, docs = 0;
     for (const f of items) { if (repo.isDirectory(f)) folders++; else docs++; }
-    this.subtitle.textContent = this.selectionMode ? `${this.selected.size}개 선택됨` : (folders > 0 ? `폴더 ${folders}개 · ` : '') + `문서 ${docs}개`;
+    this.subtitle.textContent = (folders > 0 ? `폴더 ${folders}개 · ` : '') + `문서 ${docs}개`;
     const nested = this.mode === FOLDER && !samePath(this.folder, root);
     this.upButton.classList.toggle('on', nested);
     if (nested) {
@@ -632,8 +694,9 @@ export class LibraryDialog {
     const repo = this.repository, items = this._items;
     this._updateHeading(items);
     this.selectionBar.classList.toggle('on', this.selectionMode);
+    this.page.classList.toggle('selecting', this.selectionMode);
     this.compose.style.display = this.selectionMode ? 'none' : '';
-    if (this.selectionMode) { this.selectionCount.textContent = `${this.selected.size}개 선택`; this.rebuildSelectionCommands(); }
+    if (this.selectionMode) { this.selectionCount.textContent = `${this.selected.size}개 선택됨`; this.rebuildSelectionCommands(); }
     const viewMode = repo.viewMode();
     const usable = Math.max(this.shelf.clientWidth, 240) - 28;
     const columns = viewMode === 2 ? 1 : Math.max(1, Math.min(6, Math.floor(usable / (viewMode === 1 ? 118 : 164))));
@@ -738,6 +801,7 @@ export class LibraryDialog {
     ];
     if (this.mode === FOLDER) rows.push(new R('폴더 색상', null, () => this.chooseFolderColor(this.folder)));
     rows.push(new R('휴지통', null, () => this.showTrash()));
+    rows.push(new R('설정', null, () => this.openSettings()));
     this._menu(anchor, rows);
   }
   folderMenu(target, anchor) {

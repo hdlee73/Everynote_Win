@@ -858,6 +858,7 @@ const methods = {
     rows.push(new Row('전체 화면 메뉴 계속 표시', 'ic_float', () => this.toggleDockPinned()).tint('#8E8E93').selected(this.dockPinned()));
     if (doc) rows.push(new Row('인쇄', 'ic_print', () => this.callUi2('printDocument')).tint('#007AFF'));
     rows.push(Row.divider());
+    rows.push(new Row('설정', 'ic_settings', () => this.callUi2('showSettings')).tint('#8E8E93'));
     rows.push(new Row('사용법', 'ic_outline', () => this.showHelp()).tint('#8E8E93'));
     rows.push(new Row('오프라인 사용 안내', 'ic_wifi_off', () => this.callUi2('showAboutOffline')).tint('#8E8E93'));
     const upd = this.callUi2('pendingUpdateVersion');
