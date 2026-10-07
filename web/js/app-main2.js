@@ -2365,7 +2365,7 @@ F.viewForPage = function (page) {
   if (this.secondPageView && vis(this.secondPageView) && this.secondPageView.getPageNumber() === page) return this.secondPageView;
   return null;
 };
-F.redrawPages = function () { if (this.firstPageView) this.firstPageView.invalidate(); if (this.secondPageView) this.secondPageView.invalidate(); };
+F.redrawPages = function () { for (const v of this.allPageViews()) v.invalidate(); };
 F.updateThumbnailSelection = function () {
   if (!this.thumbnailList) return;
   let selected = null;

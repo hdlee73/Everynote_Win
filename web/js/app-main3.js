@@ -194,7 +194,7 @@ const methods = {
     }
     return null;
   },
-  redrawPages() { if (this.firstPageView) this.firstPageView.invalidate(); if (this.secondPageView) this.secondPageView.invalidate(); },
+  redrawPages() { for (const v of this.allPageViews()) v.invalidate(); },
   elementAt(page, x, y) {
     if (!this.store) return null;
     for (let i = this.store.elements.length - 1; i >= 0; i--) {

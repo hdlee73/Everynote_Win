@@ -27,6 +27,18 @@ const DOWN = 0, UP = 1, MOVE = 2, CANCEL = 3, POINTER_DOWN = 5, POINTER_UP = 6;
 
 const LASSO_FREE = 0, LASSO_RECT = 1, LASSO_CIRCLE = 2;
 
+// Palm rejection (v3.15): while a pen is in proximity / on the glass, and for PEN_GUARD_MS after it leaves, touch pointers are ignored.
+// Shared by every page view (the pen may hover over one pane while the palm rests on the other).
+const PEN_GUARD_MS = 500, PALM_SIZE = 36;   // PALM_SIZE: contact width/height in CSS px from which a touch counts as a palm while writing
+const PEN = { until: 0, ids: new Set() };
+if (typeof document !== 'undefined') {
+  const mark = e => { if (e.pointerType === 'pen') PEN.until = performance.now() + PEN_GUARD_MS; };
+  document.addEventListener('pointermove', mark, { capture: true, passive: true });
+  document.addEventListener('pointerover', mark, { capture: true, passive: true });
+  document.addEventListener('pointerdown', e => { if (e.pointerType === 'pen') { PEN.ids.add(e.pointerId); mark(e); } }, { capture: true, passive: true });
+  for (const t of ['pointerup', 'pointercancel']) document.addEventListener(t, e => { if (e.pointerType === 'pen') { PEN.ids.delete(e.pointerId); mark(e); } }, { capture: true, passive: true });
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // small helpers
 // ---------------------------------------------------------------------------------------------------------------
@@ -233,7 +245,7 @@ export class PdfPageView {
     this._lastZoom = 1; this._theme = null;
     /** Two-page spread: 1 = left page (hugs the seam at its right edge), -1 = right page, 0 = single page (centred). */
     this.spreadSide = 0; this.spreadPartner = null; this._synced = null;
-    this.eraserRadius = 18; this._eraserAt = null;
+    this.eraserRadius = 18; this.eraserMode = 0; this._eraserAt = null; this._lastErase = null;
 
     this.scaleDetector = new ScaleDetector({
       onScaleBegin: () => {
@@ -434,8 +446,10 @@ export class PdfPageView {
   setDirectTextSelection(enabled) { this.directTextSelection = enabled; this.clearTextSelectionOverlay(); }
   /** Eraser range: radius in screen px (v3.10, default 18). */
   setEraserRadius(px) { this.eraserRadius = Math.max(4, Math.min(80, +px || 18)); this.invalidate(); }
+  /** Eraser mode (v3.15): 0 = whole strokes, 1 = only the part of a stroke under the eraser circle. */
+  setEraserMode(mode) { this.eraserMode = mode === 1 ? 1 : 0; this.invalidate(); }
   copyToolsFrom(other) {
-    this.eraserRadius = other.eraserRadius;
+    this.eraserRadius = other.eraserRadius; this.eraserMode = other.eraserMode;
     this.darkPage = other.darkPage; this._darkBitmap = null; this.applyBackground(); this.directTextSelection = other.directTextSelection;
     this.highlightMode = other.highlightMode; this.memoMode = other.memoMode; this.outlineMode = other.outlineMode; this.highlightColor = other.highlightColor;
     this.highlightFree = other.highlightFree; this.highlightThick = other.highlightThick;
@@ -839,7 +853,7 @@ export class PdfPageView {
       ctx.fillStyle = argb(0x222563EB); ctx.fill(path);
       ctx.lineWidth = 2 * DP; ctx.strokeStyle = argb(0xFF007AFF); ctx.setLineDash([8, 5]); ctx.lineDashOffset = 0; ctx.lineCap = 'butt'; ctx.stroke(path); ctx.setLineDash([]);
     }
-    if (this._eraserAt && this.inkMode === 2) {   // eraser range preview (follows the pen / mouse)
+    if (this._eraserAt && (this.inkMode === 2 || this.stylusDrawing)) {   // eraser range preview (also for the pen's eraser end / button) (follows the pen / mouse)
       const [ex, ey] = this._eraserAt, r = Math.max(4, this.eraserRadius || 18);
       ctx.beginPath(); ctx.arc(ex, ey, r, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(255,107,138,.12)'; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,59,48,.75)'; ctx.stroke();
@@ -1137,7 +1151,8 @@ export class PdfPageView {
   // ---- ink ---------------------------------------------------------------------------------------------------
   isStylus(e) { return e.toolType === 'pen' || e.toolType === 'mouse' || e.toolType === 'eraser'; }
   temporaryEraser(e) { return e.toolType === 'eraser' || (e.toolType === 'pen' && (e.buttonState & 2) !== 0); }
-  inputPressure(e) { return this.isStylus(e) ? Math.max(0.05, Math.min(1, e.pressure)) : 0.65; }
+  /** Pen: the reported pressure (0.05..1); mouse / finger: constant 0.65. */
+  inputPressure(e) { return e.toolType === 'pen' || e.toolType === 'eraser' ? Math.max(0.05, Math.min(1, e.pressure)) : 0.65; }
   finishInkStroke() {
     if (this.activeStroke && this.activeStroke.points.length) this._L('onInkChanged');
     this.activeStroke = null; this.stylusDrawing = false;
@@ -1150,13 +1165,16 @@ export class PdfPageView {
     const last = pts[pts.length - 1], dx = x - last.x, dy = y - last.y;
     if (dx * dx + dy * dy > 0.000002) pts.push(new InkPoint(x, y, pressure));
   }
+  /** Erases at the eraser position of event e (whole strokes or only the part under the circle, by eraserMode), then erasable marks. */
   _eraseAt(e, dest) {
     if (!this.strokes || dest.width() === 0) return;
     const x = (e.x - dest.left) / dest.width(), y = (e.y - dest.top) / dest.height(), dw = dest.width(), dh = dest.height();
     const r = Math.max(4, this.eraserRadius || 18);   // eraser range in screen px (setEraserRadius)
     this._eraserAt = [e.x, e.y];
+    const from = this._lastErase || [e.x, e.y]; this._lastErase = [e.x, e.y];   // the circle sweeps a capsule from the previous position
     let removed = 0;
-    for (let i = this.strokes.length - 1; i >= 0; i--) {
+    if (this.eraserMode === 1) removed = this._erasePartial(from, [e.x, e.y], r, dest);
+    else for (let i = this.strokes.length - 1; i >= 0; i--) {
       const s = this.strokes[i]; if (s.page !== this.page) continue;
       const pts = s.points; let hit = false;
       for (let k = 0; k < pts.length && !hit; k++) {   // points and the segments between them, so a wide eraser also catches fast, sparse strokes
@@ -1184,6 +1202,64 @@ export class PdfPageView {
       }
       if (x >= m.left - mx && x <= m.right + mx && y >= m.top - mx && y <= m.bottom + mx) { this.marks.splice(i, 1); this._L('onInkChanged'); this.invalidate(); return; }
     }
+  }
+
+  /**
+   * Partial eraser: removes the points of every stroke of this page that lie within r screen px of the segment from->to,
+   * splitting the stroke into the remaining sub-strokes (colour / width / pen kept, points keep their pressure).
+   * Segments near the eraser are densified first so the cut is accurate. Returns the number of strokes changed.
+   */
+  _erasePartial(from, to, r, dest) {
+    const dw = dest.width(), dh = dest.height(), step = Math.max(1.5, r / 4);
+    const lx = Math.min(from[0], to[0]) - r, hx = Math.max(from[0], to[0]) + r, ly = Math.min(from[1], to[1]) - r, hy = Math.max(from[1], to[1]) + r;
+    const vx = to[0] - from[0], vy = to[1] - from[1], L2 = vx * vx + vy * vy;
+    const inside = (px, py) => {
+      const t = L2 > 0 ? Math.max(0, Math.min(1, ((px - from[0]) * vx + (py - from[1]) * vy) / L2)) : 0;
+      return Math.hypot(px - (from[0] + t * vx), py - (from[1] + t * vy)) <= r;
+    };
+    let changed = 0;
+    for (let i = this.strokes.length - 1; i >= 0; i--) {
+      const s = this.strokes[i]; if (s.page !== this.page) continue;
+      const pts = s.points, n = pts.length; if (!n) continue;
+      let near = false;   // quick reject: bounding box of the stroke against the eraser box
+      let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
+      for (const q of pts) { const px = dest.left + q.x * dw, py = dest.top + q.y * dh; if (px < bx0) bx0 = px; if (px > bx1) bx1 = px; if (py < by0) by0 = py; if (py > by1) by1 = py; }
+      near = bx1 >= lx && bx0 <= hx && by1 >= ly && by0 <= hy; if (!near) continue;
+      const seq = []; let cut = false;   // [{x, y, p, out}] with the near segments densified
+      for (let k = 0; k < n; k++) {
+        const a = pts[k], ax = dest.left + a.x * dw, ay = dest.top + a.y * dh, ca = inside(ax, ay);
+        seq.push({ x: a.x, y: a.y, p: a.pressure, cut: ca }); if (ca) cut = true;
+        const b = pts[k + 1]; if (!b) break;
+        const bxs = dest.left + b.x * dw, bys = dest.top + b.y * dh, len = Math.hypot(bxs - ax, bys - ay);
+        if (len <= step || Math.max(ax, bxs) < lx || Math.min(ax, bxs) > hx || Math.max(ay, bys) < ly || Math.min(ay, bys) > hy) continue;
+        const m = Math.ceil(len / step);
+        for (let j = 1; j < m; j++) {
+          const t = j / m, px = ax + (bxs - ax) * t, py = ay + (bys - ay) * t, c = inside(px, py);
+          seq.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, p: a.pressure + (b.pressure - a.pressure) * t, cut: c }); if (c) cut = true;
+        }
+      }
+      if (!cut) continue;
+      const subs = []; let run = [];
+      const flush = () => {
+        if (run.length >= 2) {
+          const ns = new InkStroke(); ns.page = s.page; ns.color = s.color; ns.pen = s.pen; ns.width = s.width;
+          ns.points = run.map(q => new InkPoint(q.x, q.y, q.p)); subs.push(ns);
+        }
+        run = [];
+      };
+      for (const q of seq) { if (q.cut) flush(); else run.push(q); }
+      flush();
+      this.strokes.splice(i, 1, ...subs); changed++;
+    }
+    return changed;
+  }
+  /** Removes every ink stroke and erasable highlight mark of the current page. Returns { strokes, marks } (the removed items, for undo). */
+  clearPageInk() {
+    const out = { page: this.page, strokes: [], marks: [] };
+    if (this.strokes) for (let i = this.strokes.length - 1; i >= 0; i--) if (this.strokes[i].page === this.page) out.strokes.unshift(this.strokes.splice(i, 1)[0]);
+    if (this.marks) for (let i = this.marks.length - 1; i >= 0; i--) { const m = this.marks[i]; if (m.page === this.page && !m.noteOnly) out.marks.unshift(this.marks.splice(i, 1)[0]); }
+    this.finishInkStroke(); this.invalidate();
+    return out;
   }
 
   /** In a spread a page turn may only start on the document (either page), not on the grey surround; a single page is unrestricted. */
@@ -1245,8 +1321,20 @@ export class PdfPageView {
     if (pe.pointerType === 'pen') return (pe.buttons & 32) || pe.button === 5 ? 'eraser' : 'pen';
     return pe.pointerType === 'touch' ? 'touch' : 'mouse';
   }
+  /** True while a pen is near / touching / just lifted (palm rejection window). */
+  static penRecent() { return PEN.ids.size > 0 || performance.now() < PEN.until; }
+  _writeLike() { return this.inkMode !== 0 || this.lassoMode || this.highlightMode; }
+  /** A touch to ignore: any touch while the pen is around, or a palm-sized contact while a writing tool is active. */
+  _palmRejected(pe) {
+    if (pe.pointerType !== 'touch') return false;
+    return PdfPageView.penRecent() || (this._writeLike() && Math.max(pe.width || 0, pe.height || 0) >= PALM_SIZE);
+  }
   _onPointerDown(pe) {
     if (pe.pointerType === 'mouse' && pe.button !== 0) return;
+    if (this._palmRejected(pe)) { pe.preventDefault(); return; }   // never enters _ptrs: no stroke end, no pinch, no swipe
+    if (pe.pointerType === 'pen' && this._ptrs.some(p => p.tool === 'touch')) {   // a finger / palm was already down: drop it, the pen wins
+      this._dispatch(CANCEL, this._ptrs[0], pe, null); this._ptrs.length = 0;
+    }
     const seam = this._ptrs.length === 0 ? this._seamX() : null, o = this.spreadPartner;
     if (seam != null && o && o.bitmap && !pe._spreadForwarded) {   // zoomed spread: the other page is drawn across the seam inside this view
       const lx = this._local(pe)[0];
@@ -1396,7 +1484,7 @@ export class PdfPageView {
     if (this.inkMode !== 0 && (stylus || this.fingerInk) && e.pointerCount === 1 && !this.scalingOccurred) {
       const action = am; const erase = this.inkMode === 2 || this.temporaryEraser(e);
       if (action === DOWN) {
-        this.stylusDrawing = true;
+        this.stylusDrawing = true; this._lastErase = null;
         if (erase) this._eraseAt(e, dest);
         else if (dest.contains(e.x, e.y)) {
           const s = new InkStroke(); s.page = this.page; s.color = this.inkColor; s.width = this.inkWidth; s.pen = this.inkPen; this.activeStroke = s;
@@ -1410,7 +1498,7 @@ export class PdfPageView {
           for (let i = 0; this.inkMode !== 3 && i < e.getHistorySize(); i++) {
             const h = e.history[i];
             if (this.activeStroke && dest.contains(h.x, h.y)) {
-              const x = (h.x - dest.left) / dest.width(), y = (h.y - dest.top) / dest.height(), p = stylus ? Math.max(0.05, Math.min(1, h.pressure)) : 0.65;
+              const x = (h.x - dest.left) / dest.width(), y = (h.y - dest.top) / dest.height(), p = this.inputPressure({ toolType: e.toolType, pressure: h.pressure });
               this.activeStroke.points.push(new InkPoint(x, y, p));
             }
           }
@@ -1423,7 +1511,7 @@ export class PdfPageView {
           if (action === CANCEL) { if (this.strokes) { const k = this.strokes.indexOf(this.activeStroke); if (k >= 0) this.strokes.splice(k, 1); } }
           else { this._addInkPoint(e, dest); if (this.activeStroke.points.length) this._L('onInkChanged'); }
         }
-        this.activeStroke = null; this.stylusDrawing = false; if (e.toolType === 'touch') this._eraserAt = null; this.invalidate(); return true;
+        this.activeStroke = null; this.stylusDrawing = false; this._lastErase = null; if (e.toolType === 'touch' || this.inkMode !== 2) this._eraserAt = null; this.invalidate(); return true;
       }
     }
     if (am === DOWN) {
