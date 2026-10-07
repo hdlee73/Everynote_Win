@@ -2418,15 +2418,24 @@ M.startLibraryRestore = async function () {
     });
   } catch (e) { toast('복원 실패: ' + errMsg(e)); }
 };
+const RELEASES_URL = 'https://github.com/hdlee73/Everynote_Win/releases';
+M.pendingUpdateVersion = function () {
+  const v = this.recentPrefs.getString('update_version', '');
+  return v && compareVersions(v, this.appVersion()) > 0 ? v : null;
+};
 M.showAbout = function () {
   const info = h('div', { class: 'm2-about', dataset: { tag: 'about_info' } }, h('div', { class: 'm2-about-name' }, 'Everynote'), h('div', null, '버전 ' + this.appVersion()), h('div', { class: 'm2-about-by' }, AUTHOR_LINE));
+  const releaseLink = h('a', { class: 'm2-about-link', href: RELEASES_URL, dataset: { tag: 'about_releases' } }, '업데이트 정보 (GitHub 릴리스 페이지)');
+  releaseLink.addEventListener('click', e => { e.preventDefault(); host.shellOpen(RELEASES_URL).catch(() => toast('브라우저를 열 수 없습니다')); });
   const status = h('div', { class: 'm2-about-status', dataset: { tag: 'update_status' } });
+  const waiting = this.pendingUpdateVersion();
+  if (waiting) { status.textContent = '새 버전 v' + waiting + ' 이(가) 있습니다. 아래 ‘업데이트 확인’을 누르세요'; status.classList.add('m2-about-new'); }
   const mk = (key, dflt, label, tag) => {
     const box = h('input', { type: 'checkbox', dataset: { tag } }); box.checked = this.recentPrefs.getBoolean(key, dflt);
     box.addEventListener('change', () => this.recentPrefs.putBoolean(key, box.checked));
     return h('label', { class: 'm2-about-check' }, box, h('span', null, label));
   };
-  const view = h('div', null, info, status, mk('auto_update_check', true, '앱을 열 때 새 버전 자동 확인', 'auto_update'),
+  const view = h('div', null, info, releaseLink, status, mk('auto_update_check', true, '앱을 열 때 새 버전 자동 확인', 'auto_update'),
     mk('auto_update_install', false, '새 버전이 있으면 확인 없이 자동으로 설치', 'auto_update_install'));
   const dlg = new AlertDialog.Builder().setTitle('앱 정보').setView(view).setPositiveButton('업데이트 확인', null).setNegativeButton('닫기', null).show();
   rebindButton(dlg, BUTTON_POSITIVE, () => this.checkForUpdate(true, status));
@@ -2436,8 +2445,11 @@ M.checkForUpdate = async function (manual, status) {
   say('확인 중…');
   let r;
   try { r = await host.updateCheck(); } catch (e) { say('업데이트를 확인하지 못했습니다 (' + errMsg(e) + ')'); return; }
-  if (compareVersions(r.version, this.appVersion()) <= 0) { say('최신 버전입니다 (v' + this.appVersion() + ')'); return; }
-  say('새 버전 v' + r.version + ' 이(가) 있습니다');
+  const newer = compareVersions(r.version, this.appVersion()) > 0;
+  this.recentPrefs.putString('update_version', newer ? r.version : '');
+  if (!newer) { say('최신 버전입니다 (v' + this.appVersion() + ')'); return; }
+  say('새 버전 v' + r.version + ' 이(가) 있습니다'); if (status) status.classList.add('m2-about-new');
+  if (!manual && !status) { if (this.recentPrefs.getString('update_notified', '') === r.version) return; this.recentPrefs.putString('update_notified', r.version); }
   const direct = !!(r.installed && r.setupUrl);
   const install = async () => {
     const progress = ProgressDialog.show('업데이트', '새 버전을 내려받는 중… 완료되면 설치 프로그램이 앱을 닫고 업데이트합니다');
@@ -2453,7 +2465,7 @@ M.checkForUpdate = async function (manual, status) {
 };
 M.autoCheckForUpdate = function () {
   if (!host.native || !this.recentPrefs.getBoolean('auto_update_check', true)) return;
-  const now = Date.now(); if (now - (this.recentPrefs.getFloat('update_checked', 0) || 0) < 20 * 3600 * 1000) return;
+  const now = Date.now(); if (now - (this.recentPrefs.getFloat('update_checked', 0) || 0) < 6 * 3600 * 1000) return;
   this.recentPrefs.putFloat('update_checked', now); this.checkForUpdate(false, null);
 };
 M.showAboutOffline = function () { return showAboutOffline(this); };
