@@ -34,7 +34,10 @@ const logOf = async name => (await ev(n => T.log.filter(l => l.n === n).length, 
 const clearLog = () => ev(() => { T.log.length = 0; });
 
 // --- synthetic pointer events -----------------------------------------------------------------------------
+let lastPen = 0;   // palm rejection (v3.15): a touch right after the pen is ignored, so wait out the 500 ms guard like a real hand would
 async function ptr(type, x, y, o = {}) {
+  if ((o.type ?? 'pen') === 'pen') lastPen = Date.now();
+  else if (type === 'pointerdown') { const w = lastPen + 540 - Date.now(); if (w > 0) await page.waitForTimeout(w); }
   await page.evaluate(([type, x, y, o]) => {
     const el = T.view.el, r = el.getBoundingClientRect();
     const init = { bubbles: true, cancelable: true, pointerId: o.id ?? 1, pointerType: o.type ?? 'pen', clientX: r.left + x, clientY: r.top + y,

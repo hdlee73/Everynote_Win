@@ -7,6 +7,7 @@ import { prefs } from './prefs.js';
 import { installMain1, initMain1 } from './app-main1.js';
 import { installMain2, initMain2 } from './app-main2.js';
 import { installMain3, initMain3 } from './app-main3.js';
+import { installSplit } from './app-split.js';
 
 export class MainActivity {
   constructor() {
@@ -27,6 +28,7 @@ export class MainActivity {
     this.currentPage = 0;
     this.store = null;                   // active AnnotationStore
     this.pageView = null; this.firstPageView = null; this.secondPageView = null;
+    this.splitView = null; this.splitSession = null;   // split screen (app-split.js)
     this.twoPage = false;
     this.selectedColor = 0x66FFDE59;
     this.highlightFree = false; this.highlightThick = 0.022;
@@ -49,4 +51,4 @@ export class MainActivity {
   /** Android onCreate(); called once from index.html after DOM is ready. */
   async onCreate() { /* implemented in app-main1.js (assigned onto the prototype) */ }
 }
-installMain1(MainActivity); installMain2(MainActivity); installMain3(MainActivity);
+installMain1(MainActivity); installMain2(MainActivity); installMain3(MainActivity); installSplit(MainActivity);

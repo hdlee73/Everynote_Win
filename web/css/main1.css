@@ -183,4 +183,18 @@
 .m-eraser-cell{flex:1 1 0;height:52px;border-radius:12px;background:#F2F2F7;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .m-eraser-cell:hover{background:#E9E9EF}
 .m-eraser-cell.on{background:#FFE3E8;box-shadow:inset 0 0 0 2px #FF6B8A}
+.m-eraserbox .m-seg{padding:0 8px 8px}
+.m-eraser-clear{display:block;width:calc(100% - 16px);height:36px;margin:8px 8px 6px;padding:0;border:0;border-radius:10px;background:#FFE9E7;color:#FF3B30;font-size:14px;font-weight:700;cursor:pointer}
+.m-eraser-clear:hover{background:#FFDAD6}
 .m-eraser-dot{border-radius:50%;background:#fff;box-shadow:inset 0 0 0 1.5px #FF6B8A}
+
+/* ---- split screen (v3.15): two documents side by side; the touched pane is the active one ---- */
+.m-papers.m-papers-split{gap:3px;background:#8E8E93}
+.m-papers.m-papers-split > .pdf-page-view{flex:1 1 0;min-width:0}
+.m-papers.m-papers-split > .pdf-page-view.pane-active::after{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:#007AFF;pointer-events:none;z-index:3}
+.m-splitbar{position:absolute;left:0;right:0;top:6px;display:flex;pointer-events:none;z-index:5}
+.m-panecell{flex:1 1 0;min-width:0;padding:0 10px;display:flex;justify-content:flex-start}
+.m-panechip{pointer-events:auto;display:flex;align-items:center;gap:2px;max-width:100%;height:28px;padding:0 6px 0 11px;border:0;border-radius:14px;background:rgba(247,247,250,.92);color:#1C1C1E;font-size:12px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.m-panechip.active{background:#007AFF;color:#fff}
+.m-panename{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:600}
+.m-tab.in-split .m-tabname{box-shadow:inset 0 -2px 0 #5856D6}

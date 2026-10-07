@@ -19,6 +19,7 @@ import { LibraryRepository, samePath } from './library.js';
 import { FolderIconDrawable, ProgressDialog, rebindButton } from './library-dialog.js';
 import * as office from './office.js';
 import { ColorPicker } from './ui/colorpicker.js';
+import { buildSplit } from './app-split.js';
 
 // ------------------------------------------------------------------------------------------------ constants
 const NAVY = 0xFF1C1C1E, ACCENT = 0xFF007AFF, ACTIVE_BG = 0xFFE5F0FF, ACTIVE_FG = 0xFF007AFF;
@@ -40,7 +41,7 @@ const sameColor = (a, b) => (a | 0) === (b | 0);
 class DocumentSession {
   constructor() {
     this.uri = null; this.title = null; this.renderer = null; this.store = null; this.page = 0; this.officePreview = null;
-    this.redoStrokes = []; this.textRegions = new Map();
+    this.redoStrokes = []; this.textRegions = new Map(); this.clearUndo = null;
   }
 }
 
@@ -215,7 +216,7 @@ function makePageListener(app) {
 function makePageDrag(app) {
   return {
     start(direction) {
-      if (app.pageAnimating || !app.renderer || app.verticalPageSwipe || app.pageAnimStyle() !== 0) return false;
+      if (app.pageAnimating || !app.renderer || app.splitSession || app.verticalPageSwipe || app.pageAnimStyle() !== 0) return false;
       const target = app.twoPage ? Math.floor(app.currentPage / 2) * 2 + direction * 2 : app.currentPage + direction;
       if (target < 0 || target >= app.renderer.pageCount) return false;
       if (!app.pagesCached(target)) { app.ensurePages(target).catch(() => {}); return false; }   // not rendered yet: plain swipe (animated) instead
@@ -427,6 +428,7 @@ const methods = {
     this.header.append(libraryButton, this.titleView, h('div', { class: 'm-spacer' }),
       this.icon('ic_sidebar', '페이지 목록', 0xFF007AFF, () => this.toggleSidebar()),
       this.icon('ic_search', '문서·필기 검색', 0xFF30B0C7, () => this.searchDocument()),
+      this.splitButton = this.icon('ic_dual', '화면 나누기 · 문서 두 개를 나란히', 0xFF5856D6, () => this.toggleSplit()),
       this.icon('ic_fullscreen', '전체 화면', 0xFFAF52DE, () => this.toggleFullscreen()),
       this.icon('ic_more_vert', '도구', NAVY, v => this.showMainMenu(v, false)));
     content.append(this.header);
@@ -455,9 +457,12 @@ const methods = {
     firstListener.view = this.firstPageView; secondListener.view = this.secondPageView;
     this.pageView = this.firstPageView;
     this.firstPageView.setPageDrag(this.pageDragHandler); this.secondPageView.setPageDrag(this.pageDragHandler);
-    papers.append(this.firstPageView.el, this.secondPageView.el);
-    setVis(this.secondPageView.el, this.twoPage ? 'visible' : 'gone');
+    const splitListener = makePageListener(this);   // third view: the second pane of the split screen (app-split.js)
+    this.splitView = new PdfPageView(splitListener); splitListener.view = this.splitView; this.splitView.setPageDrag(this.pageDragHandler);
+    papers.append(this.firstPageView.el, this.secondPageView.el, this.splitView.el);
+    setVis(this.secondPageView.el, this.twoPage ? 'visible' : 'gone'); setVis(this.splitView.el, 'gone');
     viewport.append(papers);
+    buildSplit(this, viewport);
 
     this.previousOverlay = h('button', { class: 'm-arrow prev', type: 'button', 'aria-label': '이전 페이지', title: '이전 페이지' }, mkIcon('ic_chevron_left', 24, argb(NAVY)));
     this.nextOverlay = h('button', { class: 'm-arrow next', type: 'button', 'aria-label': '다음 페이지', title: '다음 페이지' }, mkIcon('ic_chevron_right', 24, argb(NAVY)));
@@ -543,7 +548,7 @@ const methods = {
       if (!this.fullscreen || !this.fullscreenDock) { stolen = false; return; }
       const r = viewport.getBoundingClientRect();
       downX = e.clientX; downY = e.clientY; stolen = false;
-      tracking = !this.dockShown && e.pointerType === 'touch' && !(this.inkMode !== 0 && this.fingerInk) && (downY - r.top) > r.height - 170;
+      tracking = !this.dockShown && e.pointerType === 'touch' && !PdfPageView.penRecent() && !(this.inkMode !== 0 && this.fingerInk) && (downY - r.top) > r.height - 170;
     }, true);
     viewport.addEventListener('pointermove', e => {
       if (!e.isTrusted || !this.fullscreen || !this.fullscreenDock) return;
@@ -626,7 +631,7 @@ const methods = {
   /** A mouse drags the page like a finger in reading mode (curl animation); in writing mode it writes. */
   applyMouseReadDrag() {
     const on = !this.writeMode;
-    for (const v of [this.firstPageView, this.secondPageView]) if (v && typeof v.setMouseReadDrag === 'function') v.setMouseReadDrag(on);
+    for (const v of this.allPageViews()) if (typeof v.setMouseReadDrag === 'function') v.setMouseReadDrag(on);
   },
 
   sidePanelWidth() { return Math.min(190, Math.round(window.innerWidth * 0.42)); },
@@ -654,7 +659,11 @@ const methods = {
   ERASER_SIZES: [8, 14, 22, 32, 48],
   ERASER_NAMES: ['아주 작게', '작게', '보통', '크게', '아주 크게'],
   eraserRadius() { return this.recentPrefs.getInt('eraser_radius', 18); },
-  applyEraserRadius() { const r = this.eraserRadius(); for (const v of [this.firstPageView, this.secondPageView]) if (v && v.setEraserRadius) v.setEraserRadius(r); },
+  /** Eraser mode (v3.15): 0 = 획 지우기 (whole stroke), 1 = 부분 지우기 (only the part under the circle). */
+  eraserMode() { return this.recentPrefs.getInt('eraser_mode', 0) === 1 ? 1 : 0; },
+  applyEraserRadius() { const r = this.eraserRadius(), m = this.eraserMode(); for (const v of this.allPageViews()) { if (v.setEraserRadius) v.setEraserRadius(r); if (v.setEraserMode) v.setEraserMode(m); } },
+  /** Every page view, including the second pane of a split screen. */
+  allPageViews() { return [this.firstPageView, this.secondPageView, this.splitView].filter(Boolean); },
   /** Eraser range (v3.10): five sizes drawn as circles plus a fine slider; the circle also follows the pen / mouse while erasing. */
   showEraserMenu(anchor) {
     const box = h('div', { class: 'm-menubox m-eraserbox', dataset: { tag: 'eraser_menu' } });
@@ -675,8 +684,29 @@ const methods = {
     };
     bar.addEventListener('input', () => set(+bar.value));
     refresh();
-    box.append(h('div', { class: 'm-eraser-title' }, label), row, h('div', { class: 'm-opacity' }, bar));
+    const modes = segmentedView(['획 지우기', '부분 지우기'], () => this.eraserMode(), i => {
+      this.recentPrefs.putInt('eraser_mode', i); this.applyEraserRadius(); toast(i === 1 ? '부분 지우기 · 지우개가 닿은 부분만 지웁니다' : '획 지우기 · 닿은 획을 통째로 지웁니다');
+    });
+    modes.dataset.tag = 'eraser_mode';
+    const clear = h('button', { class: 'm-eraser-clear', type: 'button', dataset: { tag: 'eraser_clear_page' } }, '이 페이지 모두 지우기');
+    clear.addEventListener('click', () => { AnchoredMenu.dismiss(); this.confirmClearPage(); });
+    box.append(h('div', { class: 'm-eraser-title' }, label), modes, row, h('div', { class: 'm-opacity' }, bar), clear);
     AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
+  },
+  /** Eraser menu: wipes all ink and erasable highlights of the current page of the active pane after a confirmation (undoable until the next ink edit). */
+  confirmClearPage() {
+    if (this.renderer == null || this.store == null) return;
+    const page = this.currentPage;
+    new AlertDialog.Builder().setTitle('페이지 전체 지우기')
+      .setMessage((page + 1) + '쪽의 모든 필기와 형광펜을 지웁니다. 계속할까요?\n(지운 직후에는 ‘실행 취소’로 되살릴 수 있습니다)')
+      .setPositiveButton('모두 지우기', () => {
+        if (this.store == null || this.currentPage !== page) return;
+        const gone = this.pageView.clearPageInk();
+        if (!gone.strokes.length && !gone.marks.length) { toast('지울 필기가 없습니다'); return; }
+        this.activeSession.clearUndo = gone; this.activeSession.redoStrokes.length = 0;
+        this.store.save(); this.pageView.invalidate(); this.refreshStudyPanel();
+        toast('이 페이지의 필기를 모두 지웠습니다');
+      }).setNegativeButton('취소', null).show();
   },
   highlightTap(anchor) {
     if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
@@ -764,6 +794,7 @@ const methods = {
     AnchoredMenu.show(anchor, true, [
       new Row('페이지 미리보기', 'ic_sidebar', () => this.toggleSidebar()).tint('#007AFF').selected(this.sidebarVisible),
       new Row('두 쪽 보기', 'ic_book', () => this.toggleTwoPage()).tint('#5856D6').selected(this.twoPage),
+      new Row(this.splitSession ? '화면 나누기 끝내기' : '화면 나누기 (문서 두 개)', 'ic_dual', () => this.toggleSplit()).tint('#5856D6').selected(!!this.splitSession),
       new Row('페이지로 이동', 'ic_page', () => this.goToPage()).tint('#30B0C7'),
       new Row('전체 화면', 'ic_fullscreen', () => this.toggleFullscreen()).tint('#AF52DE'),
       new Row('여백 자르기', 'ic_crop', () => {
@@ -784,7 +815,7 @@ const methods = {
   swipeMode() { return !this.swipeEnabled ? 0 : this.verticalPageSwipe ? 2 : 1; },
   setSwipeMode(which) {
     this.swipeEnabled = which !== 0; this.verticalPageSwipe = which === 2;
-    for (const v of [this.pageView, this.firstPageView, this.secondPageView]) if (v) { v.setVerticalPageSwipe && v.setVerticalPageSwipe(this.verticalPageSwipe); v.setPageSwipeEnabled && v.setPageSwipeEnabled(this.swipeEnabled); }
+    for (const v of [this.pageView, ...this.allPageViews()]) if (v) { v.setVerticalPageSwipe && v.setVerticalPageSwipe(this.verticalPageSwipe); v.setPageSwipeEnabled && v.setPageSwipeEnabled(this.swipeEnabled); }
     this.recentPrefs.putBoolean('vertical_page_swipe', this.verticalPageSwipe);
     this.recentPrefs.putBoolean('page_swipe_enabled_v2', this.swipeEnabled);
     if (this.syncOtherTools) this.syncOtherTools();
@@ -1094,6 +1125,7 @@ const methods = {
   // ============================================================ switch / close / tabs
   /** switchDocument(s): makes the session active. Returns the showPage promise. */
   switchDocument(s) {
+    if (this.splitSession && s === this.splitSession) { this.activateSplitPane(); return Promise.resolve(true); }   // that document is already in the other pane: just go there
     this.commitInlineText();
     if (this.searchOwner != null && this.searchOwner !== s) this.closeSearch();
     this.library.opened(s.uri);
@@ -1108,10 +1140,12 @@ const methods = {
     this.updateToolStates(); this.updateInkButton(); this.updateTabs();
     const shown = this.showPage(Math.min(s.page, this.renderer.pageCount - 1));
     this.rebuildThumbnails(); this.saveSessionState();
+    if (this.splitSession) this.updateSplitUi(); else this.consumeSplitWanted(s);
     return shown;
   },
   closeDocument(s) {
     this.commitInlineText();
+    if (this.splitSession) { if (s === this.splitSession) this.exitSplit(); else if (s === this.activeSession) { this.activateSplitPane(); this.exitSplit(); } }
     if (s === this.searchOwner) this.closeSearch();
     const oldIndex = this.sessions.indexOf(s);
     if (oldIndex < 0) return;
@@ -1132,7 +1166,7 @@ const methods = {
     this.tabRow.replaceChildren(); let activeTab = null;
     for (const session of this.sessions) {
       const active = session === this.activeSession;
-      const chip = h('div', { class: 'm-tab' + (active ? ' active' : ''), dataset: { tag: 'document_tab' } });
+      const chip = h('div', { class: 'm-tab' + (active ? ' active' : '') + (session === this.splitSession ? ' in-split' : ''), dataset: { tag: 'document_tab' } });
       const documentIcon = mkIcon('ic_document_tab', 20, active ? argb(ACCENT) : argb(0xFFAEAEB2));
       const name = h('div', { class: 'm-tabname', dataset: { tag: 'document_tab_title' }, title: session.title }, session.title);
       let pressTimer = 0, longDone = false;
@@ -1289,6 +1323,7 @@ const methods = {
     }
   },
   toggleTwoPage() {
+    if (this.splitSession) { toast('화면 나누기를 끝낸 뒤 두 쪽 보기를 쓸 수 있습니다'); return; }
     this.twoPage = !this.twoPage; this.recentPrefs.putBoolean('two_page', this.twoPage);
     if (this.renderer != null) this.showPage(this.currentPage); else setVis(this.secondPageView.el, this.twoPage ? 'invisible' : 'gone');
     toast(this.twoPage ? '두 쪽 보기 · 각 페이지를 터치해 필기하세요' : '한 쪽 보기');
@@ -1379,6 +1414,12 @@ const methods = {
   // ============================================================ undo / redo / bookmarks
   undoInk() {
     if (this.store == null) return;
+    const cu = this.activeSession && this.activeSession.clearUndo;
+    if (cu && cu.page === this.currentPage) {   // the last edit was "clear page": bring it back
+      this.activeSession.clearUndo = null;
+      this.store.strokes.push(...cu.strokes); this.store.marks.push(...cu.marks); this.store.save(); this.pageView.invalidate(); this.refreshStudyPanel();
+      toast('지운 필기를 되살렸습니다'); return;
+    }
     const strokes = this.store.strokes;
     for (let i = strokes.length - 1; i >= 0; i--) {
       const s = strokes[i];
@@ -1556,7 +1597,7 @@ const methods = {
   onMarkTapped(mark) { this.editMark(mark); },
   onPageSwipe(direction) { this.animatePage(direction); },
   onOutlinePointRequested(page, x, y) { this.promptOutline(page, x, y, ''); },
-  onInkChanged() { if (this.store != null) { this.store.save(); if (this.activeSession != null) this.activeSession.redoStrokes.length = 0; } },
+  onInkChanged() { if (this.store != null) { this.store.save(); if (this.activeSession != null) { this.activeSession.redoStrokes.length = 0; this.activeSession.clearUndo = null; } } },
   onTextSelectionFinished(selection, anchorX, anchorY) { this.showTextSelectionPopup(selection, anchorX, anchorY); },
   onTranslationTapped(note) { this.editTranslation(note); },
   /** The page view's own delete (X) button removed `element` from the page: drop it from the store too (idempotent) and save. */
@@ -1586,7 +1627,7 @@ const methods = {
       return;
     }
     this.pageAnimating = true; this.carryZoom();
-    const style = this.pageAnimStyle();
+    const style = this.splitSession ? 2 : this.pageAnimStyle();   // no curl / slide next to another pane
     if (style === 2) {
       this.showPage(target).then(() => this.resetPageTransforms()).finally(() => { this.pageAnimating = false; });
       return;
@@ -1707,6 +1748,7 @@ const methods = {
     const on = this.darkPage(); PageCurlView.backTint = 0x00FFFFFF;
     if (this.firstPageView) this.firstPageView.setDarkPage(on);
     if (this.secondPageView) this.secondPageView.setDarkPage(on);
+    if (this.splitView) this.splitView.setDarkPage(on);
   },
   toggleDarkPage() {
     this.recentPrefs.putBoolean('dark_page', !this.darkPage()); this.applyDarkPage();
