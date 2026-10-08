@@ -150,7 +150,7 @@ check('swap exchanges left/right', (await ev(() => document.querySelector('.m-pa
   check('divider double click: equal widths again', Math.abs(ws2[0] - ws2[1]) < 6);
 }
 await ev(() => app.exitSplit()); await page.waitForTimeout(500);
-check('exit: one pane again, active document kept', await ev(() => !app.isSplit() && getComputedStyle(app.splitView.el).display === 'none' && app.firstPageView.el.getBoundingClientRect().width > 700));
+check('exit: one pane again, active document kept', await ev(() => !app.isSplit() && app.paneViews.filter(v => v !== app.firstPageView).every(v => getComputedStyle(v.el).display === 'none') && app.firstPageView.el.getBoundingClientRect().width > 700));
 await ev(() => app.enterSplit(app.sessions.find(x => x !== app.activeSession))); await page.waitForTimeout(600);
 await ev(() => app.closeDocument(app.splitSession)); await page.waitForTimeout(400);
 check('closing a split document ends the split', await ev(() => !app.isSplit() && app.sessions.length === 1));
