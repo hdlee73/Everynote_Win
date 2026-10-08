@@ -84,7 +84,7 @@ check('restore (add) keeps originals and adds a copy', bk.copy, JSON.stringify(b
 // 9: app info + update check
 const ab=await pg.evaluate(async()=>{
   const {host}=await import('./js/host.js'); app._appVersion='3.7.0';
-  host._fake.updateHandler=async()=>({version:'3.8.0',page:'https://example.invalid/r',notes:'새 기능',setupUrl:'https://github.com/hdlee73/PDF-Note-Windows/releases/download/v3.8.0/Everynote-Setup-v3.8.0-x64.exe',exeUrl:null,installed:true,arch:'x64'});
+  host._fake.updateHandler=async()=>({version:'3.8.0',page:'https://example.invalid/r',notes:'새 기능',setupUrl:'https://github.com/hdlee73/Everynote_Win/releases/download/v3.8.0/Everynote-Setup-v3.8.0-x64.exe',exeUrl:null,installed:true,arch:'x64'});
   app.showAbout(); await new Promise(r=>setTimeout(r,300));
   const out={text:document.querySelector('[data-tag="about_info"]').textContent,auto:document.querySelector('[data-tag="auto_update"]').checked,inst:document.querySelector('[data-tag="auto_update_install"]').checked};
   [...document.querySelectorAll('.ad-btn')].find(x=>x.textContent.trim()==='업데이트 확인').click(); await new Promise(r=>setTimeout(r,500));

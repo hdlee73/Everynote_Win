@@ -18,7 +18,7 @@
 - 안드로이드 백업(JSON)과 호환
 
 ## 설치
-[Releases](https://github.com/hdlee73/pdf-note-windows/releases)에서 받습니다.
+[Releases](https://github.com/hdlee73/Everynote_Win/releases)에서 받습니다.
 
 | 파일 | 설명 |
 |---|---|
