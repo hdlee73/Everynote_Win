@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -329,8 +330,12 @@ sealed class Bridge
     }
 
     // ---- update check (GitHub releases of this project only)
-    const string ReleaseApi = "https://api.github.com/repos/hdlee73/PDF-Note-Windows/releases/latest";
-    const string DownloadPrefix = "https://github.com/hdlee73/PDF-Note-Windows/releases/download/";
+    const string ReleaseApi = "https://api.github.com/repos/hdlee73/Everynote_Win/releases/latest";
+    // The repository was renamed (PDF-Note-Windows -> Everynote_Win); the API now reports the new name, older builds/releases may still carry the old one.
+    static readonly string[] DownloadPrefixes = {
+        "https://github.com/hdlee73/Everynote_Win/releases/download/",
+        "https://github.com/hdlee73/PDF-Note-Windows/releases/download/",
+    };
     static readonly System.Net.Http.HttpClient web = new() { Timeout = TimeSpan.FromMinutes(15) };
     static string Arch => RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "arm64" : "x64";
     static bool IsInstalled() => File.Exists(Path.Combine(AppContext.BaseDirectory, "unins000.exe"));
@@ -368,7 +373,7 @@ sealed class Bridge
     /// <summary>Downloads the Setup of a release of this project and starts it in update mode (it closes this app, keeps all documents and settings).</summary>
     async Task<object> UpdateInstall(string url)
     {
-        if (!url.StartsWith(DownloadPrefix, StringComparison.Ordinal) || !url.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("허용되지 않는 주소입니다");
+        if (!DownloadPrefixes.Any(p => url.StartsWith(p, StringComparison.OrdinalIgnoreCase)) || !url.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("허용되지 않는 주소입니다");
         Directory.CreateDirectory(AppPaths.Temp);
         var dest = Path.Combine(AppPaths.Temp, Path.GetFileName(new Uri(url).LocalPath));
         var tmp = dest + ".part";
