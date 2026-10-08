@@ -485,29 +485,28 @@ const methods = {
     // ---- bottom bar (54)
     this.bottomBar = h('div', { class: 'm-bottom', dataset: { tag: 'reading_toolbar' } });
     const readBar = this.readBar = h('div', { class: 'm-bar', dataset: { tag: 'read_bar' } });
-    const writeBar = this.writeBar = h('div', { class: 'm-bar', dataset: { tag: 'writing_toolbar' } });
-    writeBar.style.display = 'none';
+    const writeBar = this.writeBar = h('div', { class: 'm-strip', dataset: { tag: 'writing_toolbar' } });
     this.pageLabel = h('div', { class: 'm-pagelabel', role: 'button', 'aria-label': '페이지 번호 · 눌러 이동', title: '페이지 번호 · 눌러 이동', dataset: { tag: 'page_indicator' } });
-    this.pageLabel.addEventListener('click', () => { if (this.renderer == null) this.showAddDocumentMenu(); else this.goToPage(); });
+    this.pageLabel.addEventListener('click', () => { if (this.renderer == null) this.showAddDocumentMenu(); else this.showPageJumpMenu(this.pageLabel); });
+    this.pageLabel.title = '페이지 이동'; this.pageLabel.setAttribute('aria-label', '페이지 이동');
     readBar.append(this.pageLabel);
-    this.barIcon(readBar, 'ic_outline', '문서 개요', 0xFF007AFF, () => this.showOutlineList());
     this.barIcon(readBar, 'ic_eye', '보기 방법', 0xFF30B0C7, v => this.showViewMenu(v));
-    this.bookmarkButton = this.barIcon(readBar, 'ic_star_outline', '즐겨찾기', 0xFFF5A623, () => this.toggleBookmark());
-    this.barIcon(readBar, 'ic_insert', '삽입 · 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
-    this.inkButton = this.barIcon(readBar, 'ic_ink', '필기 모드', 0xFF5856D6, () => this.setWriteMode(true));
+    this.readButton = this.barIcon(readBar, 'ic_book', '읽기 모드', 0xFF007AFF, () => this.setWriteMode(false));
+    this.inkButton = this.barIcon(readBar, 'ic_ink', '필기 모드', 0xFF5856D6, () => this.inkModeTap());
     this.textButton = this.barIcon(readBar, 'ic_text', '타이핑', 0xFF34C759, () => this.toggleTyping());
-    this.barIcon(writeBar, 'ic_book', '읽기 모드', 0xFF007AFF, () => this.setWriteMode(false));
+    this.bookmarkButton = this.barIcon(readBar, 'ic_star_outline', '즐겨찾기', 0xFFF5A623, () => this.toggleBookmark());
+    this.lassoButton = this.barIcon(readBar, 'ic_lasso', '올가미 선택', 0xFFAF52DE, () => this.toggleLasso());
+    this.insertButton = this.barIcon(readBar, 'ic_insert', '삽입 · 메모 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
+    // pen tools float on the page as their own strip (can be kept visible or hidden while writing)
     this.penButton = this.barIcon(writeBar, 'ic_ink', '펜', 0xFF1C1C1E, v => this.penTap(v));
     this.hlButton = this.barIcon(writeBar, 'ic_highlight', '형광펜', 0xFFF5C400, v => this.highlightTap(v));
     this.eraserButton = this.barIcon(writeBar, 'ic_eraser', '지우개 · 한 번 더 누르면 지울 범위', 0xFFFF6B8A, v => this.eraserTap(v));
-    this.lassoButton = this.barIcon(writeBar, 'ic_lasso', '올가미 선택', 0xFFAF52DE, () => this.toggleLasso());
-    this.memoButton = this.barIcon(writeBar, 'ic_note_add', '메모 추가', 0xFFFF9500, () => this.toggleMemoMode());
-    this.barIcon(writeBar, 'ic_insert', '삽입 · 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
     writeBar.append(h('div', { class: 'm-tbsep', 'aria-hidden': 'true' }));
     this.barIcon(writeBar, 'ic_undo', '실행 취소', 0xFF8E8E93, () => this.undoInk());
     this.barIcon(writeBar, 'ic_redo', '다시 실행', 0xFF8E8E93, () => this.redoInk());
+    viewport.append(h('div', { class: 'm-stripwrap', style: { display: 'none' } }, writeBar));
     this.barGrip = this.makeGrip(this.bottomBar, 'bar');
-    this.bottomBar.append(this.barGrip, readBar, writeBar);
+    this.bottomBar.append(this.barGrip, readBar);
     this.barIcon(this.bottomBar, 'ic_float', '하단 메뉴 위치·방향', 0xFF8E8E93, v => this.showBarLayoutMenu(v)).classList.add('m-barlayout');
     content.append(this.bottomBar); this.contentCol = content;
     if (this.floatBar()) this.applyBarMode();
@@ -518,7 +517,6 @@ const methods = {
       this.dockIcon('ic_outline', '전체 화면 개요', 0xFF007AFF, () => this.showOutlineList()),
       this.dockIcon('ic_eye', '전체 화면 보기 방법', 0xFF30B0C7, v => this.showViewMenu(v)),
       this.dockIcon('ic_ink', '전체 화면 필기도구', 0xFF5856D6, v => this.penTap(v)),
-      this.dockIcon('ic_note_add', '전체 화면 메모 추가', 0xFFFF9500, () => this.toggleMemoMode()),
       this.dockIcon('ic_insert', '전체 화면 삽입', 0xFFFF2D55, v => this.showInsertMenu(v)),
       this.dockIcon('ic_text', '전체 화면 타이핑', 0xFF34C759, () => this.toggleTyping()),
       this.dockIcon('ic_lasso', '전체 화면 올가미', 0xFFAF52DE, () => this.toggleLasso()),
@@ -642,10 +640,36 @@ const methods = {
     if (on && this.renderer == null) { toast('문서를 먼저 여세요'); return; }
     this.writeMode = on; this.applyMouseReadDrag();
     this.root.classList.toggle('m-writing', on);
-    this.readBar.style.display = on ? 'none' : '';
-    this.writeBar.style.display = on ? '' : 'none';
+    this.updateWriteStrip();
     if (on) { if (this.inkMode === 0 && !this.highlightMode && !this.memoMode && !this.outlineMode && !this.pageView.isLassoMode()) this.setInkMode(1); else this.updateToolStates(); }
     else if (this.renderer != null) this.setInkMode(0); else this.updateToolStates();
+  },
+  writeStripShown() { return this.recentPrefs.getBoolean('write_strip', true); },
+  /** The pen / highlighter / eraser strip floats over the page while writing; keeping it or hiding it is remembered. */
+  setWriteStripShown(on) {
+    this.recentPrefs.putBoolean('write_strip', on); this.updateWriteStrip();
+    toast(on ? '필기 도구 줄을 계속 보여줍니다' : '필기 도구 줄을 숨겼습니다. 필기 모드 단추를 눌러 다시 볼 수 있습니다');
+  },
+  updateWriteStrip() {
+    const show = !!this.writeMode && this.writeStripShown();
+    this.writeBar.parentElement.style.display = show ? '' : 'none';
+    this.root.classList.toggle('m-strip-on', show);
+  },
+  /** Writing-mode button: starts writing; pressed again while writing it shows / hides the tool strip. */
+  inkModeTap() {
+    if (!this.writeMode) { this.setWriteMode(true); if (!this.writeStripShown()) toast('필기 도구 줄이 숨겨져 있습니다. 필기 모드 단추를 한 번 더 누르면 나타납니다'); return; }
+    this.setWriteStripShown(!this.writeStripShown());
+  },
+  /** Page button: go to a page, previous / next / first / last page, document outline. */
+  showPageJumpMenu(anchor) {
+    const count = this.renderer.pageCount;
+    AnchoredMenu.show(anchor, true, [
+      new Row('페이지로 이동', 'ic_page', () => this.goToPage()).tint('#30B0C7'),
+      new Row('이전 페이지', 'ic_chevron_left', () => this.animatePage(-1)).tint('#8E8E93'),
+      new Row('다음 페이지', 'ic_chevron_right', () => this.animatePage(1)).tint('#8E8E93'),
+      new Row('처음 페이지', 'ic_chevron_up', () => this.showPage(0)).tint('#8E8E93'),
+      new Row('마지막 페이지', 'ic_chevron_down', () => this.showPage(count - 1)).tint('#8E8E93'),
+      new Row('문서 개요', 'ic_outline', () => this.showOutlineList()).tint('#007AFF')], null);
   },
   penTap(anchor) {
     if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
@@ -660,7 +684,7 @@ const methods = {
   ERASER_NAMES: ['아주 작게', '작게', '보통', '크게', '아주 크게'],
   eraserRadius() { return this.recentPrefs.getInt('eraser_radius', 18); },
   /** Eraser mode (v3.15): 0 = 획 지우기 (whole stroke), 1 = 부분 지우기 (only the part under the circle). */
-  eraserMode() { return this.recentPrefs.getInt('eraser_mode', 0) === 1 ? 1 : 0; },
+  eraserMode() { return this.recentPrefs.getInt('eraser_mode', 1) === 1 ? 1 : 0; },
   applyEraserRadius() { const r = this.eraserRadius(), m = this.eraserMode(); for (const v of this.allPageViews()) { if (v.setEraserRadius) v.setEraserRadius(r); if (v.setEraserMode) v.setEraserMode(m); } },
   /** Every page view, including the second pane of a split screen. */
   allPageViews() { return [this.firstPageView, this.secondPageView, this.splitView].filter(Boolean); },
@@ -871,7 +895,7 @@ const methods = {
   },
 
   showWelcome() {
-    if (this.writeMode) { this.writeMode = false; this.applyMouseReadDrag(); this.root.classList.remove('m-writing'); this.readBar.style.display = ''; this.writeBar.style.display = 'none'; }
+    if (this.writeMode) { this.writeMode = false; this.applyMouseReadDrag(); this.root.classList.remove('m-writing'); this.updateWriteStrip(); }
     setVis(this.previousOverlay, 'gone'); setVis(this.nextOverlay, 'gone');
     this.titleView.textContent = 'Everynote'; document.title = 'Everynote';
     this.pageLabel.textContent = '문서 열기';
@@ -1359,7 +1383,9 @@ const methods = {
   updateToolStates() {
     this.commitInlineText(); this.syncOtherTools(); this.updateInkButton();
     const typing = this.typingActive(), memo = this.memoMode && !typing;
-    this.paintTool(this.memoButton, memo, ACTIVE_BG, ACTIVE_FG);
+    this.paintTool(this.insertButton, memo, ACTIVE_BG, ACTIVE_FG);
+    this.paintTool(this.readButton, !this.writeMode, ACTIVE_BG, ACTIVE_FG);
+    this.paintTool(this.inkButton, !!this.writeMode, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.textButton, typing, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.lassoButton, this.pageView != null && this.pageView.isLassoMode(), ACTIVE_BG, ACTIVE_FG);
   },
@@ -1512,6 +1538,8 @@ const methods = {
       rows.push(new Row('가로 방향', 'ic_float', () => this.setBarOrientation(false)).tint('#8E8E93').selected(!v));
       rows.push(new Row('세로 방향', 'ic_float', () => this.setBarOrientation(true)).tint('#8E8E93').selected(v));
     }
+    rows.push(Row.divider());
+    rows.push(new Row('필기 도구 줄 항상 보이기', 'ic_ink', () => this.setWriteStripShown(!this.writeStripShown())).tint('#5856D6').selected(this.writeStripShown()));
     AnchoredMenu.show(anchor, true, rows, null);
   },
   dockPinned() { return this.recentPrefs.getBoolean('dock_pinned', false); },
