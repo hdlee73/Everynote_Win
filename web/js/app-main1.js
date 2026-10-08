@@ -458,10 +458,11 @@ const methods = {
     firstListener.view = this.firstPageView; secondListener.view = this.secondPageView;
     this.pageView = this.firstPageView;
     this.firstPageView.setPageDrag(this.pageDragHandler); this.secondPageView.setPageDrag(this.pageDragHandler);
-    const splitListener = makePageListener(this);   // third view: the second pane of the split screen (app-split.js)
-    this.splitView = new PdfPageView(splitListener); splitListener.view = this.splitView; this.splitView.setPageDrag(this.pageDragHandler);
-    papers.append(this.firstPageView.el, this.secondPageView.el, this.splitView.el);
-    setVis(this.secondPageView.el, this.twoPage ? 'visible' : 'gone'); setVis(this.splitView.el, 'gone');
+    // views 3 to 5: the other panes of the split screen (app-split.js); the pool of views is [first, 3, 4, 5], any of them can be the active one
+    const extra = [0, 1, 2].map(() => { const l = makePageListener(this), v = new PdfPageView(l); l.view = v; v.setPageDrag(this.pageDragHandler); return v; });
+    this.paneViews = [this.firstPageView, ...extra];
+    papers.append(this.firstPageView.el, this.secondPageView.el, ...extra.map(v => v.el));
+    setVis(this.secondPageView.el, this.twoPage ? 'visible' : 'gone'); for (const v of extra) setVis(v.el, 'gone');
     viewport.append(papers);
     buildSplit(this, viewport);
 
@@ -741,7 +742,7 @@ const methods = {
   eraserMode() { return this.recentPrefs.getInt('eraser_mode', 1) === 1 ? 1 : 0; },
   applyEraserRadius() { const r = this.eraserRadius(), m = this.eraserMode(); for (const v of this.allPageViews()) { if (v.setEraserRadius) v.setEraserRadius(r); if (v.setEraserMode) v.setEraserMode(m); } },
   /** Every page view, including the second pane of a split screen. */
-  allPageViews() { return [this.firstPageView, this.secondPageView, this.splitView].filter(Boolean); },
+  allPageViews() { return [...new Set([this.firstPageView, this.secondPageView, ...(this.paneViews || [])])].filter(Boolean); },
   /** Eraser range (v3.10): five sizes drawn as circles plus a fine slider; the circle also follows the pen / mouse while erasing. */
   showEraserMenu(anchor) {
     const box = h('div', { class: 'm-menubox m-eraserbox', dataset: { tag: 'eraser_menu' } });
@@ -1181,11 +1182,13 @@ const methods = {
   // ============================================================ switch / close / tabs
   /** switchDocument(s): makes the session active. Returns the showPage promise. */
   switchDocument(s) {
-    if (this.splitSession && s === this.splitSession) { this.activateSplitPane(); return Promise.resolve(true); }   // that document is already in the other pane: just go there
+    if (this.isSplit() && this.consumePaneWanted(s)) return Promise.resolve(true);   // opened with 화면 추가: it became a new pane
+    if (this.isSplit() && s !== this.activeSession && this.paneIndex(s) >= 0) { this.activateSplitPane(this.paneIndex(s)); return Promise.resolve(true); }   // that document is already in the other pane: just go there
     this.commitInlineText();
     if (this.searchOwner != null && this.searchOwner !== s) this.closeSearch();
     this.library.opened(s.uri);
     if (this.activeSession != null) this.activeSession.page = this.currentPage;
+    if (this.isSplit()) this.panes[this.activeSlot].session = s;
     this.activeSession = s; this.renderer = s.renderer; this.documentUri = s.uri; this.documentTitle = s.title; this.store = s.store;
     this.titleView.textContent = this.documentTitle;
     this._textSelectWanted = false;
@@ -1201,7 +1204,7 @@ const methods = {
   },
   closeDocument(s) {
     this.commitInlineText();
-    if (this.splitSession) { if (s === this.splitSession) this.exitSplit(); else if (s === this.activeSession) { this.activateSplitPane(); this.exitSplit(); } }
+    this.closeDocumentPane(s);
     if (s === this.searchOwner) this.closeSearch();
     const oldIndex = this.sessions.indexOf(s);
     if (oldIndex < 0) return;
@@ -1222,7 +1225,7 @@ const methods = {
     this.tabRow.replaceChildren(); let activeTab = null;
     for (const session of this.sessions) {
       const active = session === this.activeSession;
-      const chip = h('div', { class: 'm-tab' + (active ? ' active' : '') + (session === this.splitSession ? ' in-split' : ''), dataset: { tag: 'document_tab' } });
+      const chip = h('div', { class: 'm-tab' + (active ? ' active' : '') + (this.paneIndex(session) >= 0 ? ' in-split' : ''), dataset: { tag: 'document_tab' } });
       const documentIcon = mkIcon('ic_document_tab', 20, active ? argb(ACCENT) : argb(0xFFAEAEB2));
       const name = h('div', { class: 'm-tabname', dataset: { tag: 'document_tab_title' }, title: session.title }, session.title);
       let pressTimer = 0, longDone = false;
@@ -1813,7 +1816,7 @@ const methods = {
     const on = this.darkPage(); PageCurlView.backTint = 0x00FFFFFF;
     if (this.firstPageView) this.firstPageView.setDarkPage(on);
     if (this.secondPageView) this.secondPageView.setDarkPage(on);
-    if (this.splitView) this.splitView.setDarkPage(on);
+    for (const v of this.paneViews || []) v.setDarkPage(on);
   },
   toggleDarkPage() {
     this.recentPrefs.putBoolean('dark_page', !this.darkPage()); this.applyDarkPage();

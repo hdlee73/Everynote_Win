@@ -512,7 +512,7 @@ M.choosePageSwipeDirection = function () {
   const b = new AlertDialog.Builder().setTitle('페이지 넘김');
   b.setSingleChoiceItems(choices, !this.swipeEnabled ? 0 : this.verticalPageSwipe ? 2 : 1, (dialog, which) => {
     this.swipeEnabled = which !== 0; this.verticalPageSwipe = which === 2;
-    for (const v of [this.pageView, this.firstPageView, this.secondPageView]) if (v) { v.setVerticalPageSwipe && v.setVerticalPageSwipe(this.verticalPageSwipe); v.setPageSwipeEnabled && v.setPageSwipeEnabled(this.swipeEnabled); }
+    for (const v of [this.pageView, ...this.allPageViews()]) if (v) { v.setVerticalPageSwipe && v.setVerticalPageSwipe(this.verticalPageSwipe); v.setPageSwipeEnabled && v.setPageSwipeEnabled(this.swipeEnabled); }
     this.recentPrefs.putBoolean('vertical_page_swipe', this.verticalPageSwipe);
     this.recentPrefs.putBoolean('page_swipe_enabled_v2', this.swipeEnabled);
     if (this.syncOtherTools) this.syncOtherTools();
