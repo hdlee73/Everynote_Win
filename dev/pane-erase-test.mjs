@@ -139,6 +139,16 @@ await page.screenshot({ path: path.join(out, 'pane-split-2.png') });
 const l0 = await ev(() => document.querySelector('.m-panename').textContent);
 await ev(() => app.swapSplitPanes());
 check('swap exchanges left/right', (await ev(() => document.querySelector('.m-panename').textContent)) !== l0);
+{ // v3.18: draggable divider changes the two widths; zoom stays per pane
+  const box = await page.locator('[data-tag=split_divider]').boundingBox(); const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width / 2, y); await page.mouse.down(); await page.mouse.move(box.x + box.width / 2 + 150, y, { steps: 6 }); await page.mouse.up(); await page.waitForTimeout(400);
+  const wd = await ev(() => { const a = app.firstPageView.el.getBoundingClientRect().width, b = app.splitView.el.getBoundingClientRect().width; return { l: Math.min(a, b) === a ? a : b, saved: app.recentPrefs.getFloat('split_ratio', 0) }; });
+  const ws = await ev(() => [app.firstPageView.el, app.splitView.el].map(e => ({ x: e.getBoundingClientRect().left, w: e.getBoundingClientRect().width })).sort((p, q) => p.x - q.x));
+  check('divider drag: left pane wider than right, ratio saved', ws[0].w > ws[1].w + 100 && wd.saved > 0.55 && wd.saved <= 0.8, JSON.stringify({ ws, saved: wd.saved }));
+  await page.locator('[data-tag=split_divider]').dblclick(); await page.waitForTimeout(300);
+  const ws2 = await ev(() => [app.firstPageView.el, app.splitView.el].map(e => e.getBoundingClientRect().width));
+  check('divider double click: equal widths again', Math.abs(ws2[0] - ws2[1]) < 6);
+}
 await ev(() => app.exitSplit()); await page.waitForTimeout(500);
 check('exit: one pane again, active document kept', await ev(() => !app.isSplit() && getComputedStyle(app.splitView.el).display === 'none' && app.firstPageView.el.getBoundingClientRect().width > 700));
 await ev(() => app.enterSplit(app.sessions.find(x => x !== app.activeSession))); await page.waitForTimeout(600);

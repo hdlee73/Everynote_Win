@@ -68,6 +68,7 @@ const methods = {
     this.firstPageView.el.style.order = ''; this.splitView.el.style.order = '';
     this.firstPageView.el.classList.remove('pane-active'); this.splitView.el.classList.remove('pane-active');
     if (this.splitBar) this.splitBar.style.display = 'none';
+    this.applySplitRatio();
     const two = this._twoPageBeforeSplit; this._twoPageBeforeSplit = false;
     if (two) { this.twoPage = true; setDisplay(this.secondPageView.el, true); }
     if (this.renderer != null) this.showPage(this.currentPage);
@@ -100,6 +101,18 @@ const methods = {
   },
 
   /** Exchanges the left / right position of the two documents. */
+  /** Width of the left pane as a share of the screen (draggable divider, remembered). */
+  splitRatio() { const r = this.recentPrefs ? this.recentPrefs.getFloat('split_ratio', 0.5) : 0.5; return Math.min(0.8, Math.max(0.2, r || 0.5)); },
+  applySplitRatio(r = this.splitRatio()) {
+    const a = this.firstPageView.el, b = this.splitView.el, div = this.splitDivider;
+    const ord = (el, d) => (el.style.order === '' ? d : +el.style.order), aLeft = ord(a, 0) <= ord(b, 1), left = aLeft ? a : b, right = aLeft ? b : a;
+    if (!this.splitSession) { a.style.flex = ''; b.style.flex = ''; if (div) div.style.display = 'none'; return; }
+    left.style.flex = `${r} 1 0`; right.style.flex = `${1 - r} 1 0`;
+    if (div) { div.style.display = 'block'; div.style.left = `${r * 100}%`; }
+    const cells = this.splitBar && this.splitBar.children; if (cells && cells.length === 2) { cells[0].style.flex = `${r} 1 0`; cells[1].style.flex = `${1 - r} 1 0`; }
+    this.updateSplitArrows();
+  },
+
   swapSplitPanes() {
     if (!this.splitSession) return;
     const a = this.firstPageView.el, b = this.splitView.el, oa = a.style.order || '0';
@@ -158,6 +171,7 @@ const methods = {
       chip.addEventListener('click', () => this.showPaneMenu(chip, p.view));
       this.splitBar.append(h('div', { class: 'm-panecell' }, chip));
     }
+    this.applySplitRatio();
   },
 
   /** In split view the page-turn arrows sit on the left and right edge of the ACTIVE pane instead of the whole window. */
@@ -200,6 +214,16 @@ export function buildSplit(app, viewport) {
     app.activateSplitPane();
   };
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => app.updateSplitArrows()).observe(app.papers);
+  const div = app.splitDivider = h('div', { class: 'm-splitdiv', title: '끌어서 두 화면의 너비 조절 (두 번 누르면 절반씩)', 'aria-label': '화면 너비 조절', dataset: { tag: 'split_divider' } }, h('span', { class: 'm-splitgrip' }));
+  div.style.display = 'none'; app.papers.append(div);
+  div.addEventListener('pointerdown', e => {
+    if (!app.splitSession) return;
+    e.preventDefault(); e.stopPropagation(); div.setPointerCapture(e.pointerId);
+    const move = ev => { const rc = app.papers.getBoundingClientRect(); app._splitDrag = Math.min(0.8, Math.max(0.2, (ev.clientX - rc.left) / rc.width)); app.applySplitRatio(app._splitDrag); };
+    const up = () => { div.removeEventListener('pointermove', move); div.removeEventListener('pointerup', up); div.removeEventListener('pointercancel', up); if (app._splitDrag != null) app.recentPrefs.putFloat('split_ratio', app._splitDrag); app._splitDrag = null; };
+    div.addEventListener('pointermove', move); div.addEventListener('pointerup', up); div.addEventListener('pointercancel', up);
+  });
+  div.addEventListener('dblclick', () => { app.recentPrefs.putFloat('split_ratio', 0.5); app.applySplitRatio(0.5); });
   app.papers.addEventListener('pointerdown', hook, true);
   app.papers.addEventListener('wheel', hook, true);
 }
