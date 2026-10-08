@@ -58,7 +58,7 @@ await ev(() => { app.firstPageView.setFingerInk(false); app.store.strokes.length
 // mouse: constant pressure 0.65
 await page.waitForTimeout(100);
 const vb = await ev(() => app.firstPageView.el.getBoundingClientRect().toJSON());
-await page.mouse.move(vb.left + g.l + 100, vb.top + g.t + 120); await page.mouse.down(); await page.mouse.move(vb.left + g.l + 160, vb.top + g.t + 120, { steps: 5 }); await page.mouse.up();
+await page.mouse.move(vb.left + g.l + 100, vb.top + g.t + 420); await page.mouse.down(); await page.mouse.move(vb.left + g.l + 160, vb.top + g.t + 420, { steps: 5 }); await page.mouse.up();
 s = await strokes();
 check('mouse stroke has constant pressure 0.65', s.length === 1 && s[0].p.every(p => p === 0.65), JSON.stringify(s));
 

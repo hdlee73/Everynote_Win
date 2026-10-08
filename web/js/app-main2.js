@@ -2485,7 +2485,7 @@ export function initMain2(app) {
   app.studyPanel = null; app.studyRows = null; app.studyHeading = null;
   app.sidePanel = null; app.searchPanel = null; app.searchInput = null; app.searchStatus = null; app.searchList = null; app.searchScroll = null;
   app.outlineList = null; app.recordingList = null; app.insertList = null; app.sideTabs = []; app._thumbAspectCache = null;
-  app.showAllThumbnails = app.recentPrefs.getBoolean('thumb_all', false);
+  app.showAllThumbnails = app.recentPrefs.getBoolean('thumb_all', true);
   document.addEventListener('paste', e => app.onPasteEvent(e));
   window.addEventListener('resize', () => {
     if (app.studySplit) { const wide = window.innerWidth >= 600; app.studySplit.style.flexDirection = wide ? 'row' : 'column'; if (app.applyStudySize) app.applyStudySize(); }

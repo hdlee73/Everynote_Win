@@ -67,6 +67,9 @@ const methods = {
     this.splitView.clearPage(); setDisplay(this.splitView.el, false);
     this.firstPageView.el.style.order = ''; this.splitView.el.style.order = '';
     this.firstPageView.el.classList.remove('pane-active'); this.splitView.el.classList.remove('pane-active');
+    // touching the right pane swapped the view objects, so the "first" view may sit AFTER the second one in the DOM: a two-page spread
+    // would then be laid out mirrored (each page pushed to the outer edge). Put the first view back in front.
+    { const f = this.firstPageView.el, sec = this.secondPageView.el; if (f.compareDocumentPosition(sec) & Node.DOCUMENT_POSITION_PRECEDING) this.papers.insertBefore(f, sec); }
     if (this.splitBar) this.splitBar.style.display = 'none';
     this.applySplitRatio();
     const two = this._twoPageBeforeSplit; this._twoPageBeforeSplit = false;

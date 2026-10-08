@@ -31,6 +31,7 @@ const HIGHLIGHT_COLORS = [0x66FFDE59, 0x6654C27A, 0x66FF6B9A, 0x66549CF5, 0x66B6
 const PEN_ICONS = ['ic_pen_ball', 'ic_pen_pencil', 'ic_pen_fountain', 'ic_pen_brush', 'ic_pen_marker'];
 const WIDTH_ICONS = ['ic_width_1', 'ic_width_2', 'ic_width_3', 'ic_width_4'];
 const WIDTH_NAMES = ['얇게', '보통', '굵게', '최대'];
+const HL_THICK = [0.012, 0.022, 0.034, 0.05];   // highlighter thickness for the shared width steps
 const ZOOM_STEP = 1.25;
 const PICTURE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
 const OFFICE_EXTS = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'hwp', 'hwpx', ...PICTURE_EXTS];
@@ -216,7 +217,7 @@ function makePageListener(app) {
 function makePageDrag(app) {
   return {
     start(direction) {
-      if (app.pageAnimating || !app.renderer || app.splitSession || app.verticalPageSwipe || app.pageAnimStyle() !== 0) return false;
+      if (app.pageAnimating || !app.renderer || app.verticalPageSwipe || app.pageAnimStyle() !== 0) return false;
       const target = app.twoPage ? Math.floor(app.currentPage / 2) * 2 + direction * 2 : app.currentPage + direction;
       if (target < 0 || target >= app.renderer.pageCount) return false;
       if (!app.pagesCached(target)) { app.ensurePages(target).catch(() => {}); return false; }   // not rendered yet: plain swipe (animated) instead
@@ -270,7 +271,7 @@ const methods = {
     await this.library.ready;
     this.libraryFolder = this.library.root;
     this.lassoShape = p.getInt('lasso_shape', PdfPageView.LASSO_FREE);
-    this.showAllThumbnails = p.getBoolean('thumb_all', false);
+    this.showAllThumbnails = p.getBoolean('thumb_all', true);
     this.buildUi();
     this.pageView.setLassoShape(this.lassoShape);
     this.applyEraserRadius();
@@ -493,6 +494,7 @@ const methods = {
     this.barIcon(readBar, 'ic_eye', '보기 방법', 0xFF30B0C7, v => this.showViewMenu(v));
     this.readButton = this.barIcon(readBar, 'ic_book', '읽기 모드', 0xFF007AFF, () => this.setWriteMode(false));
     this.inkButton = this.barIcon(readBar, 'ic_ink', '필기 모드', 0xFF5856D6, () => this.inkModeTap());
+    this.eraserBarButton = this.barIcon(readBar, 'ic_eraser', '지우개', 0xFFFF6B8A, v => this.eraserBarTap(v));
     this.textButton = this.barIcon(readBar, 'ic_text', '타이핑', 0xFF34C759, () => this.toggleTyping());
     this.bookmarkButton = this.barIcon(readBar, 'ic_star_outline', '즐겨찾기', 0xFFF5A623, () => this.toggleBookmark());
     this.lassoButton = this.barIcon(readBar, 'ic_lasso', '올가미 선택', 0xFFAF52DE, () => this.toggleLasso());
@@ -504,7 +506,12 @@ const methods = {
     writeBar.append(h('div', { class: 'm-tbsep', 'aria-hidden': 'true' }));
     this.barIcon(writeBar, 'ic_undo', '실행 취소', 0xFF8E8E93, () => this.undoInk());
     this.barIcon(writeBar, 'ic_redo', '다시 실행', 0xFF8E8E93, () => this.redoInk());
-    viewport.append(h('div', { class: 'm-stripwrap', style: { display: 'none' } }, writeBar));
+    // the strip floats: its dotted grip drags it anywhere; the width / colour rows (shared by pen and highlighter) hang under it
+    this.stripBox = h('div', { class: 'm-stripbox', dataset: { tag: 'write_strip_box' } });
+    this.stripGrip = this.makeGrip(this.stripBox, 'strip'); this.stripGrip.style.display = ''; writeBar.prepend(this.stripGrip);
+    this.inkOptions = h('div', { class: 'm-inkopts', dataset: { tag: 'ink_options' }, style: { display: 'none' } });
+    this.stripBox.append(writeBar, this.inkOptions);
+    viewport.append(h('div', { class: 'm-stripwrap', style: { display: 'none' } }, this.stripBox));
     this.barGrip = this.makeGrip(this.bottomBar, 'bar');
     this.bottomBar.append(this.barGrip, readBar);
     this.barIcon(this.bottomBar, 'ic_float', '하단 메뉴 위치·방향', 0xFF8E8E93, v => this.showBarLayoutMenu(v)).classList.add('m-barlayout');
@@ -517,6 +524,7 @@ const methods = {
       this.dockIcon('ic_outline', '전체 화면 개요', 0xFF007AFF, () => this.showOutlineList()),
       this.dockIcon('ic_eye', '전체 화면 보기 방법', 0xFF30B0C7, v => this.showViewMenu(v)),
       this.dockIcon('ic_ink', '전체 화면 필기도구', 0xFF5856D6, v => this.penTap(v)),
+      this.dockIcon('ic_eraser', '전체 화면 지우개', 0xFFFF6B8A, v => this.eraserBarTap(v)),
       this.dockIcon('ic_insert', '전체 화면 삽입', 0xFFFF2D55, v => this.showInsertMenu(v)),
       this.dockIcon('ic_text', '전체 화면 타이핑', 0xFF34C759, () => this.toggleTyping()),
       this.dockIcon('ic_lasso', '전체 화면 올가미', 0xFFAF52DE, () => this.toggleLasso()),
@@ -652,7 +660,9 @@ const methods = {
   },
   updateWriteStrip() {
     const show = !!this.writeMode && this.writeStripShown();
-    this.writeBar.parentElement.style.display = show ? '' : 'none';
+    const wrap = this.stripBox.parentElement, was = wrap.style.display !== 'none';
+    wrap.style.display = show ? '' : 'none';
+    if (show && !was) this.applyFloatPos(this.stripBox, 'strip');
     this.root.classList.toggle('m-strip-on', show);
   },
   /** Writing-mode button: starts writing; pressed again while writing it shows / hides the tool strip. */
@@ -675,6 +685,50 @@ const methods = {
     if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
     if (!this.writeMode) { this.setWriteMode(true); return; }
     if (!this.highlightMode && (this.inkMode === 1 || this.inkMode === 3)) this.showPenMenu(anchor); else this.setInkMode(1);
+  },
+  /** Bottom-bar eraser: starts writing with the eraser; pressed again it opens the eraser range menu. */
+  eraserBarTap(anchor) {
+    if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
+    if (!this.writeMode) this.setWriteMode(true);
+    this.eraserTap(anchor);
+  },
+  /** Width step (0-3) shared by the pen and the highlighter: whichever of the two is in use is changed. */
+  sharedWidthIndex() {
+    if (!this.highlightMode) return this.widthIndex();
+    let best = 0;
+    for (let i = 1; i < HL_THICK.length; i++) if (Math.abs(HL_THICK[i] - this.highlightThick) < Math.abs(HL_THICK[best] - this.highlightThick)) best = i;
+    return best;
+  },
+  setSharedWidth(i) {
+    if (this.highlightMode) { this.highlightThick = HL_THICK[i]; this.applyHighlightStyle(); }
+    else { this.inkWidth = INK_WIDTHS[i]; this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools(); }
+  },
+  /** The width and colour rows under the pen strip: one set of controls for the pen and the highlighter (the palette follows the tool in use). */
+  updateInkOptions() {
+    const box = this.inkOptions; if (!box) return;
+    const hl = !!this.highlightMode, pen = !hl && (this.inkMode === 1 || this.inkMode === 3) && !!this.writeMode, kind = hl ? 2 : pen ? 1 : 0;
+    if (kind === this._inkOptionsKind) return;
+    this._inkOptionsKind = kind; box.replaceChildren();
+    if (kind === 0) { box.style.display = 'none'; return; }
+    box.append(iconSegView(WIDTH_ICONS.map((ic, i) => ({ icon: ic, label: '굵기 · ' + WIDTH_NAMES[i], draw: (g, w, hh) => {
+      g.strokeStyle = '#1C1C1E'; g.lineCap = 'round'; g.lineWidth = 1.2 + i * 1.9; g.beginPath(); g.moveTo(w * .22, hh / 2); g.lineTo(w * .78, hh / 2); g.stroke();
+    } })), () => this.sharedWidthIndex(), i => this.setSharedWidth(i), 'ink_widths'));
+    if (kind === 1) {
+      const known = INK_COLORS.concat(INK_COLORS2);
+      const pickInk = c => {
+        this.inkColor = ((this.inkColor & 0xFF000000) | (c & 0xFFFFFF)) | 0;
+        this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools(); this.updateInkButton(); row1.refresh(); row2.refresh();
+      };
+      const row1 = swatchesView(INK_COLORS, () => this.inkColor | 0xFF000000, pickInk, 22, 0, known);
+      const row2 = swatchesView(INK_COLORS2, () => this.inkColor | 0xFF000000, pickInk, 22, 1, known);
+      box.append(row1, row2);
+    } else {
+      box.append(swatchesView(HIGHLIGHT_COLORS, () => (this.selectedColor & 0xFFFFFF) | 0x66000000, c => {
+        this.selectedColor = ((((this.selectedColor >>> 24) & 255) << 24) | (c & 0xFFFFFF)) | 0;
+        this.pageView.setHighlightMode(this.highlightMode, this.selectedColor); this.syncOtherTools(); this.updateInkButton();
+      }, 30, 2, HIGHLIGHT_COLORS));
+    }
+    box.style.display = '';
   },
   eraserTap(anchor) {
     if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
@@ -744,12 +798,6 @@ const methods = {
   showPenMenu(anchor) {
     const box = h('div', { class: 'm-menubox', dataset: { tag: 'pen_menu' }, style: { padding: '4px 2px 0' } });
     const apply = () => { this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools(); this.updateInkButton(); };
-    // stroke width (Android v1.29.0 order: first row): four lines of growing thickness
-    box.append(iconSegView(WIDTH_ICONS.map((ic, i) => ({ icon: ic, label: '굵기 · ' + WIDTH_NAMES[i], draw: (g, w, hh) => {
-      g.strokeStyle = '#1C1C1E'; g.lineCap = 'round'; g.lineWidth = 1.2 + i * 1.9; g.beginPath(); g.moveTo(w * .22, hh / 2); g.lineTo(w * .78, hh / 2); g.stroke();
-    } })), () => this.widthIndex(), i => {
-      this.inkWidth = INK_WIDTHS[i]; this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools();
-    }, 'pen_widths'));
     // pen type (second row): each cell shows a real sample stroke of ballpoint / pencil / fountain / brush / felt marker
     box.append(iconSegView(AnnotationPainter.PEN_NAMES.map((name, i) => ({ icon: PEN_ICONS[i] || 'ic_ink', label: name, draw: (g, w, hh) => {
       const s = new AnnotationStore.InkStroke(); s.pen = i; s.color = 0xFF1C1C1E | 0; s.width = i === 4 ? .07 : i === 3 ? .06 : .034;
@@ -759,11 +807,6 @@ const methods = {
     } })), () => this.inkPen, i => {
       this.inkPen = i; this.pageView.setInkPen(i); this.recentPrefs.putInt('ink_pen', i); this.syncOtherTools(); this.updateInkButton();
     }, 'pen_types'));
-    const known = INK_COLORS.concat(INK_COLORS2);
-    const pickInk = c => { this.inkColor = ((this.inkColor & 0xFF000000) | (c & 0xFFFFFF)) | 0; apply(); row1.refresh(); row2.refresh(); };
-    const row1 = swatchesView(INK_COLORS, () => this.inkColor | 0xFF000000, pickInk, 22, 0, known);
-    const row2 = swatchesView(INK_COLORS2, () => this.inkColor | 0xFF000000, pickInk, 22, 1, known);
-    box.append(row1, row2);
     box.append(opacityBar(() => (this.inkColor >>> 24) & 255, a => { this.inkColor = ((a << 24) | (this.inkColor & 0xFFFFFF)) | 0; apply(); }));
     // straight line / finger writing: icon toggles
     const opts = h('div', { class: 'm-iseg m-opts', dataset: { tag: 'pen_options' } });
@@ -782,11 +825,6 @@ const methods = {
       a = Math.max(26, Math.min(255, a | 0)); this.selectedColor = ((a << 24) | (this.selectedColor & 0xFFFFFF)) | 0;
       this.recentPrefs.putInt('highlight_alpha', a); applyColor(); op.refresh(); presets.refresh();
     };
-    // swatches compare by colour only: the chosen transparency applies to every colour
-    const sw = swatchesView(HIGHLIGHT_COLORS, () => (this.selectedColor & 0xFFFFFF) | 0x66000000, c => {
-      this.selectedColor = ((alpha() << 24) | (c & 0xFFFFFF)) | 0; applyColor();
-    }, 30, 2, HIGHLIGHT_COLORS);
-    box.append(sw);
     // transparency (v3.10): slider + quick buttons, kept for the next highlights
     const op = opacityBar(alpha, setAlpha); op.dataset.tag = 'highlight_opacity'; box.append(op);
     const presets = h('div', { class: 'm-alpha-row', dataset: { tag: 'highlight_opacity_presets' } });
@@ -799,13 +837,6 @@ const methods = {
     });
     presets.refresh = () => chips.forEach(([c, a]) => { c.classList.toggle('on', Math.abs(a - alpha()) <= 2); c.firstChild.style.background = argb(((a << 24) | (this.selectedColor & 0xFFFFFF)) >>> 0); });
     presets.refresh(); box.append(presets);
-    sw.addEventListener('click', () => presets.refresh());
-    // thickness slider (Android v1.30.0): "굵기 N", 0.008 + v * 0.0024, 31 steps
-    const label = h('div', { class: 'm-oplabel', dataset: { tag: 'highlight_thick_label' } }, '굵기 ' + Math.round(this.highlightThick * 1000));
-    const bar = h('input', { type: 'range', min: 0, max: 30, step: 1, class: 'm-opbar', 'aria-label': '굵기', title: '굵기', dataset: { tag: 'highlight_thick' } });
-    bar.value = Math.round((this.highlightThick - .008) / .0024);
-    bar.addEventListener('input', () => { const t = .008 + (+bar.value) * .0024; label.textContent = '굵기 ' + Math.round(t * 1000); this.highlightThick = t; this.applyHighlightStyle(); });
-    box.append(h('div', { class: 'm-opacity' }, label, bar));
     AnchoredMenu.show(anchor, true, [Row.custom(box), Row.divider(),
       new Row('직선', 'ic_line', () => { this.highlightFree = false; this.applyHighlightStyle(); }).selected(!this.highlightFree).tint(hlTint),
       new Row('자유형', 'ic_ink', () => { this.highlightFree = true; this.applyHighlightStyle(); }).selected(this.highlightFree).tint(hlTint)], null);
@@ -1411,6 +1442,8 @@ const methods = {
     this.paintTool(this.penButton, pen, this.soft(penColor), penColor);
     this.paintTool(this.hlButton, hl, this.soft(hlColor), hlColor);
     this.paintTool(this.eraserButton, eraser, 0xFFFFE3E8, 0xFFFF3B30);
+    this.paintTool(this.eraserBarButton, eraser && !!this.writeMode, 0xFFFFE3E8, 0xFFFF3B30);
+    this.updateInkOptions();
     if (this.penButton) {
       const g = this.penButton.querySelector('.ico'), name = PEN_ICONS[this.inkPen] || 'ic_ink';
       if (g && g.dataset.icon !== name) { setIcon(g, name); g.dataset.icon = name; }
@@ -1656,7 +1689,7 @@ const methods = {
       return;
     }
     this.pageAnimating = true; this.carryZoom();
-    const style = this.splitSession ? 2 : this.pageAnimStyle();   // no curl / slide next to another pane
+    const style = this.pageAnimStyle();
     if (style === 2) {
       this.showPage(target).then(() => this.resetPageTransforms()).finally(() => { this.pageAnimating = false; });
       return;
@@ -1668,23 +1701,26 @@ const methods = {
     }
     slide();
   },
-  /** Slide + fade page turn (style 1, curl fallback, vertical mode). */
-  slidePage(direction, target) {
-    const offset = 26 * direction, vertical = this.verticalPageSwipe, moving = this.pageView;
-    const ease = 'cubic-bezier(.42,0,.58,1)', el = moving.el;
-    const finish = () => { this.resetPageTransforms(); this.pageAnimating = false; };
-    el.style.transition = `opacity 110ms ${ease}, transform 110ms ${ease}`;
-    el.style.opacity = '0.45'; el.style.transform = vertical ? `translateY(${-offset}px)` : `translateX(${-offset}px)`;
-    moving._animT = setTimeout(async () => {
-      try { await this.showPage(target); } catch (e) { /* ignore */ }
-      this.resetPageTransforms();
-      const pv = this.pageView.el;
-      pv.style.opacity = '0.45'; pv.style.transform = vertical ? `translateY(${offset}px)` : `translateX(${offset}px)`;
-      void pv.offsetWidth;
-      pv.style.transition = `opacity 170ms ${ease}, transform 170ms ${ease}`;
-      pv.style.opacity = '1'; pv.style.transform = 'translate(0,0)';
-      this.pageView._animT = setTimeout(finish, 175);
-    }, 112);
+  /** Slide page turn (style 1, curl fallback, vertical mode): the old page is pushed out and the new one pushed in, inside the page area (the whole reading area, or only the active split screen). */
+  async slidePage(direction, target) {
+    const papers = this.papers, viewport = this.viewportLayer, vertical = this.verticalPageSwipe;
+    const done = () => { this.resetPageTransforms(); this.pageAnimating = false; };
+    try {
+      if (!this.pagesCached(target)) await this.ensurePages(target);
+      const pane = this.splitSession ? this.firstPageView.el : null;
+      const rl = pane ? pane.offsetLeft : 0, rt = pane ? pane.offsetTop : 0, w = pane ? pane.clientWidth : papers.clientWidth, hh = pane ? pane.clientHeight : papers.clientHeight;
+      if (!papers || w < 8 || hh < 8) { await this.showPage(target); done(); return; }
+      const oldFull = this.snapshot(papers); this.showPage(target); this.resetPageTransforms(); const newFull = this.snapshot(papers);
+      const oldC = this.slice(oldFull, rl, rt, w, hh), newC = this.slice(newFull, rl, rt, w, hh);
+      const box = h('div', { class: 'm-slide', style: { left: (papers.offsetLeft + rl) + 'px', top: (papers.offsetTop + rt) + 'px', width: w + 'px', height: hh + 'px' } }, oldC, newC);
+      viewport.insertBefore(box, viewport.children[1] || null);
+      const span = vertical ? hh : w, axis = vertical ? 'translateY' : 'translateX', ease = 'cubic-bezier(.2,.7,.2,1)', dur = 260;
+      const fin = () => { box.remove(); done(); };
+      if (!newC.animate) { fin(); return; }
+      newC.animate([{ transform: `${axis}(${direction * span}px)` }, { transform: `${axis}(0px)` }], { duration: dur, easing: ease, fill: 'both' });
+      const out = oldC.animate([{ transform: `${axis}(0px)` }, { transform: `${axis}(${-direction * span}px)` }], { duration: dur, easing: ease, fill: 'both' });
+      out.onfinish = fin; setTimeout(() => { if (box.isConnected) fin(); }, dur + 150);
+    } catch (e) { try { await this.showPage(target); } catch (e2) { /* ignore */ } done(); }
   },
   /** Snapshot of the papers area (both page views composed) at device resolution; background black in dark mode. */
   snapshot(papers) {

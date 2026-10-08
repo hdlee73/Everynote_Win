@@ -41,7 +41,7 @@ export class MainActivity {
     this.studyVisible = false; this.basketOnly = false;
     this.searchHits = []; this.searchCurrent = -1; this.searchSession = 0; this.searchDone = 0; this.searchTotal = 0;
     this.searching = false; this.searchTruncated = false; this.searchPrecise = false; this.searchOwner = null;
-    this.lassoShape = 0; this.showAllThumbnails = false;
+    this.lassoShape = 0; this.showAllThumbnails = true;
     this.placementKind = ''; this.placementAsset = '';
     this.ocrGeneration = 0; this.thumbnailGeneration = 0;
     this.baseTint = new Map();           // ImageButton element -> tint colour

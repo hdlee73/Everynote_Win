@@ -27,7 +27,7 @@ check('eraser default is partial', await ev(() => app.eraserMode() === 1));
 // bottom bar
 const labels = await ev(() => [...document.querySelectorAll('[data-tag="read_bar"] > *')].map(e => e.getAttribute('aria-label') || e.title));
 console.log(labels.join(' | '));
-check('bar has 7 items after the page label, no outline', labels.length === 8 && !labels.some(l => /개요/.test(l)) && labels[0] === '페이지 이동', labels.join('|'));
+check('bar has 8 items after the page label (eraser next to 필기 모드), no outline', labels.length === 9 && labels[4] === '지우개' && !labels.some(l => /개요/.test(l)) && labels[0] === '페이지 이동', labels.join('|'));
 check('bar has layout button as 9th', await ev(() => !!document.querySelector('[data-tag="reading_toolbar"] > .m-barlayout')));
 await ev(() => document.querySelector('[data-tag="page_indicator"]').click()); await page.waitForTimeout(300);
 check('page button opens submenu with outline', await ev(() => /문서 개요/.test(document.body.innerText) && /마지막 페이지/.test(document.body.innerText)));
