@@ -93,7 +93,7 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
     }
     card.append(icons);
   }
-  let w = Math.min(screenW - 24, wide ? 268 : 240);
+  let w = Math.min(screenW - 24, rows.some(r => r.customEl && r.customEl.classList.contains('m-penpanel')) ? 312 : wide ? 268 : 240);
   let sideRight = true;
   if (beside && avoid) {   // a submenu opens right next to its parent, on whichever side has room; narrowed (rows ellipsize) when the window is tight
     const roomRight = screenW - avoid.right - 14, roomLeft = avoid.left - 14;
