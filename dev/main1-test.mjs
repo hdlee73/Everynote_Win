@@ -52,22 +52,23 @@ await page.evaluate(() => app.toggleBookmark()); await shot('05-bookmark');
 // ---- v1.27: reading bar, pen types / colour chips, unified selection menu
 const bars = await page.evaluate(() => ({ readHasText: !!app.readBar.querySelector('[aria-label="타이핑"]'), writeHasText: !!app.writeBar.querySelector('[aria-label="타이핑"]'),
   order: [...app.readBar.querySelectorAll('.m-tb')].map(b => b.getAttribute('aria-label')).join('|') }));
-check('typing button moved to reading bar next to pen', bars.readHasText && !bars.writeHasText && /필기 모드\|타이핑/.test(bars.order), bars.order);
+check('typing button moved to reading bar next to pen', bars.readHasText && !bars.writeHasText && /필기 모드\|지우개\|타이핑/.test(bars.order), bars.order);
 await page.evaluate(() => { app.setWriteMode(true); app.showPenMenu(app.penButton); }); await page.waitForTimeout(300);
 const pen = await page.evaluate(() => ({ chips: [...document.querySelectorAll('.amenu .m-iseg[data-tag^="pen_"]:not(.m-opts)')].map(r => [...r.children].map(c => c.getAttribute('aria-label')).join(',')),
   texts: [...document.querySelectorAll('.amenu .m-iseg .m-ibtn')].map(b => b.textContent.trim()).join(''), titles: [...document.querySelectorAll('.amenu .m-iseg .m-ibtn')].every(b => b.title && (b.querySelector('svg') || b.querySelector('canvas.m-pensample'))),
   samples: document.querySelectorAll('.amenu .m-pensample').length,
   opts: [...document.querySelectorAll('.amenu .m-opts .m-ibtn')].map(b => b.getAttribute('aria-label')).join('|'), rows: document.querySelectorAll('.amenu .amenu-row').length,
   dots: document.querySelectorAll('.amenu .m-sw .dot').length, more: document.querySelectorAll('.amenu [data-tag="color_more"]').length, op: !!document.querySelector('.amenu [data-tag="opacity_bar"]') }));
-check('pen menu (v1.29): widths row first, then pen types; both are icon / sample-stroke buttons (no text, tooltips)', pen.chips.length === 2 && pen.chips[1] === '볼펜,연필,만년필,붓,사인펜' && pen.chips[0] === '굵기 · 얇게,굵기 · 보통,굵기 · 굵게,굵기 · 최대' && pen.texts === '' && pen.titles && pen.samples === 9, JSON.stringify(pen));
+check('pen menu (v3.19): only the pen types row is left (width and colour moved to the strip); icon / sample-stroke buttons (no text, tooltips)', pen.chips.length === 1 && pen.chips[0] === '볼펜,연필,만년필,붓,사인펜' && pen.texts === '' && pen.titles && pen.samples === 5, JSON.stringify(pen));
 check('pen menu: 직선 + 손가락 필기 are icon toggles; no text rows left', /^직선.*\|손가락 필기$/.test(pen.opts) && pen.rows === 0, pen.opts + ' rows=' + pen.rows);
-check('pen menu: 2 swatch rows (8+8+rainbow chip) + opacity bar', pen.dots === 17 && pen.more === 1 && pen.op, JSON.stringify(pen));
+check('pen menu: no swatches or width rows any more, opacity bar stays', pen.dots === 0 && pen.more === 0 && pen.op, JSON.stringify(pen));
+check('strip options row (pen): 4 width icons + 2 swatch rows (8+8+rainbow chip)', await page.evaluate(() => { const o = document.querySelector('[data-tag="ink_options"]'); return o.style.display !== 'none' && o.querySelectorAll('[data-tag="ink_widths"] .m-ibtn').length === 4 && o.querySelectorAll('.m-sw .dot').length === 17 && o.querySelectorAll('[data-tag="color_more"]').length === 1; }));
 await shot('07-pen-menu');
 await page.locator('.amenu [data-tag="pen_types"] .m-ibtn').nth(3).click();
 check('pen type 붓 -> inkPen 3 + pref + pageView', await page.evaluate(() => app.inkPen === 3 && app.pageView.inkPen === 3 && app.recentPrefs.getInt('ink_pen', 0) === 3));
 await page.evaluate(() => { const b = document.querySelector('.amenu [data-tag="opacity_bar"]'); b.value = 40; b.dispatchEvent(new Event('input', { bubbles: true })); });
 check('opacity 40% -> alpha 102 and colour kept', await page.evaluate(() => (app.inkColor >>> 24) === 102 && (app.inkColor & 0xFFFFFF) === 0x1C1C1E), await page.evaluate(() => (app.inkColor >>> 0).toString(16)));
-check('width icon -> inkWidth', await (async () => { await page.locator('.amenu [data-tag="pen_widths"] .m-ibtn').nth(2).click(); return page.evaluate(() => Math.abs(app.inkWidth - 0.0065) < 1e-9 && app.pageView.inkWidth === app.inkWidth); })());
+check('width icon -> inkWidth', await (async () => { await page.evaluate(() => document.querySelectorAll('[data-tag="ink_options"] [data-tag="ink_widths"] .m-ibtn')[2].click()); return page.evaluate(() => Math.abs(app.inkWidth - 0.0065) < 1e-9 && app.pageView.inkWidth === app.inkWidth); })());
 check('pen button shows the chosen pen icon', await page.evaluate(() => app.penButton.querySelector('.ico').dataset.icon === 'ic_pen_brush'));
 await page.locator('.amenu [data-tag="pen_line"]').click();
 check('straight line toggle -> inkMode 3 (menu stays open) and back', await page.evaluate(() => app.inkMode === 3) && (await page.locator('.amenu').count()) === 1 && (await page.locator('.amenu [data-tag="pen_line"]').getAttribute('aria-pressed')) === 'true');
@@ -75,25 +76,25 @@ await page.locator('.amenu [data-tag="pen_line"]').click();
 check('straight line toggle off -> pen', await page.evaluate(() => app.inkMode === 1));
 await page.locator('.amenu [data-tag="pen_finger"]').click();
 check('finger writing toggle', await page.evaluate(() => app.fingerInk === true)); await page.locator('.amenu [data-tag="pen_finger"]').click();
-await page.locator('.amenu .m-sw').nth(0).locator('.dot').nth(2).click();
+await page.evaluate(() => document.querySelectorAll('[data-tag="ink_options"] .m-sw')[0].querySelectorAll('.dot')[2].click());
 check('picking a preset keeps alpha', await page.evaluate(() => (app.inkColor >>> 24) === 102 && (app.inkColor & 0xFFFFFF) === 0x007AFF));
-await page.click('.amenu [data-tag="color_more"]'); await page.waitForSelector('[data-tag="color_picker"]'); await shot('08-colorpicker');
+await page.evaluate(() => document.querySelector('[data-tag="ink_options"] [data-tag="color_more"]').click()); await page.waitForSelector('[data-tag="color_picker"]'); await shot('08-colorpicker');
 await page.click('.ad-btn >> text=적용'); await page.waitForTimeout(300);
 check('rainbow chip opens ColorPicker (alpha kept for pen)', await page.evaluate(() => (app.inkColor >>> 24) === 102));
 await page.keyboard.press('Escape'); await page.mouse.click(5, 400); await page.waitForTimeout(200);
 await page.evaluate(() => { app.inkColor = 0xFF1C1C1E | 0; app.pageView.setInkTool(app.inkMode, app.inkColor, app.inkWidth); app.setInkMode(0); app.setWriteMode(false); });
 await page.evaluate(() => { app.toggleHighlight(); app.showHighlightMenu(app.hlButton); }); await page.waitForTimeout(250);
-check('highlight menu has rainbow chip', (await page.locator('.amenu [data-tag="color_more"]').count()) === 1);
-check('highlight menu: thickness slider (31 steps, label 굵기 N) + 직선/자유형 rows', await page.evaluate(() => { const b = document.querySelector('.amenu [data-tag="highlight_thick"]'), l = document.querySelector('.amenu [data-tag="highlight_thick_label"]'); return !!b && b.max === '30' && b.min === '0' && l.textContent === '굵기 22' && b.value === '6'; }));
+check('highlight uses the same strip options row: rainbow chip + 4 widths, none left in the menu', (await page.locator('[data-tag="ink_options"] [data-tag="color_more"]').count()) === 1 && (await page.locator('[data-tag="ink_options"] [data-tag="ink_widths"] .m-ibtn').count()) === 4 && (await page.locator('.amenu [data-tag="color_more"]').count()) === 0);
+check('highlight menu: no thickness slider any more; shared width step is 보통', await page.evaluate(() => !document.querySelector('.amenu [data-tag="highlight_thick"]') && app.sharedWidthIndex() === 1));
 check('highlight menu: rows 직선 (selected) and 자유형', await page.evaluate(() => { const t = [...document.querySelectorAll('.amenu .amenu-row, .amenu [role="menuitem"], .amenu div')].map(x => x.textContent.trim()); return t.includes('직선') && t.includes('자유형'); }));
-await page.evaluate(() => { const b = document.querySelector('.amenu [data-tag="highlight_thick"]'); b.value = '30'; b.dispatchEvent(new Event('input', { bubbles: true })); });
-check('thickness slider -> 굵기 80, pageView style updated', await page.evaluate(() => document.querySelector('.amenu [data-tag="highlight_thick_label"]').textContent === '굵기 80' && Math.abs(app.pageView.highlightThick - 0.08) < 1e-9 && Math.abs(app.highlightThick - 0.08) < 1e-9));
+await page.evaluate(() => document.querySelectorAll('[data-tag="ink_options"] [data-tag="ink_widths"] .m-ibtn')[3].click());
+check('last width step -> highlighter 굵기 50, pageView style updated', await page.evaluate(() => Math.abs(app.pageView.highlightThick - 0.05) < 1e-9 && Math.abs(app.highlightThick - 0.05) < 1e-9));
 await shot('09b-highlight-menu-thick');
 await page.locator('.amenu >> text=자유형').first().click(); await page.waitForTimeout(200);
-check('자유형 row -> freehand on pageView and app', await page.evaluate(() => app.highlightFree === true && app.pageView.highlightFree === true && app.pageView.highlightThick > .07));
+check('자유형 row -> freehand on pageView and app', await page.evaluate(() => app.highlightFree === true && app.pageView.highlightFree === true && app.pageView.highlightThick > .04));
 check('toast says "원하는 모양대로 그리세요" in freehand mode', await page.evaluate(() => { app.toggleHighlight(); app.toggleHighlight(); return true; }) && await page.evaluate(() => [...document.querySelectorAll('body *')].some(e => e.children.length === 0 && e.textContent === '원하는 모양대로 그리세요')));
 await page.evaluate(() => { app.showHighlightMenu(app.hlButton); }); await page.waitForTimeout(250); await shot('09c-highlight-menu-free');
-check('menu reopens with 자유형 selected and label 굵기 80', await page.evaluate(() => document.querySelector('.amenu [data-tag="highlight_thick_label"]').textContent === '굵기 80'));
+check('menu reopens and the width step stays at the last one', await page.evaluate(() => app.sharedWidthIndex() === 3));
 await page.locator('.amenu >> text=직선').first().click(); await page.waitForTimeout(200);
 await page.evaluate(() => { app.highlightThick = 0.022; app.applyHighlightStyle(); });
 check('직선 row -> straight', await page.evaluate(() => app.highlightFree === false && app.pageView.highlightFree === false));
