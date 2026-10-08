@@ -71,7 +71,7 @@ const methods = {
     const two = this._twoPageBeforeSplit; this._twoPageBeforeSplit = false;
     if (two) { this.twoPage = true; setDisplay(this.secondPageView.el, true); }
     if (this.renderer != null) this.showPage(this.currentPage);
-    this.updateTabs(); this.updateFloaters();
+    this.updateTabs(); this.updateFloaters(); this.updateSplitArrows();
     toast('화면 나누기를 끝냈습니다');
   },
 
@@ -142,6 +142,7 @@ const methods = {
 
   /** Pane title chips (pick a document / swap / end) and the highlight of the active pane. */
   updateSplitUi() {
+    this.updateSplitArrows();
     if (!this.splitBar) return;
     const on = !!this.splitSession;
     this.splitBar.style.display = on ? 'flex' : 'none';
@@ -157,6 +158,14 @@ const methods = {
       chip.addEventListener('click', () => this.showPaneMenu(chip, p.view));
       this.splitBar.append(h('div', { class: 'm-panecell' }, chip));
     }
+  },
+
+  /** In split view the page-turn arrows sit on the left and right edge of the ACTIVE pane instead of the whole window. */
+  updateSplitArrows() {
+    const pv = this.previousOverlay, nx = this.nextOverlay, papers = this.papers; if (!pv || !nx || !papers) return;
+    if (!this.splitSession) { pv.style.left = ''; nx.style.right = ''; return; }
+    const pane = this.firstPageView.el, w = papers.clientWidth;
+    pv.style.left = (pane.offsetLeft + 8) + 'px'; nx.style.right = (w - pane.offsetLeft - pane.offsetWidth + 8) + 'px';
   },
 
   /** Document list for one pane + swap + end split. */
@@ -190,6 +199,7 @@ export function buildSplit(app, viewport) {
     if (!v.el.contains(e.target) || (e.type === 'pointerdown' && v._palmRejected(e))) return;
     app.activateSplitPane();
   };
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => app.updateSplitArrows()).observe(app.papers);
   app.papers.addEventListener('pointerdown', hook, true);
   app.papers.addEventListener('wheel', hook, true);
 }

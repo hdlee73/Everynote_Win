@@ -1552,7 +1552,8 @@ M.insertRows = function () {
 M.showInsertMenu = function (anchor) {
   if (!this.renderer) { toast('문서를 먼저 여세요'); return; }
   this.dropTarget = null;
-  AnchoredMenu.show(anchor, true, this.insertRows(), null);
+  const R = AnchoredMenu.Row;
+  AnchoredMenu.show(anchor, true, [new R('메모 추가', 'ic_note_add', () => this.toggleMemoMode()).tint('#FF9500').selected(!!this.memoMode), ...this.insertRows()], null);
 };
 /** Long press on empty paper: the same insert menu, and whatever is chosen is placed right there. */
 M.showInsertMenuAt = function (view, page, x, y, viewX, viewY) {
