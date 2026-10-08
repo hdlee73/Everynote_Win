@@ -29,9 +29,6 @@ const RAINBOW = 'conic-gradient(#FF3B30,#FFCC00,#34C759,#00C7BE,#007AFF,#AF52DE,
 const INK_WIDTHS = [0.0022, 0.004, 0.0065, 0.009];
 const HIGHLIGHT_COLORS = [0x66FFDE59, 0x6654C27A, 0x66FF6B9A, 0x66549CF5, 0x66B67CF2];
 const PEN_ICONS = ['ic_pen_ball', 'ic_pen_pencil', 'ic_pen_fountain', 'ic_pen_brush', 'ic_pen_marker'];
-const WIDTH_ICONS = ['ic_width_1', 'ic_width_2', 'ic_width_3', 'ic_width_4'];
-const WIDTH_NAMES = ['얇게', '보통', '굵게', '최대'];
-const HL_THICK = [0.012, 0.022, 0.034, 0.05];   // highlighter thickness for the shared width steps
 const ZOOM_STEP = 1.25;
 const PICTURE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
 const OFFICE_EXTS = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'hwp', 'hwpx', ...PICTURE_EXTS];
@@ -693,44 +690,8 @@ const methods = {
     if (!this.writeMode) this.setWriteMode(true);
     this.eraserTap(anchor);
   },
-  /** Width step (0-3) shared by the pen and the highlighter: whichever of the two is in use is changed. */
-  sharedWidthIndex() {
-    if (!this.highlightMode) return this.widthIndex();
-    let best = 0;
-    for (let i = 1; i < HL_THICK.length; i++) if (Math.abs(HL_THICK[i] - this.highlightThick) < Math.abs(HL_THICK[best] - this.highlightThick)) best = i;
-    return best;
-  },
-  setSharedWidth(i) {
-    if (this.highlightMode) { this.highlightThick = HL_THICK[i]; this.applyHighlightStyle(); }
-    else { this.inkWidth = INK_WIDTHS[i]; this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools(); }
-  },
-  /** The width and colour rows under the pen strip: one set of controls for the pen and the highlighter (the palette follows the tool in use). */
-  updateInkOptions() {
-    const box = this.inkOptions; if (!box) return;
-    const hl = !!this.highlightMode, pen = !hl && (this.inkMode === 1 || this.inkMode === 3) && !!this.writeMode, kind = hl ? 2 : pen ? 1 : 0;
-    if (kind === this._inkOptionsKind) return;
-    this._inkOptionsKind = kind; box.replaceChildren();
-    if (kind === 0) { box.style.display = 'none'; return; }
-    box.append(iconSegView(WIDTH_ICONS.map((ic, i) => ({ icon: ic, label: '굵기 · ' + WIDTH_NAMES[i], draw: (g, w, hh) => {
-      g.strokeStyle = '#1C1C1E'; g.lineCap = 'round'; g.lineWidth = 1.2 + i * 1.9; g.beginPath(); g.moveTo(w * .22, hh / 2); g.lineTo(w * .78, hh / 2); g.stroke();
-    } })), () => this.sharedWidthIndex(), i => this.setSharedWidth(i), 'ink_widths'));
-    if (kind === 1) {
-      const known = INK_COLORS.concat(INK_COLORS2);
-      const pickInk = c => {
-        this.inkColor = ((this.inkColor & 0xFF000000) | (c & 0xFFFFFF)) | 0;
-        this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools(); this.updateInkButton(); row1.refresh(); row2.refresh();
-      };
-      const row1 = swatchesView(INK_COLORS, () => this.inkColor | 0xFF000000, pickInk, 22, 0, known);
-      const row2 = swatchesView(INK_COLORS2, () => this.inkColor | 0xFF000000, pickInk, 22, 1, known);
-      box.append(row1, row2);
-    } else {
-      box.append(swatchesView(HIGHLIGHT_COLORS, () => (this.selectedColor & 0xFFFFFF) | 0x66000000, c => {
-        this.selectedColor = ((((this.selectedColor >>> 24) & 255) << 24) | (c & 0xFFFFFF)) | 0;
-        this.pageView.setHighlightMode(this.highlightMode, this.selectedColor); this.syncOtherTools(); this.updateInkButton();
-      }, 30, 2, HIGHLIGHT_COLORS));
-    }
-    box.style.display = '';
-  },
+  /** The strip keeps only the tools; width, opacity, colour and pen type live in the pen panel (showPenMenu / showHighlightMenu). */
+  updateInkOptions() { if (this.inkOptions) this.inkOptions.style.display = 'none'; },
   eraserTap(anchor) {
     if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
     if (this.inkMode === 2 && !this.highlightMode) this.showEraserMenu(anchor); else this.setInkMode(2);
@@ -796,51 +757,108 @@ const methods = {
     for (let i = 0; i < INK_WIDTHS.length; i++) if (Math.abs(INK_WIDTHS[i] - this.inkWidth) < Math.abs(INK_WIDTHS[best] - this.inkWidth)) best = i;
     return best;
   },
-  showPenMenu(anchor) {
-    const box = h('div', { class: 'm-menubox', dataset: { tag: 'pen_menu' }, style: { padding: '4px 2px 0' } });
-    const apply = () => { this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools(); this.updateInkButton(); };
-    // pen type (second row): each cell shows a real sample stroke of ballpoint / pencil / fountain / brush / felt marker
-    box.append(iconSegView(AnnotationPainter.PEN_NAMES.map((name, i) => ({ icon: PEN_ICONS[i] || 'ic_ink', label: name, draw: (g, w, hh) => {
-      const s = new AnnotationStore.InkStroke(); s.pen = i; s.color = 0xFF1C1C1E | 0; s.width = i === 4 ? .07 : i === 3 ? .06 : .034;
-      for (let k = 0; k <= 12; k++) s.points.push(new AnnotationStore.InkPoint(.18 + .64 * k / 12, .5 + .2 * Math.sin(k / 12 * Math.PI * 2), k < 2 || k > 10 ? .5 : .9));
+  showPenMenu(anchor) { this.showPenPanel(anchor, false); },
+  showHighlightMenu(anchor) { this.showPenPanel(anchor, true); },
+  /**
+   * One tidy panel for the pen and for the highlighter (Samsung Notes style): live preview, pen type, thickness, opacity, colours
+   * and the on/off options. Replaces the width/colour row that used to sit under the tool strip.
+   */
+  showPenPanel(anchor, hl) {
+    const box = h('div', { class: 'm-menubox m-penpanel', dataset: { tag: hl ? 'highlight_menu' : 'pen_menu' } });
+    const PW = 700;   // page width the preview pretends to have, so thickness looks as it will on the page
+    const range = hl ? [0.01, 0.06] : [0.0015, 0.012];
+    const fracOf = v => range[0] + (range[1] - range[0]) * (v - 1) / 99;
+    const valueOf = f => Math.max(1, Math.min(100, Math.round(1 + (f - range[0]) / (range[1] - range[0]) * 99)));
+    const color = () => hl ? this.selectedColor | 0 : this.inkColor | 0;
+    const width = () => hl ? this.highlightThick : this.inkWidth;
+    const applyPen = () => { this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools(); this.updateInkButton(); preview.draw(); };
+    const applyHl = () => { this.pageView.setHighlightMode(this.highlightMode, this.selectedColor); this.syncOtherTools(); this.updateInkButton(); preview.draw(); };
+
+    // live preview of the stroke that the settings below will draw
+    const preview = h('canvas', { class: 'm-pp-preview', dataset: { tag: 'pen_preview' } });
+    preview.draw = () => {
+      const dpr = window.devicePixelRatio || 1, w = 276, hgt = 56;
+      preview.width = Math.round(w * dpr); preview.height = Math.round(hgt * dpr); preview.style.width = w + 'px'; preview.style.height = hgt + 'px';
+      const g = preview.getContext('2d'); if (!g) return; g.scale(dpr, dpr);
+      const s = new AnnotationStore.InkStroke(); s.pen = hl ? 0 : this.inkPen; s.color = color();
+      const px = hl ? width() * hgt * 3 : width() * PW;
+      for (let k = 0; k <= 24; k++) s.points.push(new AnnotationStore.InkPoint(.08 + .84 * k / 24, .5 + .24 * Math.sin(k / 24 * Math.PI * 2), k < 2 || k > 22 ? .5 : .9));
+      if (hl) {   // the highlighter is a flat band: draw it as one translucent line
+        g.save(); g.lineCap = 'butt'; g.lineWidth = Math.min(hgt - 6, Math.max(6, px)); g.strokeStyle = argb(s.color >>> 0);
+        g.beginPath(); g.moveTo(w * .08, hgt / 2); g.lineTo(w * .92, hgt / 2); g.stroke(); g.restore(); return;
+      }
+      s.width = px / w;
       const saveDark = AnnotationPainter.dark; AnnotationPainter.dark = false;
-      try { AnnotationPainter.stroke(g, new RectF(0, 0, w, hh), s); } finally { AnnotationPainter.dark = saveDark; }
-    } })), () => this.inkPen, i => {
-      this.inkPen = i; this.pageView.setInkPen(i); this.recentPrefs.putInt('ink_pen', i); this.syncOtherTools(); this.updateInkButton();
-    }, 'pen_types'));
-    box.append(opacityBar(() => (this.inkColor >>> 24) & 255, a => { this.inkColor = ((a << 24) | (this.inkColor & 0xFFFFFF)) | 0; apply(); }));
-    // straight line / finger writing: icon toggles
-    const opts = h('div', { class: 'm-iseg m-opts', dataset: { tag: 'pen_options' } });
-    const lineBtn = iconToggleView('ic_line', '직선 · 시작점에서 끝점까지', () => this.inkMode === 3, on => { this.setInkMode(on ? 3 : 1); }, 'pen_line');
-    const fingerBtn = iconToggleView('ic_touch', '손가락 필기', () => this.fingerInk, () => { this.toggleFingerInk(); }, 'pen_finger');
-    opts.append(lineBtn, fingerBtn);
-    box.append(opts);
-    AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
-  },
-  showHighlightMenu(anchor) {
-    const hlTint = '#' + ((this.selectedColor | 0) & 0xFFFFFF).toString(16).padStart(6, '0');
-    const box = h('div', { class: 'm-menubox', style: { padding: '6px 2px 0' } });
-    const alpha = () => (this.selectedColor >>> 24) & 255;
-    const applyColor = () => { this.pageView.setHighlightMode(this.highlightMode, this.selectedColor); this.syncOtherTools(); this.updateInkButton(); };
-    const setAlpha = a => {
-      a = Math.max(26, Math.min(255, a | 0)); this.selectedColor = ((a << 24) | (this.selectedColor & 0xFFFFFF)) | 0;
-      this.recentPrefs.putInt('highlight_alpha', a); applyColor(); op.refresh(); presets.refresh();
+      try { AnnotationPainter.stroke(g, new RectF(0, 0, w, hgt), s); } finally { AnnotationPainter.dark = saveDark; }
     };
-    // transparency (v3.10): slider + quick buttons, kept for the next highlights
-    const op = opacityBar(alpha, setAlpha); op.dataset.tag = 'highlight_opacity'; box.append(op);
-    const presets = h('div', { class: 'm-alpha-row', dataset: { tag: 'highlight_opacity_presets' } });
-    const PRESETS = [[25, '연하게'], [40, '기본'], [60, '진하게'], [85, '아주 진하게']];
-    const chips = PRESETS.map(([pct, name]) => {
-      const a = Math.round(pct * 255 / 100);
-      const c = h('div', { class: 'm-alpha-chip', role: 'button', 'aria-label': '투명도 ' + name + ' ' + pct + '%', title: name + ' ' + pct + '%' },
-        h('span', { class: 'm-alpha-sample', style: { background: argb(((a << 24) | (this.selectedColor & 0xFFFFFF)) >>> 0) } }), h('span', null, pct + '%'));
-      c.addEventListener('click', () => setAlpha(a)); presets.append(c); return [c, a];
+    box.append(h('div', { class: 'm-pp-title' }, hl ? '형광펜' : '펜'), preview);
+
+    // pen type: sample stroke + name under it
+    if (!hl) {
+      const types = iconSegView(AnnotationPainter.PEN_NAMES.map((name, i) => ({ icon: PEN_ICONS[i] || 'ic_ink', label: name, draw: (g, w, hh) => {
+        const s = new AnnotationStore.InkStroke(); s.pen = i; s.color = 0xFF1C1C1E | 0; s.width = i === 4 ? .07 : i === 3 ? .06 : .034;
+        for (let k = 0; k <= 12; k++) s.points.push(new AnnotationStore.InkPoint(.18 + .64 * k / 12, .5 + .2 * Math.sin(k / 12 * Math.PI * 2), k < 2 || k > 10 ? .5 : .9));
+        const saveDark = AnnotationPainter.dark; AnnotationPainter.dark = false;
+        try { AnnotationPainter.stroke(g, new RectF(0, 0, w, hh), s); } finally { AnnotationPainter.dark = saveDark; }
+      } })), () => this.inkPen, i => {
+        this.inkPen = i; this.pageView.setInkPen(i); this.recentPrefs.putInt('ink_pen', i); this.syncOtherTools(); this.updateInkButton(); preview.draw();
+      }, 'pen_types');
+      const names = h('div', { class: 'm-pp-names' }, ...AnnotationPainter.PEN_NAMES.map(n => h('span', null, n)));
+      box.append(h('div', { class: 'm-pp-sec' }, '펜 종류'), types, names);
+    }
+
+    // thickness slider (1-100)
+    const wNum = h('span', { class: 'm-pp-val' });
+    const wBar = h('input', { type: 'range', min: 1, max: 100, step: 1, class: 'm-opbar', 'aria-label': '굵기', title: '굵기', dataset: { tag: 'pen_width' } });
+    const syncW = () => { const v = valueOf(width()); wBar.value = v; wNum.textContent = v; };
+    wBar.addEventListener('input', () => {
+      const f = fracOf(+wBar.value); wNum.textContent = wBar.value;
+      if (hl) { this.highlightThick = f; this.applyHighlightStyle(); preview.draw(); } else { this.inkWidth = f; applyPen(); }
     });
-    presets.refresh = () => chips.forEach(([c, a]) => { c.classList.toggle('on', Math.abs(a - alpha()) <= 2); c.firstChild.style.background = argb(((a << 24) | (this.selectedColor & 0xFFFFFF)) >>> 0); });
-    presets.refresh(); box.append(presets);
-    AnchoredMenu.show(anchor, true, [Row.custom(box), Row.divider(),
-      new Row('직선', 'ic_line', () => { this.highlightFree = false; this.applyHighlightStyle(); }).selected(!this.highlightFree).tint(hlTint),
-      new Row('자유형', 'ic_ink', () => { this.highlightFree = true; this.applyHighlightStyle(); }).selected(this.highlightFree).tint(hlTint)], null);
+    box.append(h('div', { class: 'm-pp-row' }, h('div', { class: 'm-pp-lbl' }, '굵기'), wBar, wNum));
+
+    // opacity slider (10-100 %)
+    const oNum = h('span', { class: 'm-pp-val' });
+    const oBar = h('input', { type: 'range', min: 10, max: 100, step: 1, class: 'm-opbar', 'aria-label': '투명도', title: '투명도', dataset: { tag: 'pen_opacity' } });
+    const alpha = () => (color() >>> 24) & 255;
+    const syncO = () => { const p = Math.max(10, Math.round(alpha() * 100 / 255)); oBar.value = p; oNum.textContent = p + '%'; };
+    oBar.addEventListener('input', () => {
+      const a = Math.max(hl ? 26 : 1, Math.round(+oBar.value * 255 / 100)); oNum.textContent = oBar.value + '%';
+      if (hl) { this.selectedColor = ((a << 24) | (this.selectedColor & 0xFFFFFF)) | 0; this.recentPrefs.putInt('highlight_alpha', a); applyHl(); }
+      else { this.inkColor = ((a << 24) | (this.inkColor & 0xFFFFFF)) | 0; applyPen(); }
+    });
+    box.append(h('div', { class: 'm-pp-row' }, h('div', { class: 'm-pp-lbl' }, '투명도'), oBar, oNum));
+
+    // colours
+    box.append(h('div', { class: 'm-pp-sec' }, '색상'));
+    if (!hl) {
+      const known = INK_COLORS.concat(INK_COLORS2);
+      const pick = c => { this.inkColor = ((this.inkColor & 0xFF000000) | (c & 0xFFFFFF)) | 0; applyPen(); r1.refresh(); r2.refresh(); };
+      const r1 = swatchesView(INK_COLORS, () => this.inkColor | 0xFF000000, pick, 24, 0, known);
+      const r2 = swatchesView(INK_COLORS2, () => this.inkColor | 0xFF000000, pick, 24, 1, known);
+      r1.dataset.tag = 'pen_colors'; box.append(r1, r2);
+    } else {
+      const known = HIGHLIGHT_COLORS;
+      const pick = c => {
+        const preset = known.some(k => sameColor(k, c));
+        this.selectedColor = (preset ? ((this.selectedColor >>> 24) << 24) | (c & 0xFFFFFF) : c) | 0; applyHl(); syncO(); row.refresh();
+      };
+      const row = swatchesView(HIGHLIGHT_COLORS, () => { for (const c of HIGHLIGHT_COLORS) if ((c & 0xFFFFFF) === (this.selectedColor & 0xFFFFFF)) return c; return this.selectedColor | 0; }, pick, 28, 2, known);
+      row.dataset.tag = 'pen_colors'; box.append(row);
+    }
+
+    // options
+    if (!hl) {
+      const opts = h('div', { class: 'm-iseg m-opts', dataset: { tag: 'pen_options' } });
+      opts.append(
+        iconToggleView('ic_line', '직선 · 시작점에서 끝점까지', () => this.inkMode === 3, on => { this.setInkMode(on ? 3 : 1); }, 'pen_line'),
+        iconToggleView('ic_touch', '손가락 필기', () => this.fingerInk, () => { this.toggleFingerInk(); }, 'pen_finger'));
+      box.append(h('div', { class: 'm-pp-sec' }, '옵션 · 직선 / 손가락 필기'), opts);
+    } else {
+      box.append(h('div', { class: 'm-pp-sec' }, '모양'), segmentedView(['직선', '자유형'], () => this.highlightFree ? 1 : 0, i => { this.highlightFree = i === 1; this.applyHighlightStyle(); }));
+    }
+    syncW(); syncO(); preview.draw();
+    AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
   },
   applyHighlightStyle() { this.pageView.setHighlightStyle(this.highlightFree, this.highlightThick); this.syncOtherTools(); },
 

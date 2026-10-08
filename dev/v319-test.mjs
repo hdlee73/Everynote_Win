@@ -28,14 +28,14 @@ check('page preview default is all pages', await ev(() => app.showAllThumbnails 
 await ev(() => document.querySelector('[data-tag="reading_toolbar"] [aria-label="지우개"]').click()); await page.waitForTimeout(250);
 check('bar eraser starts writing with the eraser (strip shown, no width/colour row)', await ev(() => app.writeMode && app.inkMode === 2 && app.inkOptions.style.display === 'none' && getComputedStyle(app.stripBox.parentElement).display !== 'none'));
 await ev(() => app.eraserButton.click()); await ev(() => app.penButton.click()); await page.waitForTimeout(250);
-check('pen: width + colour row appears under the strip', await ev(() => app.inkMode === 1 && app.inkOptions.style.display !== 'none' && app.inkOptions.querySelectorAll('.m-sw .dot').length === 17));
+check('pen: the strip has no width/colour row any more (v3.21 pen panel)', await ev(() => app.inkMode === 1 && app.inkOptions.style.display === 'none'));
+await ev(() => app.penButton.click()); await page.waitForTimeout(250);
+check('pen tapped again: panel with width slider + 17 colour dots', await ev(() => !!document.querySelector('.amenu [data-tag="pen_width"]') && document.querySelectorAll('.amenu .m-sw .dot').length === 17));
 await page.keyboard.press('Escape'); await page.mouse.click(5, 5);
-await ev(() => document.querySelectorAll('[data-tag="ink_options"] [data-tag="ink_widths"] .m-ibtn')[3].click());
-check('shared width: pen gets step 4', await ev(() => app.inkWidth === 0.009));
 await ev(() => app.hlButton.click()); await page.waitForTimeout(200);
-check('highlighter shows its palette (5 + chip) in the same row', await ev(() => app.highlightMode && app.inkOptions.querySelectorAll('.m-sw .dot').length === 6));
-await ev(() => document.querySelectorAll('[data-tag="ink_options"] [data-tag="ink_widths"] .m-ibtn')[0].click());
-check('shared width: highlighter gets step 1, pen width untouched', await ev(() => app.highlightThick === 0.012 && app.inkWidth === 0.009));
+await ev(() => app.hlButton.click()); await page.waitForTimeout(250);
+check('highlighter: second tap shows its panel (5 colours + chip)', await ev(() => app.highlightMode && document.querySelectorAll('.amenu .m-sw .dot').length === 6));
+await page.keyboard.press('Escape'); await page.mouse.click(5, 5);
 // floating strip: drag the grip
 await ev(() => app.penButton.click()); await page.waitForTimeout(200);
 const gb = await ev(() => app.stripGrip.getBoundingClientRect().toJSON());
