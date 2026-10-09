@@ -71,6 +71,13 @@ function penSample(draw) {
   const g = c.getContext('2d'); if (g) { g.scale(dpr, dpr); draw(g, w, hgt); }
   return c;
 }
+/** Fills stroke s with a smooth S-curve from x0 to x1 (n points, eased pressure) so previews and pen icons are drawn without visible corners. amp 0 = straight. */
+function sampleCurve(s, x0, x1, amp, n = 72) {
+  for (let k = 0; k <= n; k++) {
+    const t = k / n, ease = Math.sin(Math.PI * t);
+    s.points.push(new AnnotationStore.InkPoint(x0 + (x1 - x0) * t, .5 + amp * Math.sin(t * Math.PI * 2), .35 + .55 * ease));
+  }
+}
 /** iconSegmented(items=[{icon,label}], current, choose): row of round icon buttons (Samsung Notes style) with tooltips + aria-labels. */
 function iconSegView(items, current, choose, tag = '') {
   const row = h('div', { class: 'm-iseg', dataset: tag ? { tag } : {} });
@@ -269,11 +276,12 @@ const methods = {
     this.libraryFolder = this.library.root;
     this.lassoShape = p.getInt('lasso_shape', PdfPageView.LASSO_FREE);
     this.showAllThumbnails = p.getBoolean('thumb_all', true);
+    this.thumbInkOnly = p.getBoolean('thumb_ink', false);
     this.buildUi();
     this.pageView.setLassoShape(this.lassoShape);
     this.applyEraserRadius();
     this.applyDarkPage();
-    this.inkPen = p.getInt('ink_pen', 0);
+    this.inkPen = Math.min(4, p.getInt('ink_pen', 0));
     this.pageView.setInkPen(this.inkPen);
     this.pageView.setFingerInk(this.fingerInk);
     this.pageView.setPageSwipeEnabled(this.swipeEnabled);
@@ -300,7 +308,7 @@ const methods = {
     window.addEventListener('keydown', e => this.onKeyDown(e));
     window.addEventListener('focus', () => this.onResume());
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.onResume(); });
-    window.addEventListener('resize', () => { try { this.layoutStudyPanel(); } catch (err) { /* part 2 */ } });
+    window.addEventListener('resize', () => { try { this.layoutStudyPanel(); } catch (err) { /* part 2 */ } try { this.reclampFloaters(); } catch (err) { /* not built yet */ } });
     document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && this.fullscreen && !host.native) this.toggleFullscreen(); });
     const hasFiles = e => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
     window.addEventListener('dragover', e => { if (hasFiles(e) && !e.defaultPrevented && this._droppableDocs(e.dataTransfer)) e.preventDefault(); });
@@ -496,7 +504,7 @@ const methods = {
     this.textButton = this.barIcon(readBar, 'ic_text', '타이핑', 0xFF34C759, () => this.toggleTyping());
     this.bookmarkButton = this.barIcon(readBar, 'ic_star_outline', '즐겨찾기', 0xFFF5A623, () => this.toggleBookmark());
     this.lassoButton = this.barIcon(readBar, 'ic_lasso', '올가미 선택', 0xFFAF52DE, () => this.toggleLasso());
-    this.insertButton = this.barIcon(readBar, 'ic_insert', '삽입 · 메모 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
+    this.insertButton = this.barIcon(readBar, 'ic_insert', '삽입 · 메모 하이라이트 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
     // pen tools float on the page as their own strip (can be kept visible or hidden while writing)
     this.penButton = this.barIcon(writeBar, 'ic_ink', '펜', 0xFF1C1C1E, v => this.penTap(v));
     this.hlButton = this.barIcon(writeBar, 'ic_highlight', '형광펜', 0xFFF5C400, v => this.highlightTap(v));
@@ -682,7 +690,7 @@ const methods = {
   penTap(anchor) {
     if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
     if (!this.writeMode) { this.setWriteMode(true); return; }
-    if (!this.highlightMode && (this.inkMode === 1 || this.inkMode === 3)) this.showPenMenu(anchor); else this.setInkMode(1);
+    if (!this.highlightMode && !this.highlighterMode && (this.inkMode === 1 || this.inkMode === 3)) this.showPenMenu(anchor); else this.setInkMode(1);
   },
   /** Bottom-bar eraser: starts writing with the eraser; pressed again it opens the eraser range menu. */
   eraserBarTap(anchor) {
@@ -748,31 +756,51 @@ const methods = {
         toast('이 페이지의 필기를 모두 지웠습니다');
       }).setNegativeButton('취소', null).show();
   },
+  /** Strip highlighter (형광펜) = part of the handwriting: first tap starts it, a second tap opens its panel. The text 하이라이트 tool lives in the 삽입 menu. */
   highlightTap(anchor) {
     if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
-    if (this.highlightMode) this.showHighlightMenu(anchor); else this.toggleHighlight();
+    if (!this.writeMode) this.setWriteMode(true);
+    if (this.highlighterMode && (this.inkMode === 1 || this.inkMode === 3)) this.showHighlightMenu(anchor); else this.setInkMode(this.hlStraight ? 3 : 1, true);
   },
+  /** The highlighter borrows the pen's slots (inkPen / inkColor / inkWidth) while it is active; the pen's own values wait in penStash. */
+  enterHighlighter() {
+    if (this.highlighterMode) return;
+    const p = this.recentPrefs;
+    this.penStash = { pen: this.inkPen, color: this.inkColor, width: this.inkWidth };
+    this.highlighterMode = true; this.inkPen = AnnotationPainter.HIGHLIGHTER;
+    this.inkColor = p.getInt('hl_ink_color', 0x66FFDE59) | 0; this.inkWidth = Math.max(.004, Math.min(.04, p.getFloat('hl_ink_width', .016)));
+    this.pageView.setInkPen(this.inkPen);
+  },
+  leaveHighlighter() {
+    if (!this.highlighterMode) return;
+    this.saveHighlighterPrefs();
+    const s = this.penStash || { pen: 0, color: this.inkColor, width: this.inkWidth };
+    this.highlighterMode = false; this.penStash = null; this.inkPen = s.pen; this.inkColor = s.color; this.inkWidth = s.width;
+    this.pageView.setInkPen(this.inkPen);
+  },
+  saveHighlighterPrefs() { if (this.highlighterMode) { this.recentPrefs.putInt('hl_ink_color', this.inkColor | 0); this.recentPrefs.putFloat('hl_ink_width', this.inkWidth); } },
+  /** The pen as the pen button shows it (the stashed one while the highlighter is active). */
+  penView() { return this.highlighterMode && this.penStash ? this.penStash : { pen: this.inkPen, color: this.inkColor, width: this.inkWidth }; },
+  hlInkView() { return this.highlighterMode ? { color: this.inkColor, width: this.inkWidth } : { color: this.recentPrefs.getInt('hl_ink_color', 0x66FFDE59) | 0, width: this.recentPrefs.getFloat('hl_ink_width', .016) }; },
   widthIndex() {
     let best = 0;
     for (let i = 0; i < INK_WIDTHS.length; i++) if (Math.abs(INK_WIDTHS[i] - this.inkWidth) < Math.abs(INK_WIDTHS[best] - this.inkWidth)) best = i;
     return best;
   },
   showPenMenu(anchor) { this.showPenPanel(anchor, false); },
+  /** Strip 형광펜 (ink highlighter): color / opacity / thickness + 직선 / 자유형. */
   showHighlightMenu(anchor) { this.showPenPanel(anchor, true); },
   /**
-   * One tidy panel for the pen and for the highlighter (Samsung Notes style): live preview, pen type, thickness, opacity, colours
-   * and the on/off options. Replaces the width/colour row that used to sit under the tool strip.
+   * One tidy panel for the pen and for the ink highlighter (Samsung Notes style): live preview, pen type, thickness, opacity, colours
+   * and the on/off options. While the highlighter is active inkColor / inkWidth hold its values (the pen's wait in penStash).
    */
   showPenPanel(anchor, hl) {
     const box = h('div', { class: 'm-menubox m-penpanel', dataset: { tag: hl ? 'highlight_menu' : 'pen_menu' } });
     const PW = 700;   // page width the preview pretends to have, so thickness looks as it will on the page
-    const range = hl ? [0.01, 0.06] : [0.0015, 0.012];
+    const range = hl ? [0.004, 0.04] : [0.0015, 0.012];
     const fracOf = v => range[0] + (range[1] - range[0]) * (v - 1) / 99;
     const valueOf = f => Math.max(1, Math.min(100, Math.round(1 + (f - range[0]) / (range[1] - range[0]) * 99)));
-    const color = () => hl ? this.selectedColor | 0 : this.inkColor | 0;
-    const width = () => hl ? this.highlightThick : this.inkWidth;
-    const applyPen = () => { this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.syncOtherTools(); this.updateInkButton(); preview.draw(); };
-    const applyHl = () => { this.pageView.setHighlightMode(this.highlightMode, this.selectedColor); this.syncOtherTools(); this.updateInkButton(); preview.draw(); };
+    const applyPen = () => { this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.saveHighlighterPrefs(); this.syncOtherTools(); this.updateInkButton(); preview.draw(); };
 
     // live preview of the stroke that the settings below will draw
     const preview = h('canvas', { class: 'm-pp-preview', dataset: { tag: 'pen_preview' } });
@@ -780,14 +808,8 @@ const methods = {
       const dpr = window.devicePixelRatio || 1, w = 276, hgt = 56;
       preview.width = Math.round(w * dpr); preview.height = Math.round(hgt * dpr); preview.style.width = w + 'px'; preview.style.height = hgt + 'px';
       const g = preview.getContext('2d'); if (!g) return; g.scale(dpr, dpr);
-      const s = new AnnotationStore.InkStroke(); s.pen = hl ? 0 : this.inkPen; s.color = color();
-      const px = hl ? width() * hgt * 3 : width() * PW;
-      for (let k = 0; k <= 24; k++) s.points.push(new AnnotationStore.InkPoint(.08 + .84 * k / 24, .5 + .24 * Math.sin(k / 24 * Math.PI * 2), k < 2 || k > 22 ? .5 : .9));
-      if (hl) {   // the highlighter is a flat band: draw it as one translucent line
-        g.save(); g.lineCap = 'butt'; g.lineWidth = Math.min(hgt - 6, Math.max(6, px)); g.strokeStyle = argb(s.color >>> 0);
-        g.beginPath(); g.moveTo(w * .08, hgt / 2); g.lineTo(w * .92, hgt / 2); g.stroke(); g.restore(); return;
-      }
-      s.width = px / w;
+      const s = new AnnotationStore.InkStroke(); s.pen = hl ? AnnotationPainter.HIGHLIGHTER : this.inkPen; s.color = this.inkColor | 0; s.width = this.inkWidth * PW / w;
+      sampleCurve(s, .08, .92, hl && this.inkMode === 3 ? 0 : .24, 72);
       const saveDark = AnnotationPainter.dark; AnnotationPainter.dark = false;
       try { AnnotationPainter.stroke(g, new RectF(0, 0, w, hgt), s); } finally { AnnotationPainter.dark = saveDark; }
     };
@@ -797,7 +819,7 @@ const methods = {
     if (!hl) {
       const types = iconSegView(AnnotationPainter.PEN_NAMES.map((name, i) => ({ icon: PEN_ICONS[i] || 'ic_ink', label: name, draw: (g, w, hh) => {
         const s = new AnnotationStore.InkStroke(); s.pen = i; s.color = 0xFF1C1C1E | 0; s.width = i === 4 ? .07 : i === 3 ? .06 : .034;
-        for (let k = 0; k <= 12; k++) s.points.push(new AnnotationStore.InkPoint(.18 + .64 * k / 12, .5 + .2 * Math.sin(k / 12 * Math.PI * 2), k < 2 || k > 10 ? .5 : .9));
+        sampleCurve(s, .16, .84, .22, 72);
         const saveDark = AnnotationPainter.dark; AnnotationPainter.dark = false;
         try { AnnotationPainter.stroke(g, new RectF(0, 0, w, hh), s); } finally { AnnotationPainter.dark = saveDark; }
       } })), () => this.inkPen, i => {
@@ -810,22 +832,18 @@ const methods = {
     // thickness slider (1-100)
     const wNum = h('span', { class: 'm-pp-val' });
     const wBar = h('input', { type: 'range', min: 1, max: 100, step: 1, class: 'm-opbar', 'aria-label': '굵기', title: '굵기', dataset: { tag: 'pen_width' } });
-    const syncW = () => { const v = valueOf(width()); wBar.value = v; wNum.textContent = v; };
-    wBar.addEventListener('input', () => {
-      const f = fracOf(+wBar.value); wNum.textContent = wBar.value;
-      if (hl) { this.highlightThick = f; this.applyHighlightStyle(); preview.draw(); } else { this.inkWidth = f; applyPen(); }
-    });
+    const syncW = () => { const v = valueOf(this.inkWidth); wBar.value = v; wNum.textContent = v; };
+    wBar.addEventListener('input', () => { this.inkWidth = fracOf(+wBar.value); wNum.textContent = wBar.value; applyPen(); });
     box.append(h('div', { class: 'm-pp-row' }, h('div', { class: 'm-pp-lbl' }, '굵기'), wBar, wNum));
 
     // opacity slider (10-100 %)
     const oNum = h('span', { class: 'm-pp-val' });
     const oBar = h('input', { type: 'range', min: 10, max: 100, step: 1, class: 'm-opbar', 'aria-label': '투명도', title: '투명도', dataset: { tag: 'pen_opacity' } });
-    const alpha = () => (color() >>> 24) & 255;
+    const alpha = () => (this.inkColor >>> 24) & 255;
     const syncO = () => { const p = Math.max(10, Math.round(alpha() * 100 / 255)); oBar.value = p; oNum.textContent = p + '%'; };
     oBar.addEventListener('input', () => {
       const a = Math.max(hl ? 26 : 1, Math.round(+oBar.value * 255 / 100)); oNum.textContent = oBar.value + '%';
-      if (hl) { this.selectedColor = ((a << 24) | (this.selectedColor & 0xFFFFFF)) | 0; this.recentPrefs.putInt('highlight_alpha', a); applyHl(); }
-      else { this.inkColor = ((a << 24) | (this.inkColor & 0xFFFFFF)) | 0; applyPen(); }
+      this.inkColor = ((a << 24) | (this.inkColor & 0xFFFFFF)) | 0; applyPen();
     });
     box.append(h('div', { class: 'm-pp-row' }, h('div', { class: 'm-pp-lbl' }, '투명도'), oBar, oNum));
 
@@ -841,9 +859,9 @@ const methods = {
       const known = HIGHLIGHT_COLORS;
       const pick = c => {
         const preset = known.some(k => sameColor(k, c));
-        this.selectedColor = (preset ? ((this.selectedColor >>> 24) << 24) | (c & 0xFFFFFF) : c) | 0; applyHl(); syncO(); row.refresh();
+        this.inkColor = (preset ? ((this.inkColor >>> 24) << 24) | (c & 0xFFFFFF) : c) | 0; applyPen(); syncO(); row.refresh();
       };
-      const row = swatchesView(HIGHLIGHT_COLORS, () => { for (const c of HIGHLIGHT_COLORS) if ((c & 0xFFFFFF) === (this.selectedColor & 0xFFFFFF)) return c; return this.selectedColor | 0; }, pick, 28, 2, known);
+      const row = swatchesView(HIGHLIGHT_COLORS, () => { for (const c of HIGHLIGHT_COLORS) if ((c & 0xFFFFFF) === (this.inkColor & 0xFFFFFF)) return c; return this.inkColor | 0; }, pick, 28, 2, known);
       row.dataset.tag = 'pen_colors'; box.append(row);
     }
 
@@ -855,12 +873,35 @@ const methods = {
         iconToggleView('ic_touch', '손가락 필기', () => this.fingerInk, () => { this.toggleFingerInk(); }, 'pen_finger'));
       box.append(h('div', { class: 'm-pp-sec' }, '옵션 · 직선 / 손가락 필기'), opts);
     } else {
-      box.append(h('div', { class: 'm-pp-sec' }, '모양'), segmentedView(['직선', '자유형'], () => this.highlightFree ? 1 : 0, i => { this.highlightFree = i === 1; this.applyHighlightStyle(); }));
+      box.append(h('div', { class: 'm-pp-sec' }, '모양 · 직선 / 자유형'), segmentedView(['직선', '자유형'], () => this.inkMode === 3 ? 0 : 1, i => { this.setInkMode(i === 0 ? 3 : 1, true); preview.draw(); }));
     }
     syncW(); syncO(); preview.draw();
     AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
   },
-  applyHighlightStyle() { this.pageView.setHighlightStyle(this.highlightFree, this.highlightThick); this.syncOtherTools(); },
+  /** 하이라이트 (text Mark tool) menu: a straight band only, so thickness is the only setting. */
+  showMarkHighlightMenu(anchor) {
+    const box = h('div', { class: 'm-menubox m-penpanel', dataset: { tag: 'mark_highlight_menu' } });
+    const range = [0.01, 0.06];
+    const fracOf = v => range[0] + (range[1] - range[0]) * (v - 1) / 99;
+    const valueOf = f => Math.max(1, Math.min(100, Math.round(1 + (f - range[0]) / (range[1] - range[0]) * 99)));
+    const preview = h('canvas', { class: 'm-pp-preview', dataset: { tag: 'mark_preview' } });
+    preview.draw = () => {
+      const dpr = window.devicePixelRatio || 1, w = 276, hgt = 56;
+      preview.width = Math.round(w * dpr); preview.height = Math.round(hgt * dpr); preview.style.width = w + 'px'; preview.style.height = hgt + 'px';
+      const g = preview.getContext('2d'); if (!g) return; g.scale(dpr, dpr);
+      g.fillStyle = argb(this.selectedColor >>> 0); const bh = Math.min(hgt - 6, Math.max(6, this.highlightThick * hgt * 3));
+      g.fillRect(w * .08, (hgt - bh) / 2, w * .84, bh);
+    };
+    const wNum = h('span', { class: 'm-pp-val' });
+    const wBar = h('input', { type: 'range', min: 1, max: 100, step: 1, class: 'm-opbar', 'aria-label': '굵기', title: '굵기', dataset: { tag: 'mark_width' } });
+    wBar.value = valueOf(this.highlightThick); wNum.textContent = wBar.value;
+    wBar.addEventListener('input', () => { this.highlightThick = fracOf(+wBar.value); wNum.textContent = wBar.value; this.applyHighlightStyle(); preview.draw(); });
+    box.append(h('div', { class: 'm-pp-title' }, '하이라이트'), preview, h('div', { class: 'm-pp-row' }, h('div', { class: 'm-pp-lbl' }, '굵기'), wBar, wNum),
+      h('div', { class: 'm-pp-sec' }, '문장을 따라 직선으로 드래그합니다. 색은 정해져 있고 굵기만 바꿀 수 있습니다.'));
+    preview.draw();
+    AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
+  },
+  applyHighlightStyle() { this.pageView.setHighlightStyle(false, this.highlightThick); this.syncOtherTools(); },
 
   // ============================================================ menus
   showViewMenu(anchor) {
@@ -1210,7 +1251,7 @@ const methods = {
     this.activeSession = s; this.renderer = s.renderer; this.documentUri = s.uri; this.documentTitle = s.title; this.store = s.store;
     this.titleView.textContent = this.documentTitle;
     this._textSelectWanted = false;
-    this.highlightMode = this.memoMode = this.outlineMode = false; this.inkMode = 0;
+    this.highlightMode = this.memoMode = this.outlineMode = false; this.inkMode = 0; this.leaveHighlighter();
     const pv = this.pageView;
     pv.setLassoMode(false); pv.stopTextSelection();
     pv.setHighlightMode(false, this.selectedColor); pv.setMemoMode(false); pv.setOutlineMode(false); pv.setInkTool(0, this.inkColor, this.inkWidth);
@@ -1411,13 +1452,13 @@ const methods = {
     if (this.renderer == null) return;
     this.highlightMode = !this.highlightMode; this.memoMode = this.outlineMode = false; this.stopInk(); this.updateToolStates();
     this.pageView.setMemoMode(false); this.pageView.setOutlineMode(false); this.pageView.setHighlightMode(this.highlightMode, this.selectedColor);
-    toast(this.highlightMode ? (this.highlightFree ? '원하는 모양대로 그리세요' : '문장을 따라 좌우로 드래그하세요') : '하이라이트를 종료했습니다');
+    toast(this.highlightMode ? '하이라이트: 문장을 따라 직선으로 드래그하세요' : '하이라이트를 종료했습니다');
   },
   toggleMemoMode() {
     this.placementKind = ''; if (this.renderer == null) return;
     this.memoMode = !this.memoMode; this.highlightMode = this.outlineMode = false; this.stopInk(); this.updateToolStates();
     this.pageView.setHighlightMode(false, this.selectedColor); this.pageView.setOutlineMode(false); this.pageView.setMemoMode(this.memoMode);
-    toast(this.memoMode ? '메모를 놓을 위치를 탭하세요' : '메모 추가를 종료했습니다');
+    toast(this.memoMode ? '메모를 놓을 위치를 탭하세요' : '메모를 종료했습니다');
   },
   toggleOutlineMode() {
     if (this.renderer == null) return;
@@ -1435,20 +1476,23 @@ const methods = {
   updateToolStates() {
     this.commitInlineText(); this.syncOtherTools(); this.updateInkButton();
     const typing = this.typingActive(), memo = this.memoMode && !typing;
-    this.paintTool(this.insertButton, memo, ACTIVE_BG, ACTIVE_FG);
+    this.paintTool(this.insertButton, memo || this.highlightMode, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.readButton, !this.writeMode, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.inkButton, !!this.writeMode, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.textButton, typing, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.lassoButton, this.pageView != null && this.pageView.isLassoMode(), ACTIVE_BG, ACTIVE_FG);
   },
-  stopInk() { this.pageView.setLassoMode(false); this.inkMode = 0; this.pageView.setInkTool(0, this.inkColor, this.inkWidth); this.updateInkButton(); },
-  setInkMode(mode) {
+  stopInk() { this.leaveHighlighter(); this.pageView.setLassoMode(false); this.inkMode = 0; this.pageView.setInkTool(0, this.inkColor, this.inkWidth); this.updateInkButton(); },
+  /** hl: the stroke is the ink highlighter (형광펜); only modes 1 (free) and 3 (straight) can be one. */
+  setInkMode(mode, hl = false) {
     this.placementKind = ''; if (this.renderer == null) return;
+    if (hl && (mode === 1 || mode === 3)) { this.enterHighlighter(); this.hlStraight = mode === 3; } else this.leaveHighlighter();
     this.pageView.setLassoMode(false); this.inkMode = mode; this.pageView.setDirectTextSelection(false); this._textSelectWanted = false;
     this.highlightMode = this.memoMode = this.outlineMode = false;
     this.pageView.setHighlightMode(false, this.selectedColor); this.pageView.setMemoMode(false); this.pageView.setOutlineMode(false);
     this.pageView.setInkTool(mode, this.inkColor, this.inkWidth); this.updateToolStates(); this.updateInkButton();
-    toast(mode === 3 ? '직선: 시작점에서 끝점까지 드래그하세요'
+    toast(hl ? (mode === 3 ? '형광펜 직선: 시작점에서 끝점까지 드래그하세요' : '형광펜: 필기하듯 자유롭게 칠하세요')
+      : mode === 3 ? '직선: 시작점에서 끝점까지 드래그하세요'
       : mode === 1 ? (this.fingerInk ? '손가락 또는 S펜으로 필기하세요' : 'S펜으로 필기하세요. 손가락 필기는 필기도구에서 켤 수 있습니다')
       : mode === 2 ? '지울 획을 터치하세요'
       : '읽기 모드 · 빠르게 스와이프하면 페이지를 넘깁니다');
@@ -1456,8 +1500,9 @@ const methods = {
   soft(color) { return ((color & 0xFFFFFF) | 0x26000000) >>> 0; },
   updateInkButton() {
     this.updateLassoBar();
-    const hl = this.highlightMode, eraser = this.inkMode === 2 && !hl, pen = !hl && (this.inkMode === 1 || this.inkMode === 3);
-    const penColor = (this.inkColor | 0xFF000000) >>> 0, hlColor = (this.selectedColor | 0xFF000000) >>> 0;
+    const mark = this.highlightMode, inkOn = this.inkMode === 1 || this.inkMode === 3;
+    const hl = !!this.highlighterMode && inkOn && !mark, eraser = this.inkMode === 2 && !mark, pen = !mark && !hl && inkOn;
+    const penColor = (this.penView().color | 0xFF000000) >>> 0, hlColor = (this.hlInkView().color | 0xFF000000) >>> 0;
     if (this.penButton) this.baseTint.set(this.penButton, penColor);
     if (this.hlButton) this.baseTint.set(this.hlButton, hlColor);
     this.paintTool(this.penButton, pen, this.soft(penColor), penColor);
@@ -1466,9 +1511,9 @@ const methods = {
     this.paintTool(this.eraserBarButton, eraser && !!this.writeMode, 0xFFFFE3E8, 0xFFFF3B30);
     this.updateInkOptions();
     if (this.penButton) {
-      const g = this.penButton.querySelector('.ico'), name = PEN_ICONS[this.inkPen] || 'ic_ink';
+      const g = this.penButton.querySelector('.ico'), name = PEN_ICONS[this.penView().pen] || 'ic_ink';
       if (g && g.dataset.icon !== name) { setIcon(g, name); g.dataset.icon = name; }
-      this.penButton.setAttribute('aria-label', '펜'); this.penButton.title = '펜 · ' + (AnnotationPainter.PEN_NAMES[this.inkPen] || '');
+      this.penButton.setAttribute('aria-label', '펜'); this.penButton.title = '펜 · ' + (AnnotationPainter.PEN_NAMES[this.penView().pen] || '');
     }
     if (this.hlButton) this.hlButton.title = '형광펜';
     if (this.eraserButton) this.eraserButton.title = '지우개';
@@ -1614,7 +1659,7 @@ const methods = {
     b.classList.toggle('rail-left', place === 'left'); b.classList.toggle('rail-right', place === 'right');
     this.barGrip.style.display = place === 'float' ? '' : 'none';
     if (f) { this.root.append(b); if (place === 'float') this.applyFloatPos(b, vert ? 'barv' : 'bar'); } else this.contentCol.append(b);
-    this.railMargin(); this.enforceChrome();
+    this.railMargin(); this.enforceChrome(); this.reclampFloaters();
   },
   railMargin() {
     const p = this.barPlace(), on = !this.fullscreen;
@@ -1622,10 +1667,23 @@ const methods = {
   },
   floatPos(key) { try { const v = JSON.parse(this.recentPrefs.getString(key + '_pos', '[0,0]')); return [+v[0] || 0, +v[1] || 0]; } catch (e) { return [0, 0]; } },
   moveFloating(el, dx, dy) {
-    const r = this.root.getBoundingClientRect(), cur = el.getBoundingClientRect(), t = (el.style.translate || '0px 0px').split(' ').map(parseFloat);
+    // the pen strip and the lasso bar live on the page: they stay inside the page area, and above the bottom menu (docked or floating)
+    const onPage = (el === this.stripBox || el === this.lassoBar) && this.viewportLayer;
+    const r = (onPage ? this.viewportLayer : this.root).getBoundingClientRect(), cur = el.getBoundingClientRect(), t = (el.style.translate || '0px 0px').split(' ').map(parseFloat);
     const baseL = cur.left - (t[0] || 0), baseT = cur.top - (t[1] || 0);
-    dx = Math.max(r.left - baseL, Math.min(dx, r.right - cur.width - baseL)); dy = Math.max(r.top - baseT, Math.min(dy, r.bottom - cur.height - baseT));
+    dx = Math.max(r.left - baseL, Math.min(dx, r.right - cur.width - baseL));
+    let bottom = r.bottom;
+    const bar = this.bottomBar;
+    if (onPage && bar && bar.classList.contains('float') && !bar.classList.contains('vert') && bar.isConnected && bar.style.display !== 'none') {
+      const b = bar.getBoundingClientRect(), x0 = baseL + dx;
+      if (b.width > 0 && x0 < b.right + 4 && x0 + cur.width > b.left - 4) bottom = Math.min(bottom, b.top - 6);
+    }
+    dy = Math.max(r.top - baseT, Math.min(dy, bottom - cur.height - baseT));
     el.style.translate = dx + 'px ' + dy + 'px'; return [dx, dy];
+  },
+  /** After the bottom menu moved / changed place or the window was resized: keep the floating pen strip and lasso bar clear of it. */
+  reclampFloaters() {
+    for (const [el, key] of [[this.stripBox, 'strip'], [this.lassoBar, 'lasso']]) if (el && el.offsetParent !== null) this.applyFloatPos(el, key);
   },
   applyFloatPos(el, key) { requestAnimationFrame(() => { const p = this.floatPos(key); this.moveFloating(el, p[0], p[1]); }); },
   makeGrip(target, key) {
@@ -1680,7 +1738,12 @@ const methods = {
   onMarkTapped(mark) { this.editMark(mark); },
   onPageSwipe(direction) { this.animatePage(direction); },
   onOutlinePointRequested(page, x, y) { this.promptOutline(page, x, y, ''); },
-  onInkChanged() { if (this.store != null) { this.store.save(); if (this.activeSession != null) { this.activeSession.redoStrokes.length = 0; this.activeSession.clearUndo = null; } } },
+  onInkChanged() { if (this.store != null) { this.store.save(); this.thumbInkRefresh(); if (this.activeSession != null) { this.activeSession.redoStrokes.length = 0; this.activeSession.clearUndo = null; } } },
+  /** The 필기 filter of the preview panel lists pages by their ink: refresh it (debounced) when the ink changes. */
+  thumbInkRefresh() {
+    if (!this.thumbInkOnly || !this.showAllThumbnails || !this.sidebarVisible || this.panelTab !== 1) return;
+    clearTimeout(this._thumbInkT); this._thumbInkT = setTimeout(() => { if (this.thumbInkOnly && this.sidebarVisible && this.panelTab === 1) this.rebuildThumbnails(); }, 600);
+  },
   onTextSelectionFinished(selection, anchorX, anchorY) { this.showTextSelectionPopup(selection, anchorX, anchorY); },
   onTranslationTapped(note) { this.editTranslation(note); },
   /** The page view's own delete (X) button removed `element` from the page: drop it from the store too (idempotent) and save. */

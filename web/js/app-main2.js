@@ -568,22 +568,28 @@ M.onLassoSelectionFinished = function () {
   const panel = h('div', { class: 'm2-lasso' });
   const preview = h('canvas', { class: 'm2-lasso-pv' });
   preview.width = capture.width; preview.height = capture.height; preview.getContext('2d').drawImage(capture, 0, 0);
-  panel.append(preview, h('div', { class: 'm2-lasso-hint' }, '선택 영역 · p.' + (capturedPage + 1)));
+  panel.append(preview, h('div', { class: 'm2-lasso-hint' }, '선택 영역 · ' + (capturedPage + 1) + '쪽'));
   const labels = ['이미지 복사', 'PNG 저장', '이미지 공유', '글자 복사', '다시 선택', '선택 종료'];
   const icons = ['ic_copy', 'ic_folder_open', 'ic_share', 'ic_scan', 'ic_lasso', 'ic_check'];
   let dialog;
-  const mk = this.menuTile.bind(this);
-  for (let row = 0; row < 3; row++) {
-    const group = h('div', { class: 'm2-mt-row' }); panel.append(group);
-    for (let col = 0; col < 2; col++) {
-      const index = row * 2 + col;
+  const tints = ['#007AFF', '#34C759', '#5856D6', '#30B0C7', '#AF52DE', '#8E8E93'];
+  // same look as the pen panel / m-* menus: soft rounded buttons, a tinted icon over a small label, two rows of three
+  const mk = (group, label, iconName, action, tint) => {
+    const t = h('button', { class: 'm2-ltile', type: 'button', 'aria-label': label, title: label }, icon(iconName, 22, tint), h('span', { class: 'm2-ltile-l' }, label));
+    t.addEventListener('click', () => action()); group.append(t);
+  };
+  panel.append(h('div', { class: 'm-pp-sec' }, '이 영역으로'));
+  for (let row = 0; row < 2; row++) {
+    const group = h('div', { class: 'm2-lgrid' }); panel.append(group);
+    for (let col = 0; col < 3; col++) {
+      const index = row * 3 + col;
       mk(group, labels[index], icons[index], () => {
         if (index < 3) { handedOff = true; dialog.dismiss(); this.writeCapture(capture, index, capturedTitle, capturedPage); }
         else if (index === 3) {
           if (selectedText === '') { toast('인식된 글자가 없습니다. 이미지 복사를 사용하거나 글자를 다시 인식하세요'); return; }
           this.copySelectedText(selectedText); dialog.dismiss();
         } else { dialog.dismiss(); if (index === 5) { this.setInkMode(0); this.updateToolStates(); } }
-      });
+      }, tints[index]);
     }
   }
   dialog = alertCard({
@@ -990,6 +996,7 @@ M.showPageMenu = function (page, anchor) {
     new R('이 페이지로 이동', 'ic_page', () => this.showPage(page)).tint('#30B0C7'),
     new R('뒤에 페이지 추가', 'ic_page_add', () => this.choosePageToInsert(page)).tint('#34C759'),
     new R('다른 형식으로 뒤에 추가', 'ic_page_add', () => this.chooseOtherPageFormat(page)).tint('#34C759'),
+    new R('이 페이지 필기·삽입 지우기', 'ic_eraser', () => this.confirmClearContent(page)).danger(),
     new R('이 페이지 삭제', 'ic_delete', () => this.confirmDeletePage(page)).danger()]);
 };
 /** Runs a file-level page edit, then re-opens the renderer and shifts the annotations to match. */
@@ -1553,7 +1560,10 @@ M.showInsertMenu = function (anchor) {
   if (!this.renderer) { toast('문서를 먼저 여세요'); return; }
   this.dropTarget = null;
   const R = AnchoredMenu.Row;
-  AnchoredMenu.show(anchor, true, [new R('메모 추가', 'ic_note_add', () => this.toggleMemoMode()).tint('#FF9500').selected(!!this.memoMode), ...this.insertRows()], null);
+  const rows = [new R('메모', 'ic_note_add', () => this.toggleMemoMode()).tint('#FF9500').selected(!!this.memoMode),
+    new R('하이라이트', 'ic_highlight', () => this.toggleHighlight()).tint('#F5C400').selected(!!this.highlightMode)];
+  if (this.highlightMode) rows.push(new R('하이라이트 굵기', 'ic_highlight', () => later(() => this.showMarkHighlightMenu(anchor))).tint('#F5C400'));
+  AnchoredMenu.show(anchor, true, [...rows, ...this.insertRows()], null);
 };
 /** Long press on empty paper: the same insert menu, and whatever is chosen is placed right there. */
 M.showInsertMenuAt = function (view, page, x, y, viewX, viewY) {
@@ -2032,8 +2042,8 @@ M.buildSidePanel = function () {
 M.sidePanelResized = function () { clearTimeout(this._thumbT); this._thumbT = setTimeout(() => { if (this.sidebarVisible && this.panelTab === 1 && this.rebuildThumbnails) this.rebuildThumbnails(); }, 120); };
 /** Same icon as the matching menu entry (a star while only the favourites are shown) + the word. */
 M.setSideTitle = function (tab) {
-  const star = tab === 1 && !this.showAllThumbnails;
-  this.sideTitle.replaceChildren(icon(star ? 'ic_star' : SIDE_ICONS[tab], 20, star ? '#F5A623' : SIDE_TINTS[tab]), h('span', { class: 'm2-side-label' }, SIDE_TITLES[tab]));
+  const star = tab === 1 && !this.showAllThumbnails, ink = tab === 1 && this.showAllThumbnails && this.thumbInkOnly;
+  this.sideTitle.replaceChildren(icon(star ? 'ic_star' : ink ? 'ic_ink' : SIDE_ICONS[tab], 20, star ? '#F5A623' : ink ? '#5856D6' : SIDE_TINTS[tab]), h('span', { class: 'm2-side-label' }, SIDE_TITLES[tab]));
 };
 /** The header never loses its title: narrow panels get smaller buttons and padding, the text shrinks to fit. */
 M.fitSideHead = function () {
@@ -2075,12 +2085,52 @@ M.closeSidePanel = function () {
 M.showThumbnailMenu = function (anchor) {
   const R = AnchoredMenu.Row;
   AnchoredMenu.show(anchor, false, [
-    new R('즐겨찾기 페이지만', 'ic_star', () => { this.showAllThumbnails = false; this.recentPrefs.putBoolean('thumb_all', false); this.selectPanelTab(1); }).tint('#F5A623').selected(!this.showAllThumbnails),
-    new R('전체 페이지', 'ic_thumbnails', () => { this.showAllThumbnails = true; this.recentPrefs.putBoolean('thumb_all', true); this.selectPanelTab(1); }).tint('#007AFF').selected(this.showAllThumbnails),
+    new R('즐겨찾기 페이지만', 'ic_star', () => this.setThumbFilter('fav')).tint('#F5A623').selected(!this.showAllThumbnails),
+    new R('전체 페이지', 'ic_thumbnails', () => this.setThumbFilter('all')).tint('#007AFF').selected(this.showAllThumbnails && !this.thumbInkOnly),
+    new R('필기 있는 페이지만', 'ic_ink', () => this.setThumbFilter('ink')).tint('#5856D6').selected(this.showAllThumbnails && !!this.thumbInkOnly),
     R.divider(),
     new R('페이지 추가', 'ic_page_add', () => this.chooseAddedPage()).tint('#34C759'),
     new R('다른 형식으로 페이지 추가', 'ic_page_add', () => this.chooseOtherPageFormat(!this.renderer ? 0 : this.renderer.pageCount - 1)).tint('#34C759'),
-    new R('페이지 삭제', 'ic_delete', () => this.confirmDeletePage(this.currentPage)).danger()], null);
+    new R('페이지 삭제', 'ic_delete', () => this.confirmDeletePage(this.currentPage)).danger(),
+    R.divider(),
+    new R('문서 전체 필기·삽입 지우기', 'ic_eraser', () => this.confirmClearContent(null)).danger()], null);
+};
+/** Preview filter: 'fav' = bookmarked pages, 'all' = every page, 'ink' = only pages with handwriting (pen, highlighter) or freehand marks. */
+M.setThumbFilter = function (which) {
+  this.showAllThumbnails = which !== 'fav'; this.thumbInkOnly = which === 'ink';
+  this.recentPrefs.putBoolean('thumb_all', this.showAllThumbnails); this.recentPrefs.putBoolean('thumb_ink', this.thumbInkOnly);
+  this.selectPanelTab(1);
+};
+M.pageHasInk = function (page, store = this.store) {
+  if (!store) return false;
+  return store.strokes.some(s => s.page === page) || store.marks.some(m => m.page === page && !m.noteOnly && m.path && m.path.length > 0);
+};
+/** Pages with ink, memos, highlights, translations or inserted items (recordings excluded) - what "지우기" would touch. */
+M.pageContentCount = function (page, store = this.store) {
+  if (!store) return 0;
+  const on = x => page == null || x.page === page;
+  return store.strokes.filter(on).length + store.marks.filter(on).length + store.elements.filter(e => on(e) && e.kind !== 'audio').length + store.translations.filter(on).length;
+};
+/** Removes ink strokes, 하이라이트·메모 marks, inserted elements (photos, shapes, tables, typed text, links ...) and translation notes of one page (page == null: the whole document) after a confirmation.
+ *  Voice recordings, bookmarks and outlines stay. There is no undo for this, so the dialog says so. */
+M.confirmClearContent = function (page) {
+  if (!this.renderer || !this.store) return;
+  const whole = page == null, store = this.store, session = this.activeSession;
+  if (this.pageContentCount(page, store) === 0) { toast(whole ? '지울 필기나 삽입 항목이 없습니다' : '이 페이지에는 지울 필기나 삽입 항목이 없습니다'); return; }
+  new AlertDialog.Builder().setTitle(whole ? '문서 전체 필기·삽입 지우기' : '이 페이지 필기·삽입 지우기')
+    .setMessage((whole ? '문서 전체의' : (page + 1) + '쪽의') + ' 필기, 형광펜, 하이라이트, 메모와 삽입한 항목(사진·도형·표·타이핑 등)을 모두 지웁니다.\n음성 녹음은 지워지지 않습니다. 되돌릴 수 없습니다. 계속할까요?')
+    .setPositiveButton('모두 지우기', () => {
+      if (this.store !== store) return;
+      const keep = (arr, drop) => { for (let i = arr.length - 1; i >= 0; i--) if (drop(arr[i])) arr.splice(i, 1); };   // in place: the page views share these arrays
+      const on = x => whole || x.page === page;
+      keep(store.strokes, on); keep(store.marks, on); keep(store.translations, on); keep(store.elements, e => on(e) && e.kind !== 'audio');
+      session.redoStrokes.length = 0; session.clearUndo = null;
+      for (const v of this.allPageViews()) { if (v.selectElement) v.selectElement(null); }
+      this.commitInlineText && this.commitInlineText();
+      store.save(); this.redrawPages(); this.rebuildThumbnails(); this.refreshStudyPanel && this.refreshStudyPanel();
+      if (this.sidebarVisible && this.panelTab === 4) this.rebuildInsertions();
+      toast(whole ? '문서 전체의 필기와 삽입 항목을 지웠습니다' : (page + 1) + '쪽의 필기와 삽입 항목을 지웠습니다');
+    }).setNegativeButton('취소', null).show();
 };
 /** Lets a list row be swiped away (either direction) to delete it. iOS Mail style (Android v1.32.0): a red area with a trash icon is revealed
  *  under the row; past the 40% line it turns darker and the icon grows. Taps and vertical scrolling keep working. */
@@ -2132,9 +2182,9 @@ M.rebuildOutlinePanel = function () { this.rebuildOutlineItems(); };
 /** Lists every highlight with a note and every sticky memo of the document in the 삽입 목록 tab (the outline tab keeps outlines only). */
 M.appendMarkList = function (list) {
   if (!this.store) return;
-  const listed = this.store.marks.filter(m => m.noteOnly || (m.note != null && m.note.trim() !== ''));
+  const listed = this.store.marks;   // memos and every 하이라이트 (with or without a note)
   if (listed.length === 0) return;
-  list.append(h('div', { class: 'm2-marks-h' }, '메모 ' + listed.length));
+  list.append(h('div', { class: 'm2-marks-h' }, '메모·하이라이트 ' + listed.length));
   const marks = [...listed].sort((a, b) => a.page - b.page || a.top - b.top);
   for (const mark of marks) {
     const row = h('div', { class: 'm2-mark', dataset: { tag: 'mark_item' }, role: 'button' });
@@ -2175,7 +2225,7 @@ M.thumbnailModeToggle = function () {
 };
 M.thumbnailPages = function () {
   const pages = []; const total = !this.renderer ? 0 : this.renderer.pageCount;
-  if (this.showAllThumbnails) { for (let i = 0; i < total; i++) pages.push(i); }
+  if (this.showAllThumbnails) { for (let i = 0; i < total; i++) if (!this.thumbInkOnly || this.pageHasInk(i)) pages.push(i); }
   else if (this.store) { for (const p of this.store.bookmarks) if (p != null && p >= 0 && p < total) pages.push(p); pages.sort((a, b) => a - b); }
   return pages;
 };
@@ -2198,7 +2248,7 @@ M.rebuildThumbnails = async function () {
   this.thumbnailList.textContent = '';
   if (!this.renderer) return;
   const pages = this.thumbnailPages();
-  if (pages.length === 0) { this.thumbnailList.append(h('div', { class: 'm2-empty', dataset: { tag: 'thumb_empty' } }, '즐겨찾기한 페이지가 없습니다.\n\n아래쪽 ★를 누르면\n이곳에 미리보기가 나타납니다.')); return; }
+  if (pages.length === 0) { this.thumbnailList.append(h('div', { class: 'm2-empty', dataset: { tag: 'thumb_empty' } }, this.thumbInkOnly && this.showAllThumbnails ? '필기한 페이지가 없습니다.\n\n펜이나 형광펜으로 쓰면\n이곳에 미리보기가 나타납니다.' : '즐겨찾기한 페이지가 없습니다.\n\n아래쪽 ★를 누르면\n이곳에 미리보기가 나타납니다.')); return; }
   const aspect = await this.thumbnailAspect();
   if (generation !== this.thumbnailGeneration) return;
   const pw = this.sidePanelWidth() - 60, ph = Math.round(pw * aspect);
@@ -2485,7 +2535,7 @@ export function initMain2(app) {
   app.studyPanel = null; app.studyRows = null; app.studyHeading = null;
   app.sidePanel = null; app.searchPanel = null; app.searchInput = null; app.searchStatus = null; app.searchList = null; app.searchScroll = null;
   app.outlineList = null; app.recordingList = null; app.insertList = null; app.sideTabs = []; app._thumbAspectCache = null;
-  app.showAllThumbnails = app.recentPrefs.getBoolean('thumb_all', true);
+  app.showAllThumbnails = app.recentPrefs.getBoolean('thumb_all', true); app.thumbInkOnly = app.recentPrefs.getBoolean('thumb_ink', false);
   document.addEventListener('paste', e => app.onPasteEvent(e));
   window.addEventListener('resize', () => {
     if (app.studySplit) { const wide = window.innerWidth >= 600; app.studySplit.style.flexDirection = wide ? 'row' : 'column'; if (app.applyStudySize) app.applyStudySize(); }

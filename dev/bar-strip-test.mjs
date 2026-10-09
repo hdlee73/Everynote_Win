@@ -42,7 +42,7 @@ check('second tap hides strip, stays in write mode, remembered', !(await stripVi
 await ev(() => document.querySelector('[aria-label="필기 모드"]').click()); await page.waitForTimeout(200);
 check('third tap shows again', await stripVis());
 await ev(() => app.showInsertMenu(document.querySelector('[aria-label^="삽입"]'))); await page.waitForTimeout(250);
-check('insert menu has 메모 추가', await ev(() => /메모 추가/.test(document.body.innerText)));
+check('insert menu has 메모', await ev(() => [...document.querySelectorAll('.amenu .amenu-row')].some(r => r.textContent.trim() === '메모')));
 await page.mouse.click(5, 5); await page.waitForTimeout(200);
 await page.screenshot({ path: path.join(out, 'bar-strip.png') });
 // split frame + arrows

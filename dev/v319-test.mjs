@@ -34,7 +34,7 @@ check('pen tapped again: panel with width slider + 17 colour dots', await ev(() 
 await page.keyboard.press('Escape'); await page.mouse.click(5, 5);
 await ev(() => app.hlButton.click()); await page.waitForTimeout(200);
 await ev(() => app.hlButton.click()); await page.waitForTimeout(250);
-check('highlighter: second tap shows its panel (5 colours + chip)', await ev(() => app.highlightMode && document.querySelectorAll('.amenu .m-sw .dot').length === 6));
+check('highlighter: second tap shows its panel (5 colours + chip)', await ev(() => app.highlighterMode && document.querySelectorAll('.amenu .m-sw .dot').length === 6));
 await page.keyboard.press('Escape'); await page.mouse.click(5, 5);
 // floating strip: drag the grip
 await ev(() => app.penButton.click()); await page.waitForTimeout(200);

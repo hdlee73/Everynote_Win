@@ -331,6 +331,7 @@ const methods = {
       this.splitBar.append(chip);
     });
     this.positionChips(); this.updateSplitArrows();
+    requestAnimationFrame(() => this.positionChips());   // panes may still be laid out at their old size right now
   },
   positionChips() {
     if (!this.splitBar || !this.isSplit()) return;

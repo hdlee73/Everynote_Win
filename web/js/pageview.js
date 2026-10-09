@@ -437,7 +437,7 @@ export class PdfPageView {
     this.invalidate();
   }
   /** Pen type of new strokes: 0 ballpoint, 1 pencil, 2 fountain pen, 3 brush, 4 felt marker. */
-  setInkPen(pen) { this.inkPen = Math.max(0, Math.min(4, pen | 0)); }
+  setInkPen(pen) { this.inkPen = Math.max(0, Math.min(5, pen | 0)); }
   setInkTool(mode, color, width) {
     this.inkMode = mode; this.inkColor = color; this.inkWidth = width;
     if (mode !== 0) { this.setLassoMode(false); this.highlightMode = this.memoMode = this.outlineMode = false; }

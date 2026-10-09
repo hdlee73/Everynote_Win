@@ -91,7 +91,8 @@ const methods = {
         t.push(tile('동영상', 'ic_video', run('pickVideo')));
         t.push(tile('유튜브 링크', 'ic_youtube', run('askYoutube')));
         t.push(tile('음성 녹음', 'ic_mic', run('startRecording')));
-        t.push(tile('메모 추가', 'ic_memo', run('toggleMemoMode')));
+        t.push(tile('메모', 'ic_memo', run('toggleMemoMode')));
+        t.push(tile('하이라이트', 'ic_highlight', run('toggleHighlight'), { selected: this.highlightMode }));
         break;
       case 3:
         t.push(tile('문서·필기 검색', 'ic_search', run('searchDocument')));
@@ -140,6 +141,7 @@ const methods = {
   buildLassoBar() {
     const bar = this.lassoBar = h('div', { class: 'm3-lasso', dataset: { tag: 'lasso_bar' }, style: { display: 'none' } });
     const icons = ['ic_lasso', 'ic_rect', 'ic_circle'], names = ['자유', '네모', '원'];
+    const grip = this.makeGrip(bar, 'lasso'); grip.style.display = ''; bar.append(grip);   // floats like the pen strip: drag the dotted grip
     for (let i = 0; i < 3; i++) {
       const chip = h('div', { class: 'm3-lchip', role: 'button', 'aria-label': '올가미 ' + names[i], title: '올가미 · ' + names[i], dataset: { tag: 'lasso_shape_' + i } },
         icon(icons[i], 22, 'currentColor'));
@@ -157,14 +159,15 @@ const methods = {
   },
   updateLassoBar() {
     if (!this.lassoBar || !this.pageView) return;
-    const on = this.pageView.isLassoMode();
+    const on = this.pageView.isLassoMode(), was = this.lassoBar.style.display !== 'none';
     setShown(this.lassoBar, on);
     if (!on) return;
+    if (!was) this.applyFloatPos(this.lassoBar, 'lasso');
     for (let i = 0; i < 3; i++) {
       const chip = this.lassoBar.querySelector(`[data-tag="lasso_shape_${i}"]`); if (!chip) continue;
       const selected = i === this.lassoShape;
-      chip.style.background = selected ? css(ACTIVE_BG) : 'transparent';
-      chip.style.color = css(selected ? ACTIVE_FG : NAVY);
+      chip.classList.toggle('on', selected); chip.setAttribute('aria-pressed', String(selected));
+      chip.style.background = ''; chip.style.color = '';
     }
   },
   toggleLasso() {
@@ -174,7 +177,7 @@ const methods = {
   startLasso() {
     if (!this.renderer) { this.toast('PDF를 먼저 여세요'); return; }
     this.onSelectionAdjustStarted();
-    this.highlightMode = this.memoMode = this.outlineMode = false; this.placementKind = ''; this.inkMode = 0;
+    this.highlightMode = this.memoMode = this.outlineMode = false; this.placementKind = ''; this.inkMode = 0; this.leaveHighlighter();
     this.pageView.setLassoShape(this.lassoShape); this.pageView.setLassoMode(true); this.updateToolStates();
     this.toast(this.lassoShape === LASSO_RECT ? '드래그해서 네모 영역을 지정하세요. 모양은 위쪽 막대에서 바꿀 수 있습니다.'
       : this.lassoShape === LASSO_CIRCLE ? '중심에서 바깥쪽으로 드래그해 원형 영역을 지정하세요.'
