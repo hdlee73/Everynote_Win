@@ -394,12 +394,15 @@ export class AnnotationPainter {
         const src = new Float64Array(P);
         for (let i = 1; i < n - 1; i++) P[i] = (src[i - 1] + 2 * src[i] + src[i + 1]) / 4;
       }
-      for (let i = 1; i < n - 1; i++) {                            // position: 1-2-1 unless the path turns sharply here (keeps real corners)
-        const ax = RX[i] - RX[i - 1], ay = (RY[i] - RY[i - 1]) * 1.414, bx = RX[i + 1] - RX[i], by = (RY[i + 1] - RY[i]) * 1.414;
-        const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
-        if (la < 1e-9 || lb < 1e-9) continue;
-        if ((ax * bx + ay * by) / (la * lb) < .5) continue;        // turn > 60 degrees: a corner
-        X[i] = (RX[i - 1] + 2 * RX[i] + RX[i + 1]) / 4; Y[i] = (RY[i - 1] + 2 * RY[i] + RY[i + 1]) / 4;
+      for (let pass = 0; pass < 2; pass++) {   // position, two passes (also calms strokes saved by older versions): 1-2-1 unless the path turns sharply here (keeps real corners)
+        RX.set(X); RY.set(Y);
+        for (let i = 1; i < n - 1; i++) {
+          const ax = RX[i] - RX[i - 1], ay = (RY[i] - RY[i - 1]) * 1.414, bx = RX[i + 1] - RX[i], by = (RY[i + 1] - RY[i]) * 1.414;
+          const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+          if (la < 1e-9 || lb < 1e-9) continue;
+          if ((ax * bx + ay * by) / (la * lb) < .5) continue;        // turn > 60 degrees: a corner
+          X[i] = (RX[i - 1] + 2 * RX[i] + RX[i + 1]) / 4; Y[i] = (RY[i - 1] + 2 * RY[i] + RY[i + 1]) / 4;
+        }
       }
       const ox = [X[0]], oy = [Y[0]], op = [P[0]];
       for (let i = 0; i < n - 1; i++) {
