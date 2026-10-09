@@ -1184,14 +1184,24 @@ export class PdfPageView {
     if (this.activeStroke && this.activeStroke.points.length) this._L('onInkChanged');
     this.activeStroke = null; this.stylusDrawing = false;
   }
-  _addInkPoint(e, dest) {
-    if (!this.activeStroke || !dest.contains(e.x, e.y)) return;
-    const x = (e.x - dest.left) / dest.width(), y = (e.y - dest.top) / dest.height(), pressure = this.inputPressure(e), pts = this.activeStroke.points;
-    if (!pts.length) { pts.push(new InkPoint(x, y, pressure)); return; }
-    if (this.inkMode === 3) { const end = new InkPoint(x, y, pressure); if (pts.length === 1) pts.push(end); else pts[1] = end; return; }
-    const last = pts[pts.length - 1], dx = x - last.x, dy = y - last.y;
-    if (dx * dx + dy * dy > 0.0000006) pts.push(new InkPoint(x, y, pressure));
+  /** Pen stabiliser (v3.24.0): digitizer jitter is a fixed number of screen pixels, so at 100% zoom it is large next to the letters (at 300% the same jitter is a third as big in page units). Input is filtered in screen space: adaptive exponential smoothing (strong for slow, tiny moves, almost none for fast strokes) and points closer than ~1 css px are dropped. */
+  _inkSmooth(x, y) {
+    const s = this._sm;
+    if (!s) { this._sm = { x, y }; return this._sm; }
+    const dx = x - s.x, dy = y - s.y, dist = Math.hypot(dx, dy), a = dist / (dist + 7 * DP);
+    s.x += dx * a; s.y += dy * a; return s;
   }
+  _pushInkPoint(sx, sy, pressure, dest, raw) {
+    if (!this.activeStroke || !dest.contains(sx, sy)) return;
+    const pts = this.activeStroke.points, x = (sx - dest.left) / dest.width(), y = (sy - dest.top) / dest.height();
+    if (!pts.length) { pts.push(new InkPoint(x, y, pressure)); this._sm = { x: sx, y: sy }; return; }
+    if (this.inkMode === 3) { const end = new InkPoint(x, y, pressure); if (pts.length === 1) pts.push(end); else pts[1] = end; return; }
+    let fx = sx, fy = sy;
+    if (raw) this._sm = null; else { const s = this._inkSmooth(sx, sy); fx = s.x; fy = s.y; }   // the last point of a stroke is the raw pen-up position: no lag at the end
+    const last = pts[pts.length - 1], lx = dest.left + last.x * dest.width(), ly = dest.top + last.y * dest.height();
+    if (Math.hypot(fx - lx, fy - ly) >= (raw ? 0.5 : 1.5) * DP) pts.push(new InkPoint((fx - dest.left) / dest.width(), (fy - dest.top) / dest.height(), raw ? last.pressure : pressure));   // pen-up reports pressure 0: keep the last real one
+  }
+  _addInkPoint(e, dest, raw = false) { this._pushInkPoint(e.x, e.y, this.inputPressure(e), dest, raw); }
   /** Erases at the eraser position of event e (whole strokes or only the part under the circle, by eraserMode), then erasable marks. */
   _eraseAt(e, dest) {
     if (!this.strokes || dest.width() === 0) return;
@@ -1524,10 +1534,7 @@ export class PdfPageView {
         else {
           for (let i = 0; this.inkMode !== 3 && i < e.getHistorySize(); i++) {
             const h = e.history[i];
-            if (this.activeStroke && dest.contains(h.x, h.y)) {
-              const x = (h.x - dest.left) / dest.width(), y = (h.y - dest.top) / dest.height(), p = this.inputPressure({ toolType: e.toolType, pressure: h.pressure });
-              this.activeStroke.points.push(new InkPoint(x, y, p));
-            }
+            this._pushInkPoint(h.x, h.y, this.inputPressure({ toolType: e.toolType, pressure: h.pressure }), dest, false);
           }
           this._addInkPoint(e, dest);
         }
@@ -1536,7 +1543,7 @@ export class PdfPageView {
       if ((action === UP || action === CANCEL) && this.stylusDrawing) {
         if (!erase && this.activeStroke) {
           if (action === CANCEL) { if (this.strokes) { const k = this.strokes.indexOf(this.activeStroke); if (k >= 0) this.strokes.splice(k, 1); } }
-          else { this._addInkPoint(e, dest); if (this.activeStroke.points.length) this._L('onInkChanged'); }
+          else { this._addInkPoint(e, dest, true); if (this.activeStroke.points.length) this._L('onInkChanged'); }
         }
         this.activeStroke = null; this.stylusDrawing = false; this._lastErase = null; if (e.toolType === 'touch' || this.inkMode !== 2) this._eraserAt = null; this.invalidate(); return true;
       }
