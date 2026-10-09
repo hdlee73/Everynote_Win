@@ -399,7 +399,7 @@ test('v1.27: element rot, stroke pen, memo boxW/boxH round-trip with Android key
   const st = new InkStroke(); st.pen = 3; st.points.push(new InkPoint(.1, .2, .5));
   assert.equal(stringify(st.toJson()), '{"page":0,"color":0,"width":0,"pen":3,"points":[{"x":0.10000000149011612,"y":0.20000000298023224,"p":0.5}]}');
   assert.equal(InkStroke.fromJson(st.toJson()).pen, 3);
-  assert.equal(InkStroke.fromJson({ pen: 9 }).pen, 4); assert.equal(InkStroke.fromJson({ pen: -2 }).pen, 0); assert.equal(InkStroke.fromJson({}).pen, 0);
+  assert.equal(InkStroke.fromJson({ pen: 9 }).pen, 5); assert.equal(InkStroke.fromJson({ pen: -2 }).pen, 0); assert.equal(InkStroke.fromJson({}).pen, 0);
   const m = new Mark(); m.boxW = 180.5; m.boxH = 90;
   assert.equal(stringify(m.toJson()).startsWith('{"paper":-3162,"fontSp":13,"boxSize":1,"boxW":180.5,"boxH":90,"rot":0,"thick":0,"page":0'), true);
   const back = Mark.fromJson(m.toJson()); assert.equal(back.boxW, 180.5); assert.equal(back.boxH, 90);

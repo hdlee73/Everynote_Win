@@ -351,7 +351,7 @@ await ev(() => { T.view.setInkTool(1, 0xFF1C1C1E | 0, 0.004); T.view.setInkPen(3
 await drag(line(px(.2), py(.9), px(.5), py(.92), 8), { type: 'touch', id: 55 });
 const pens = await ev(() => T.store.strokes.map(s => s.pen));
 check('new stroke carries the selected pen', pens.length === 1 && pens[0] === 3, JSON.stringify(pens));
-await ev(() => { T.view.setInkPen(99); }); check('setInkPen clamps to 0..4', (await ev(() => T.view.inkPen)) === 4);
+await ev(() => { T.view.setInkPen(99); }); check('setInkPen clamps to 0..5', (await ev(() => T.view.inkPen)) === 5);
 await shot('15-pen-stroke');
 await ev(() => { T.view.setInkTool(0, 0xFF1C1C1E | 0, 0.004); T.view.setFingerInk(false); T.store.strokes.length = 0; T.el.rot = 0; T.view.selectElement(null); });
 // memo: first tap selects (dashed frame + handle), handle drag resizes, second tap edits

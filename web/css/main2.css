@@ -56,9 +56,17 @@ textarea.field{overflow-y:auto}
 .m2-memo-btns{display:flex;align-items:center}
 
 /* ---- lasso capture ---- */
-.m2-lasso{padding:8px 12px}
-.m2-lasso-pv{display:block;width:100%;height:190px;object-fit:contain;background:#F2F2F7;border-radius:12px}
-.m2-lasso-hint{font-size:14px;color:#1C1C1E;padding:8px 8px 4px}
+.m2-lasso{padding:4px 12px 8px}
+.m2-lasso-pv{display:block;width:100%;height:190px;object-fit:contain;background:#F7F7FA;border:1px solid #ECECF1;border-radius:14px;box-sizing:border-box}
+.m2-lasso-hint{font-size:12px;color:#8E8E93;padding:6px 2px 0}
+.m2-lasso .m-pp-sec{padding:10px 2px 4px}
+.m2-lgrid{display:flex;gap:6px;margin-bottom:6px}
+.m2-ltile{flex:1 1 0;min-width:0;height:62px;padding:0;border:0;border-radius:14px;background:#F2F2F7;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;font:inherit}
+.m2-ltile:hover{background:#E8E8EE}
+.m2-ltile:active{background:#E5F0FF}
+.m2-ltile:focus{outline:none}
+.m2-ltile:focus-visible{outline:2px solid rgba(0,122,255,.55);outline-offset:1px}
+.m2-ltile-l{font-size:12px;color:#1C1C1E;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 
 /* ---- study panel ---- */
 .m2-study{display:none;flex-direction:column;padding:4px 8px;background:#FFFBF1;min-width:0;min-height:0;overflow:hidden}

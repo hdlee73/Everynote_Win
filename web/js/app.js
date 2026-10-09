@@ -31,7 +31,8 @@ export class MainActivity {
     this.splitView = null; this.splitSession = null;   // split screen (app-split.js)
     this.twoPage = false;
     this.selectedColor = 0x66FFDE59;
-    this.highlightFree = false; this.highlightThick = 0.022;
+    this.highlightFree = false; this.highlightThick = 0.022;   // 하이라이트 (text Mark tool): straight only, thickness adjustable
+    this.highlighterMode = false; this.penStash = null; this.hlStraight = false;   // 형광펜 (ink highlighter): borrows the pen slots, see enterHighlighter
     this.highlightMode = false; this.memoMode = false; this.outlineMode = false; this.fullscreen = false;
     this.verticalPageSwipe = false; this.fingerInk = false; this.swipeEnabled = true;
     this.inkMode = 0; this.inkColor = 0xFF1C1C1E; this.inkWidth = 0.004;
@@ -41,7 +42,7 @@ export class MainActivity {
     this.studyVisible = false; this.basketOnly = false;
     this.searchHits = []; this.searchCurrent = -1; this.searchSession = 0; this.searchDone = 0; this.searchTotal = 0;
     this.searching = false; this.searchTruncated = false; this.searchPrecise = false; this.searchOwner = null;
-    this.lassoShape = 0; this.showAllThumbnails = true;
+    this.lassoShape = 0; this.showAllThumbnails = true; this.thumbInkOnly = false;
     this.placementKind = ''; this.placementAsset = '';
     this.ocrGeneration = 0; this.thumbnailGeneration = 0;
     this.baseTint = new Map();           // ImageButton element -> tint colour

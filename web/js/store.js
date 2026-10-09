@@ -170,12 +170,12 @@ export class InkPoint {
 }
 
 export class InkStroke {
-  constructor() { this.page = 0; this.color = 0; /** 0 ballpoint, 1 pencil, 2 fountain pen, 3 brush, 4 felt marker. */ this.pen = 0; this.width = 0; this.points = []; }
+  constructor() { this.page = 0; this.color = 0; /** 0 ballpoint, 1 pencil, 2 fountain pen, 3 brush, 4 felt marker, 5 highlighter. */ this.pen = 0; this.width = 0; this.points = []; }
   toJson() { return { page: i32(this.page), color: i32(this.color), width: f(this.width), pen: i32(this.pen), points: this.points.map(p => p.toJson()) }; }
   static fromJson(o) {
     const s = new InkStroke();
     s.page = optInt(o, 'page'); s.color = optInt(o, 'color', 0xFF1C1C1E | 0); s.width = optFloat(o, 'width', .004);
-    s.pen = Math.max(0, Math.min(4, optInt(o, 'pen', 0)));
+    s.pen = Math.max(0, Math.min(5, optInt(o, 'pen', 0)));
     const a = optArray(o, 'points');
     if (a) for (let i = 0; i < a.length; i++) s.points.push(InkPoint.fromJson(itemObj(a, i)));
     return s;

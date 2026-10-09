@@ -366,8 +366,9 @@ export class AnnotationPainter {
     const d = RectF.from(d0);
     for (const s of store.strokes) if (s.page === page) AnnotationPainter.stroke(c, d, s);
   }
-  /** Names of the pen types (InkStroke.pen 0..4). */
+  /** Names of the pen types the pen panel offers (InkStroke.pen 0..4); pen 5 is the highlighter (flat, constant width, translucent, no pressure). */
   static PEN_NAMES = ['볼펜', '연필', '만년필', '붓', '사인펜'];
+  static HIGHLIGHTER = 5;
 
   /**
    * One stroke in the style of its pen: ballpoint, pencil, fountain pen (nib angle), brush (taper) or felt marker.
@@ -378,7 +379,7 @@ export class AnnotationPainter {
     const d = RectF.from(d0), pts = s.points, n = pts.length, dw = d.width(), dh = d.height();
     if (n === 0 || dw <= 0) return;
     const pen = s.pen | 0, argbv = AnnotationPainter.adj(s.color);
-    const penAlpha = pen === 1 ? .78 : pen === 3 ? .92 : pen === 4 ? .82 : 1;
+    const penAlpha = pen === 1 ? .78 : pen === 3 ? .92 : pen === 4 ? .82 : 1;   // pen 5 (highlighter) keeps the colour's own alpha
     const eff = Math.round(((argbv >>> 24) & 255) * penAlpha);
     const base = s.width * dw;
     const widthAt = (i) => {
@@ -391,6 +392,7 @@ export class AnnotationPainter {
         case 2: { const ang = Math.atan2(by - ay, bx - ax), cut = Math.abs(Math.sin(ang + Math.PI / 4)); w = base * (.32 + 1.05 * cut) * (.65 + pr * .7); break; }
         case 3: { const t = n <= 1 ? .5 : i / (n - 1), taper = Math.min(1, Math.min(t, 1 - t) * 7); w = base * 2.1 * (.35 + pr * .95) * (.35 + .65 * taper); break; }
         case 4: w = base * 1.5; break;
+        case 5: w = base; break;   // highlighter: flat band, no pressure
         default: w = base * (.45 + pr * 1.15);
       }
       return { w: Math.max(1.5, w), ax, ay, bx, by };
