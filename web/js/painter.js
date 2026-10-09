@@ -371,48 +371,108 @@ export class AnnotationPainter {
   static HIGHLIGHTER = 5;
 
   /**
+   * Smoothed copy of a stroke's points for drawing (v3.23.0): the raw digitizer samples are jittery and sparse at speed, so drawing
+   * them as straight segments gave wrinkled letters and angular curves. Gentle 1-2-1 smoothing of position (not at sharp corners) and
+   * pressure, then a Catmull-Rom spline through the points, subdivided finely. Stored in page-normalized coordinates and cached per
+   * stroke (re-built only when the points change), so panning / zooming many strokes stays cheap.
+   * Returns { x[], y[], p[] }.
+   */
+  static _geom(s) {
+    const pts = s.points, n = pts.length;
+    let sx = 0, sy = 0, sp = 0;
+    for (let i = 0; i < n; i++) { const q = pts[i]; sx += q.x; sy += q.y; sp += q.pressure; }
+    const cache = AnnotationPainter._geoCache || (AnnotationPainter._geoCache = new WeakMap());
+    const hit = cache.get(s);
+    if (hit && hit.n === n && hit.sx === sx && hit.sy === sy && hit.sp === sp) return hit.g;
+    let g;
+    if (n <= 2) g = { x: pts.map(q => q.x), y: pts.map(q => q.y), p: pts.map(q => q.pressure) };
+    else {
+      const X = new Float64Array(n), Y = new Float64Array(n), P = new Float64Array(n);
+      for (let i = 0; i < n; i++) { X[i] = pts[i].x; Y[i] = pts[i].y; P[i] = pts[i].pressure; }
+      const RX = new Float64Array(X), RY = new Float64Array(Y), RP = new Float64Array(P);
+      for (let pass = 0; pass < 2; pass++) {                       // pressure: two passes of 1-2-1
+        const src = new Float64Array(P);
+        for (let i = 1; i < n - 1; i++) P[i] = (src[i - 1] + 2 * src[i] + src[i + 1]) / 4;
+      }
+      for (let i = 1; i < n - 1; i++) {                            // position: 1-2-1 unless the path turns sharply here (keeps real corners)
+        const ax = RX[i] - RX[i - 1], ay = (RY[i] - RY[i - 1]) * 1.414, bx = RX[i + 1] - RX[i], by = (RY[i + 1] - RY[i]) * 1.414;
+        const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+        if (la < 1e-9 || lb < 1e-9) continue;
+        if ((ax * bx + ay * by) / (la * lb) < .5) continue;        // turn > 60 degrees: a corner
+        X[i] = (RX[i - 1] + 2 * RX[i] + RX[i + 1]) / 4; Y[i] = (RY[i - 1] + 2 * RY[i] + RY[i + 1]) / 4;
+      }
+      const ox = [X[0]], oy = [Y[0]], op = [P[0]];
+      for (let i = 0; i < n - 1; i++) {
+        const i0 = Math.max(0, i - 1), i3 = Math.min(n - 1, i + 2);
+        const seg = Math.hypot((X[i + 1] - X[i]) * 1000, (Y[i + 1] - Y[i]) * 1414);   // length at a 1000 px wide reference page
+        const steps = Math.max(1, Math.min(12, Math.ceil(seg / 3)));
+        for (let k = 1; k <= steps; k++) {
+          const t = k / steps, t2 = t * t, t3 = t2 * t;
+          const f0 = -.5 * t3 + t2 - .5 * t, f1 = 1.5 * t3 - 2.5 * t2 + 1, f2 = -1.5 * t3 + 2 * t2 + .5 * t, f3 = .5 * t3 - .5 * t2;
+          ox.push(f0 * X[i0] + f1 * X[i] + f2 * X[i + 1] + f3 * X[i3]);
+          oy.push(f0 * Y[i0] + f1 * Y[i] + f2 * Y[i + 1] + f3 * Y[i3]);
+          op.push(P[i] + (P[i + 1] - P[i]) * t);
+        }
+      }
+      g = { x: ox, y: oy, p: op };
+    }
+    cache.set(s, { n, sx, sy, sp, g });
+    return g;
+  }
+
+  /**
    * One stroke in the style of its pen: ballpoint, pencil, fountain pen (nib angle), brush (taper) or felt marker.
    * Translucent colours do not darken where the stroke overlaps itself (the stroke is drawn opaque on a layer that is
    * composited with the alpha once).
    */
   static stroke(c, d0, s) {
-    const d = RectF.from(d0), pts = s.points, n = pts.length, dw = d.width(), dh = d.height();
-    if (n === 0 || dw <= 0) return;
+    const d = RectF.from(d0), n0 = s.points.length, dw = d.width(), dh = d.height();
+    if (n0 === 0 || dw <= 0) return;
+    const G = AnnotationPainter._geom(s), n = G.x.length;
     const pen = s.pen | 0, argbv = AnnotationPainter.adj(s.color);
     const penAlpha = pen === 1 ? .78 : pen === 3 ? .92 : pen === 4 ? .82 : 1;   // pen 5 (highlighter) keeps the colour's own alpha
     const eff = Math.round(((argbv >>> 24) & 255) * penAlpha);
     const base = s.width * dw;
-    const widthAt = (i) => {
-      const b = pts[i], a = pts[Math.max(0, i - 1)];
-      const pr = (a.pressure + b.pressure) / 2;
-      const ax = d.left + a.x * dw, ay = d.top + a.y * dh, bx = d.left + b.x * dw, by = d.top + b.y * dh;
+    const px = new Float64Array(n), py = new Float64Array(n), W = new Float64Array(n);
+    for (let i = 0; i < n; i++) { px[i] = d.left + G.x[i] * dw; py[i] = d.top + G.y[i] * dh; }
+    for (let i = 0; i < n; i++) {
+      const a = Math.max(0, i - 1), b = i, pr = (G.p[a] + G.p[b]) / 2;
       let w;
       switch (pen) {
         case 1: w = base * .75 * (.5 + pr * .9); break;
-        case 2: { const ang = Math.atan2(by - ay, bx - ax), cut = Math.abs(Math.sin(ang + Math.PI / 4)); w = base * (.32 + 1.05 * cut) * (.65 + pr * .7); break; }
+        case 2: { const ang = Math.atan2(py[b] - py[a], px[b] - px[a]), cut = Math.abs(Math.sin(ang + Math.PI / 4)); w = base * (.32 + 1.05 * cut) * (.65 + pr * .7); break; }
         case 3: { const t = n <= 1 ? .5 : i / (n - 1), taper = Math.min(1, Math.min(t, 1 - t) * 7); w = base * 2.1 * (.35 + pr * .95) * (.35 + .65 * taper); break; }
         case 4: w = base * 1.5; break;
         case 5: w = base; break;   // highlighter: flat band, no pressure
         default: w = base * (.45 + pr * 1.15);
       }
-      return { w: Math.max(1.5, w), ax, ay, bx, by };
-    };
+      W[i] = Math.max(1.5, w);
+    }
+    if (pen !== 4 && pen !== 5 && n > 2) {   // smooth the width along the stroke (no steps where the pressure changes)
+      let prev = W[0];
+      for (let i = 1; i < n - 1; i++) { const cur = W[i]; W[i] = (prev + 2 * cur + W[i + 1]) / 4; prev = cur; }
+    }
     const paintInto = (g, ox, oy) => {
       g.save();
       try {
         g.strokeStyle = g.fillStyle = argb(argbv | 0xFF000000);
         g.lineCap = pen === 4 ? 'square' : 'round'; g.lineJoin = 'round';
-        for (let i = 0; i < n; i++) {
-          const { w, ax, ay, bx, by } = widthAt(i);
-          if (i === 0) { g.beginPath(); g.arc(bx - ox, by - oy, w / 2, 0, Math.PI * 2); g.fill(); }
-          else { g.lineWidth = w; g.beginPath(); g.moveTo(ax - ox, ay - oy); g.lineTo(bx - ox, by - oy); g.stroke(); }
+        const constW = pen === 4 || pen === 5;
+        if (constW && n > 1) {   // one path: no overlapping caps, no seams
+          g.lineWidth = W[0]; g.beginPath(); g.moveTo(px[0] - ox, py[0] - oy);
+          for (let i = 1; i < n; i++) g.lineTo(px[i] - ox, py[i] - oy);
+          g.stroke(); return;
+        }
+        g.beginPath(); g.arc(px[0] - ox, py[0] - oy, W[0] / 2, 0, Math.PI * 2); g.fill();
+        for (let i = 1; i < n; i++) {
+          g.lineWidth = (W[i] + W[i - 1]) / 2; g.beginPath(); g.moveTo(px[i - 1] - ox, py[i - 1] - oy); g.lineTo(px[i] - ox, py[i] - oy); g.stroke();
         }
       } finally { g.restore(); }
     };
     if (eff >= 255) { paintInto(c, 0, 0); return; }
     // translucent: bounding box layer
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const p of pts) { const x = d.left + p.x * dw, y = d.top + p.y * dh; if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
+    for (let i = 0; i < n; i++) { const x = px[i], y = py[i]; if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y; }
     const pad = base * 2.6 + 3;
     const L = Math.max(d.left, minX - pad), T = Math.max(d.top, minY - pad), R = Math.min(d.right, maxX + pad), B = Math.min(d.bottom, maxY + pad);
     if (R <= L || B <= T) return;

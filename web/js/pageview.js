@@ -200,7 +200,7 @@ export class PdfPageView {
     const cv = this.canvas = document.createElement('canvas');
     cv.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;display:block;pointer-events:none;';
     el.appendChild(cv);
-    this._ctx = cv.getContext('2d');
+    this._ctx = cv.getContext('2d', { desynchronized: true });   // desynchronized: the browser presents the canvas without waiting for the compositor (less pen latency)
 
     // ---- state (Java fields)
     this.bitmap = null; this._darkBitmap = null;
@@ -336,9 +336,36 @@ export class PdfPageView {
     if (!this._theme && this.el.isConnected) this.refreshTheme();
     this._syncSpread();
     const spillL = this.spreadSide < 0 ? this._spill() : 0, spillW = this._spill();
+    const W = this.el.clientWidth, H = this.el.clientHeight, cv = this.canvas;
+    if (this.stylusDrawing && this.activeStroke && this.inkMode !== 3 && this.bitmap && this.strokes && this.strokes.includes(this.activeStroke)) {
+      // Live ink (v3.23.0): while the pen is down, everything except the stroke being written is painted once into a cache; each frame
+      // then only blits the cache and draws the active stroke. Repainting the whole page (shadow, page bitmap, every stroke, notes)
+      // per pen sample was the main source of the writing delay.
+      const key = [cv.width, cv.height, dpr, spillL, spillW, this.scale, this.panX, this.panY, this.page, this.darkPage, this.strokes.length].join('|');
+      const lc = this._live || (this._live = { cv: document.createElement('canvas'), key: '' });
+      if (lc.key !== key) {
+        if (lc.cv.width !== cv.width || lc.cv.height !== cv.height) { lc.cv.width = cv.width; lc.cv.height = cv.height; }
+        const g = lc.cv.getContext('2d');
+        g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, lc.cv.width, lc.cv.height);
+        g.setTransform(dpr, 0, 0, dpr, spillL * dpr, 0);
+        this._skipStroke = this.activeStroke;
+        try { this._paintAll(g, W, H, false, spillL, spillW); } finally { this._skipStroke = null; }
+        lc.key = key;
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
+      ctx.drawImage(lc.cv, 0, 0);
+      ctx.setTransform(dpr, 0, 0, dpr, spillL * dpr, 0);
+      ctx.save();
+      ctx.beginPath(); ctx.rect(-spillL, 0, W + spillW, H); ctx.clip();
+      AnnotationPainter.dark = this.darkPage;
+      try { AnnotationPainter.stroke(ctx, this.contentRect(), this.activeStroke); } finally { AnnotationPainter.dark = false; }
+      ctx.restore();
+      return;
+    }
+    if (this._live) this._live.key = '';
     ctx.setTransform(dpr, 0, 0, dpr, spillL * dpr, 0);
-    ctx.clearRect(-spillL, 0, this.el.clientWidth + spillW, this.el.clientHeight);       // the backdrop is the CSS background of el (of the spread's parent)
-    this._paintAll(ctx, this.el.clientWidth, this.el.clientHeight, false, spillL, spillW);
+    ctx.clearRect(-spillL, 0, W + spillW, H);       // the backdrop is the CSS background of el (of the spread's parent)
+    this._paintAll(ctx, W, H, false, spillL, spillW);
     this._checkZoom();
   }
   /** opaque: also paint the backdrop (snapshots); the live canvas is transparent over the CSS backdrop. */
@@ -830,7 +857,7 @@ export class PdfPageView {
         fillCircle(ctx, dest.left + last.right * dw, dest.top + last.bottom * dh, handle, 0xFF007AFF);
       }
       if (this.marks) for (const m of this.marks) if (m.page === this.page && !m.noteOnly) AnnotationPainter.highlight(ctx, dest, m);
-      if (this.strokes) for (const s of this.strokes) if (s.page === this.page) AnnotationPainter.stroke(ctx, dest, s);
+      if (this.strokes) for (const s of this.strokes) if (s.page === this.page && s !== this._skipStroke) AnnotationPainter.stroke(ctx, dest, s);
       this.memoHitBoxes.clear();
       if (this.marks) for (const m of this.marks) if (m.page === this.page && m.visible && (m.noteOnly || (m.note != null && m.note.length > 0))) this._drawMemo(ctx, dest, m);
       this.noteHitBoxes.clear();
@@ -1163,7 +1190,7 @@ export class PdfPageView {
     if (!pts.length) { pts.push(new InkPoint(x, y, pressure)); return; }
     if (this.inkMode === 3) { const end = new InkPoint(x, y, pressure); if (pts.length === 1) pts.push(end); else pts[1] = end; return; }
     const last = pts[pts.length - 1], dx = x - last.x, dy = y - last.y;
-    if (dx * dx + dy * dy > 0.000002) pts.push(new InkPoint(x, y, pressure));
+    if (dx * dx + dy * dy > 0.0000006) pts.push(new InkPoint(x, y, pressure));
   }
   /** Erases at the eraser position of event e (whole strokes or only the part under the circle, by eraserMode), then erasable marks. */
   _eraseAt(e, dest) {
