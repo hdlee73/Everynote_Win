@@ -250,7 +250,9 @@ const methods = {
     edit.addEventListener('input', ev => {
       if (ev && ev.inputType === 'insertLineBreak') this.continueList(edit.selectionStart - 1);   // Enter inside a list line starts the next item
       e.text = edit.value; this._inlineDirty = true; if (this._inlineSync) this._inlineSync();
+      this.showInlineBar(false);   // the format bar steps aside while typing
     });
+    edit.addEventListener('pointerup', () => this.showInlineBar(true));   // touching the text box (tap, long press, selection) brings it back
     for (const t of ['keyup', 'click', 'select']) edit.addEventListener(t, () => { if (this._inlineSync) this._inlineSync(); });
     layer.append(edit);
     this.inlineMove = this.inlineHandle('✥', '글상자 이동', (dx, dy, page) => {
@@ -310,6 +312,7 @@ const methods = {
     this.placeInlineBar(top, editBottom);
   },
   /** Keeps the toolbar clear of the text being typed: above the box first (the keyboard covers the lower part), else below, else at the top. */
+  showInlineBar(shown) { if (this.inlineBar) this.inlineBar.style.display = shown ? '' : 'none'; },
   placeInlineBar(editTop, editBottom) {
     const bar = this.inlineBar, layer = this.viewportLayer;
     if (!bar || !layer || layer.clientHeight <= 0) return;
