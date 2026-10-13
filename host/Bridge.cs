@@ -384,9 +384,37 @@ sealed class Bridge
             if (!res.IsSuccessStatusCode) throw new IOException("내려받지 못했습니다 (" + (int)res.StatusCode + ")");
             await using var fs = File.Create(tmp); await res.Content.CopyToAsync(fs);
         }
+        try { await VerifyDownload(url, tmp); }
+        catch { try { File.Delete(tmp); } catch { } throw; }
         File.Move(tmp, dest, true);
         Process.Start(new ProcessStartInfo(dest, "/UPDATE") { UseShellExecute = true });
         return true;
+    }
+
+    /// <summary>Checks the downloaded installer against the release's SHA256SUMS.txt (published next to it by CI); refuses to run it when the list or the entry is missing or the hash differs.</summary>
+    static async Task VerifyDownload(string url, string file)
+    {
+        var name = Path.GetFileName(new Uri(url).LocalPath);
+        var sumsUrl = url.Substring(0, url.LastIndexOf('/') + 1) + "SHA256SUMS.txt";
+        string sums;
+        using (var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, sumsUrl))
+        {
+            req.Headers.TryAddWithoutValidation("User-Agent", "Everynote");
+            using var res = await web.SendAsync(req);
+            if (!res.IsSuccessStatusCode) throw new IOException("검증 정보(SHA256SUMS.txt)를 받지 못해 업데이트를 중단했습니다 (" + (int)res.StatusCode + ")");
+            sums = await res.Content.ReadAsStringAsync();
+        }
+        string expected = null;
+        foreach (var line in sums.Split('\n'))
+        {
+            var t = line.Trim(); var i = t.IndexOf(' ');
+            if (i <= 0) continue;
+            if (string.Equals(t.Substring(i).Trim().TrimStart('*'), name, StringComparison.OrdinalIgnoreCase)) { expected = t.Substring(0, i); break; }
+        }
+        if (expected == null) throw new IOException("검증 정보에 " + name + " 항목이 없어 업데이트를 중단했습니다");
+        string actual;
+        await using (var fs = File.OpenRead(file)) actual = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(fs));
+        if (!string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase)) throw new IOException("내려받은 파일이 손상되었거나 변조되어 업데이트를 중단했습니다");
     }
 
     static object FsCopy(string from, string to)

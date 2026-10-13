@@ -205,6 +205,10 @@ jobs:
           $v = $env:RELEASE_TAG
           Copy-Item out/x64/Everynote.exe "dist/Everynote-$v-win-x64.exe"
           Copy-Item out/arm64/Everynote.exe "dist/Everynote-$v-win-arm64.exe"
+          # SHA-256 of every release file; the in-app updater checks the downloaded installer against this list
+          $lines = Get-ChildItem dist -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | Sort-Object Name | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" }
+          [IO.File]::WriteAllText("$PWD/dist/SHA256SUMS.txt", (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding($false)))
+          Get-Content dist/SHA256SUMS.txt
           Get-ChildItem dist | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v4
