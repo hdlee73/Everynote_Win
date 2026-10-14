@@ -60,7 +60,7 @@ await ev(async () => { const { Mark, AnnotationStore } = await import('/js/store
   const e = new AnnotationStore.PageElement(); e.page = 2; e.kind = 'shape'; e.text = 'rect|FF007AFF|00000000|3'; e.left = .3; e.top = .3; e.right = .6; e.bottom = .5; app.store.elements.push(e);
   const e2 = new AnnotationStore.PageElement(); e2.page = 4; e2.kind = 'shape'; e2.text = 'rect|FF007AFF|00000000|3'; e2.left = .3; e2.top = .3; e2.right = .6; e2.bottom = .5; app.store.elements.push(e2); });
 await ev(() => app.confirmClearContent(2)); await page.waitForTimeout(200);
-check('clear page: confirmation dialog first, nothing deleted yet', await ev(() => /되돌릴 수 없습니다/.test(document.body.innerText) && app.store.strokes.length === 2));
+check('clear page: confirmation dialog first, nothing deleted yet', await ev(() => /실행 취소/.test(document.body.innerText) && app.store.strokes.length === 2));
 await page.locator('.ad-btn >> text=취소').click(); await page.waitForTimeout(150);
 check('cancel keeps everything', await ev(() => app.store.strokes.length === 2 && app.store.marks.length === 1 && app.store.elements.length === 2));
 await ev(() => app.confirmClearContent(2)); await page.waitForTimeout(150); await page.locator('.ad-btn >> text=모두 지우기').click(); await page.waitForTimeout(500);

@@ -405,7 +405,9 @@ export class LibraryDialog {
     this.selected = new Set(); this.selectionMode = false;
     this.generation = 0; this.loadVersion = 0; this.busy = false; this.showing = false; this.dismissL = null;
     this.drawerP = 0; this.drawerWidth = 320; this._items = []; this._meta = new Map(); this._anim = 0;
+    this.docked = false;
     this._build();
+    this.applyDocking();
   }
   setOnDismissListener(fn) { this.dismissL = fn; return this; }
   isShowing() { return this.showing; }
@@ -417,7 +419,7 @@ export class LibraryDialog {
     document.body.append(this.el);
     this._key = e => { if (e.key === 'Escape') { e.preventDefault(); this.onBackPressed(); } };
     window.addEventListener('keydown', this._key);
-    this._ro = new ResizeObserver(() => { const w = this.shelf.clientWidth; if (w !== this._lastW) { this._lastW = w; this._render(++this.generation); } });
+    this._ro = new ResizeObserver(() => { this.applyDocking(); const w = this.shelf.clientWidth; if (w !== this._lastW) { this._lastW = w; this._render(++this.generation); } });
     this._ro.observe(this.shelf);
     this.refresh();
   }
@@ -430,7 +432,7 @@ export class LibraryDialog {
     if (this.dismissL) this.dismissL(this);
   }
   onBackPressed() {
-    if (this.drawer.classList.contains('on')) { this.closeDrawer(); return; }
+    if (!this.docked && this.drawer.classList.contains('on')) { this.closeDrawer(); return; }
     if (this.selectionMode) { this.selectionMode = false; this.selected.clear(); this.refreshGrid(); return; }
     if (this.searchRow.classList.contains('on')) { this.toggleSearch(); return; }
     if (this.mode === FOLDER && !samePath(this.folder, this.repository.root)) { this.selectFolder(parentOf(this.folder)); return; }
@@ -459,7 +461,6 @@ export class LibraryDialog {
     this.rail = rail;
     // top bar
     const top = h('div', { class: 'lib-top' },
-      this._ib('ic_chevron_left', '문서함 닫기', () => this.dismiss()),
       (this.menuButton = this._ib('ic_menu', '폴더 트리 보기', () => this.openDrawer(), 'lib-menu-btn')),
       h('div', { class: 'sp' }),
       this._ib('ic_search', '문서 이름 검색', () => this.toggleSearch()),
@@ -549,7 +550,7 @@ export class LibraryDialog {
     this.drawerRows = [];
     this.drawerCounts = [];
     icons.forEach((n, i) => {
-      const row = this._drawerRow(n, names[i], () => { this.closeDrawer(); if (i === 3) this.showTrash(); else this.showMode(i); });
+      const row = this._drawerRow(n, names[i], () => { this._drawerPicked(); if (i === 3) this.showTrash(); else this.showMode(i); });
       panel.append(row.el); this.drawerRows.push(row.el); this.drawerCounts.push(row.count);
     });
     panel.append(h('div', { class: 'lib-dots' }));
@@ -561,7 +562,7 @@ export class LibraryDialog {
     const manage = h('div', { class: 'lib-manage', role: 'button', 'aria-label': '폴더 관리' }, '폴더 관리');
     manage.addEventListener('click', () => this.folderManageMenu(manage));
     panel.append(manage);
-    panel.append(h('div', { class: 'lib-dots' }), this._drawerRow('ic_settings', '설정', () => { this.closeDrawer(); this.openSettings(); }).el);
+    panel.append(h('div', { class: 'lib-dots' }), this._drawerRow('ic_settings', '설정', () => { this._drawerPicked(); this.openSettings(); }).el);
     this.drawerWidth = Math.min(320, Math.round(window.innerWidth * .86));
     this.drawer = h('div', { class: 'lib-drawer', dataset: { tag: 'library_drawer' } }, this.drawerScrim, panel);
   }
@@ -597,12 +598,29 @@ export class LibraryDialog {
     };
     this._anim = requestAnimationFrame(step);
   }
+  // Folder tree: on a wide window it is docked as a column beside the document list (the default, remembered in the preferences); on a narrow one it slides over the list.
+  _prefs() { return (this.activity && this.activity.recentPrefs) || null; }
+  wantsDock() { const p = this._prefs(); return window.innerWidth >= 600 && (p ? p.getBoolean('lib_tree_docked', true) : true); }
+  applyDocking() {
+    const want = this.wantsDock();
+    if (want === this.docked && this.el.classList.contains('docked') === want) return;
+    this.docked = want; this.el.classList.toggle('docked', want);
+    cancelAnimationFrame(this._anim);
+    if (want) { this.drawer.classList.add('on'); this.drawerPanel.style.width = ''; this.drawerPanel.style.transform = ''; this.drawerScrim.style.opacity = ''; this.drawerP = 1; if (this.showing) { this.tree.select(this.folder); this.updateDrawerCounts().catch(() => {}); } }
+    else { this.drawer.classList.remove('on'); this.setDrawerProgress(0); }
+  }
   openDrawer() {
+    if (window.innerWidth >= 600) { const p = this._prefs(); if (p) p.putBoolean('lib_tree_docked', true); this.applyDocking(); return; }
     this.tree.select(this.folder); this.updateDrawerCounts();
     if (!this.drawer.classList.contains('on')) this.setDrawerProgress(0);
     this.drawer.classList.add('on'); this.settleDrawer(1);
   }
-  closeDrawer() { if (this.drawer.classList.contains('on')) this.settleDrawer(0); }
+  closeDrawer() {
+    if (this.docked) { const p = this._prefs(); if (p) p.putBoolean('lib_tree_docked', false); this.applyDocking(); return; }
+    if (this.drawer.classList.contains('on')) this.settleDrawer(0);
+  }
+  /** Picking something in the tree closes the sliding drawer but leaves a docked tree open. */
+  _drawerPicked() { if (!this.docked) this.closeDrawer(); }
   /** touch edge swipe (Java onInterceptTouchEvent): pen / touch only */
   _edgeDrag() {
     let st = null;
@@ -641,7 +659,7 @@ export class LibraryDialog {
   selectFolder(f) {
     this.selected.clear(); this.selectionMode = false; this.mode = FOLDER; this.folder = f;
     if (this.actions.selectedFolder) this.actions.selectedFolder(f);
-    this.closeDrawer(); this.refresh();
+    this._drawerPicked(); this.refresh();
   }
   async items() {
     const q = this.search.value, repo = this.repository;
@@ -652,7 +670,7 @@ export class LibraryDialog {
       default: return repo.sorted(this.folder, q);
     }
   }
-  refresh() { this.styleRail(); return this.refreshGrid(); }
+  refresh() { this.styleRail(); if (this.docked) { this.tree.select(this.folder); this.updateDrawerCounts().catch(() => {}); } return this.refreshGrid(); }
   styleRail() { this.railButtons.forEach((b, i) => b.classList.toggle('on', i < 3 && this.mode === i)); }
   _updateHeading(items) {
     const repo = this.repository, root = repo.root;
@@ -800,15 +818,25 @@ export class LibraryDialog {
       new R('즐겨찾기 맨 위 고정', null, () => { repo.pinFavorites(!repo.pinFavorites()); this.refreshGrid(); }).selected(repo.pinFavorites()),
     ];
     if (this.mode === FOLDER) rows.push(new R('폴더 색상', null, () => this.chooseFolderColor(this.folder)));
+    if (this.mode === FOLDER) rows.push(...this._backupRows(this.folder));
+    else if (this.actions.restoreBackup) rows.push(new R('백업 불러오기', null, () => this.actions.restoreBackup()));
     rows.push(new R('휴지통', null, () => this.showTrash()));
     rows.push(new R('설정', null, () => this.openSettings()));
     this._menu(anchor, rows);
+  }
+  /** Menu rows for backing a folder up (documents, notes, pictures, recordings) into one zip and for loading such a backup (also on another device). */
+  _backupRows(folder) {
+    const R = AnchoredMenu.Row, rows = [];
+    if (folder && this.actions.backupFolder) rows.push(new R('이 폴더 일괄 백업', null, () => this.actions.backupFolder(folder)));
+    if (this.actions.restoreBackup) rows.push(new R('백업 불러오기', null, () => this.actions.restoreBackup()));
+    return rows;
   }
   folderMenu(target, anchor) {
     const R = AnchoredMenu.Row;
     this._menu(anchor, [
       new R('폴더 색상', null, () => this.chooseFolderColor(target)),
       new R('하위 폴더 만들기', null, () => this.createFolder(target, () => { this.tree.reload(); this.refresh(); })),
+      ...this._backupRows(target),
     ]);
   }
   folderManageMenu(anchor) {
@@ -816,6 +844,7 @@ export class LibraryDialog {
     this._menu(anchor, [
       new R('폴더 만들기', null, () => this.createFolder(this.tree.selected(), () => { this.tree.reload(); this.refresh(); })),
       new R('선택한 폴더 색상', null, () => this.chooseFolderColor(this.tree.selected())),
+      ...this._backupRows(this.tree.selected()),
     ]);
   }
   chooseFolderColor(target) {

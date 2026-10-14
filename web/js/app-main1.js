@@ -28,6 +28,7 @@ const INK_COLORS2 = [0xFF8E1B14, 0xFFB35900, 0xFF8A6D00, 0xFF00746E, 0xFF0040A8,
 const RAINBOW = 'conic-gradient(#FF3B30,#FFCC00,#34C759,#00C7BE,#007AFF,#AF52DE,#FF3B30)';
 const INK_WIDTHS = [0.0022, 0.004, 0.0065, 0.009];
 const HIGHLIGHT_COLORS = [0x66FFDE59, 0x6654C27A, 0x66FF6B9A, 0x66549CF5, 0x66B67CF2];
+const TAPE_COLORS = [0xFFFFE066, 0xFFFFB3C1, 0xFF9AD8B7, 0xFF9EC9F5, 0xFFC9A7F2, 0xFFFFC38A, 0xFFE5E5EA, 0xFF636366];
 const PEN_ICONS = ['ic_pen_ball', 'ic_pen_pencil', 'ic_pen_fountain', 'ic_pen_brush', 'ic_pen_marker'];
 const ZOOM_STEP = 1.25;
 const PICTURE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
@@ -210,7 +211,7 @@ function makePageListener(app) {
     }
   };
   for (const n of ['onHighlightCreated', 'onMarkTapped', 'onMemoPointRequested', 'onZoomGestureStarted', 'onPageSwipe', 'onOutlinePointRequested', 'onInkChanged',
-    'onTextSelectionFinished', 'onTranslationTapped', 'onSelectionAdjustStarted', 'onLassoSelectionFinished', 'onElementTapped', 'onHyperlinkTapped', 'onZoomChanged', 'onElementDeleted']) {
+    'onTextSelectionFinished', 'onTranslationTapped', 'onSelectionAdjustStarted', 'onLassoSelectionFinished', 'onElementTapped', 'onHyperlinkTapped', 'onZoomChanged', 'onElementDeleted', 'onElementSelected']) {
     l[n] = (...a) => { active(); return app[n](...a); };
   }
   l.onBlankLongPress = (page, x, y, viewX, viewY) => { active(); app.showInsertMenuAt(l.view, page, x, y, viewX, viewY); };
@@ -221,19 +222,31 @@ function makePageListener(app) {
 function makePageDrag(app) {
   return {
     start(direction) {
-      if (app.pageAnimating || !app.renderer || app.verticalPageSwipe || app.pageAnimStyle() !== 0) return false;
+      const style = app.pageAnimStyle();
+      if (app.pageAnimating || !app.renderer || app.verticalPageSwipe || style > 1) return false;
       const target = app.twoPage ? Math.floor(app.currentPage / 2) * 2 + direction * 2 : app.currentPage + direction;
       if (target < 0 || target >= app.renderer.pageCount) return false;
       if (!app.pagesCached(target)) { app.ensurePages(target).catch(() => {}); return false; }   // not rendered yet: plain swipe (animated) instead
       app.pageAnimating = true; app.carryZoom();
+      if (style === 1) {
+        const slide = app.beginSlide(direction, target);
+        if (!slide) { app.pageAnimating = app.curlConsumed; return false; }
+        app.dragSlide = slide; app.dragSpan = Math.max(120, slide.span);
+        return true;
+      }
       const curl = app.beginCurl(direction, target);
       if (!curl) { app.pageAnimating = app.curlConsumed; return false; }
       app.dragCurl = curl; app.dragSpan = Math.max(120, (curl._w || curl.width || 0) * (app.twoPage ? 0.5 : 1) * 1.1);
       return true;
     },
     touchAt(fraction) { if (app.dragCurl) app.dragCurl.setTouch(fraction); },
-    move(distance) { if (app.dragCurl) app.dragCurl.setProgress(distance / app.dragSpan); },
+    move(distance) { if (app.dragCurl) app.dragCurl.setProgress(distance / app.dragSpan); else if (app.dragSlide) app.slideFrame(app.dragSlide, distance / app.dragSpan); },
     end(velocity) {
+      if (app.dragSlide) {
+        const slide = app.dragSlide; app.dragSlide = null;
+        app.finishSlide(slide, slide.progress, commitDecision(velocity, slide.progress) ? 1 : 0);
+        return;
+      }
       if (!app.dragCurl) return;
       const curl = app.dragCurl; app.dragCurl = null;
       const p = curl.progress();
@@ -249,7 +262,7 @@ export function initMain1(app) {
     selectionPopup: null, speech: null, speechReady: false, speechPending: null, speechLocale: 'en-US',
     pendingSource: null, pendingBounds: null, pendingSession: null, pendingPage: 0,
     awaitingOfficeReturn: false, officeConverting: false, hwpConversion: null, officeToken: null,
-    dragCurl: null, curlOrigin: 0, dragSpan: 120, curlConsumed: false, _showGen: 0, _prefetchGen: 0, _textSelectWanted: false,
+    dragCurl: null, dragSlide: null, curlOrigin: 0, dragSpan: 120, curlConsumed: false, _showGen: 0, _prefetchGen: 0, _textSelectWanted: false,
     descriptor: null, inkPen: 0, templateTarget: null,
   });
   if (app.inlineElement === undefined) app.inlineElement = null;
@@ -358,6 +371,9 @@ const methods = {
       else if (e.key === '0' && this.renderer) this.resetZoomAll();
       else if (k === 'z' && !e.shiftKey) this.undoInk();
       else if (k === 'y' || (k === 'z' && e.shiftKey)) this.redoInk();
+      else if (k === 'c' && this.selectedPageElement()) this.copySelectedElement(false);
+      else if (k === 'x' && this.selectedPageElement()) this.copySelectedElement(true);
+      else if (k === 'd' && this.selectedPageElement()) this.duplicateSelectedElement();
       else if (k === 'w' && this.activeSession) this.closeDocument(this.activeSession);
       else if (e.key === 'Tab' && this.sessions.length > 1) {
         const i = this.sessions.indexOf(this.activeSession), n = this.sessions.length;
@@ -505,9 +521,12 @@ const methods = {
     this.bookmarkButton = this.barIcon(readBar, 'ic_star_outline', '즐겨찾기', 0xFFF5A623, () => this.toggleBookmark());
     this.lassoButton = this.barIcon(readBar, 'ic_lasso', '올가미 선택', 0xFFAF52DE, () => this.toggleLasso());
     this.insertButton = this.barIcon(readBar, 'ic_insert', '삽입 · 메모 하이라이트 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
+    this.undoButton = this.barIcon(readBar, 'ic_undo', '실행 취소', 0xFF8E8E93, () => this.undoInk());
+    this.redoButton = this.barIcon(readBar, 'ic_redo', '다시 실행', 0xFF8E8E93, () => this.redoInk());
     // pen tools float on the page as their own strip (can be kept visible or hidden while writing)
     this.penButton = this.barIcon(writeBar, 'ic_ink', '펜', 0xFF1C1C1E, v => this.penTap(v));
     this.hlButton = this.barIcon(writeBar, 'ic_highlight', '형광펜', 0xFFF5C400, v => this.highlightTap(v));
+    this.tapeButton = this.barIcon(writeBar, 'ic_tape', '테이프 · 글자를 가리는 마스킹 테이프', 0xFF8E8E93, v => this.tapeTap(v));
     this.eraserButton = this.barIcon(writeBar, 'ic_eraser', '지우개 · 한 번 더 누르면 지울 범위', 0xFFFF6B8A, v => this.eraserTap(v));
     writeBar.append(h('div', { class: 'm-tbsep', 'aria-hidden': 'true' }));
     this.barIcon(writeBar, 'ic_undo', '실행 취소', 0xFF8E8E93, () => this.undoInk());
@@ -751,7 +770,6 @@ const methods = {
         if (this.store == null || this.currentPage !== page) return;
         const gone = this.pageView.clearPageInk();
         if (!gone.strokes.length && !gone.marks.length) { toast('지울 필기가 없습니다'); return; }
-        this.activeSession.clearUndo = gone; this.activeSession.redoStrokes.length = 0;
         this.store.save(); this.pageView.invalidate(); this.refreshStudyPanel();
         toast('이 페이지의 필기를 모두 지웠습니다');
       }).setNegativeButton('취소', null).show();
@@ -762,11 +780,11 @@ const methods = {
     if (!this.writeMode) this.setWriteMode(true);
     if (this.highlighterMode && (this.inkMode === 1 || this.inkMode === 3)) this.showHighlightMenu(anchor); else this.setInkMode(this.hlStraight ? 3 : 1, true);
   },
-  /** The highlighter borrows the pen's slots (inkPen / inkColor / inkWidth) while it is active; the pen's own values wait in penStash. */
+  /** The highlighter and the tape borrow the pen's slots (inkPen / inkColor / inkWidth) while active; the pen's own values wait in penStash. */
   enterHighlighter() {
     if (this.highlighterMode) return;
     const p = this.recentPrefs;
-    this.penStash = { pen: this.inkPen, color: this.inkColor, width: this.inkWidth };
+    if (this.tapeMode) { this.saveTapePrefs(); this.tapeMode = false; } else this.penStash = { pen: this.inkPen, color: this.inkColor, width: this.inkWidth };
     this.highlighterMode = true; this.inkPen = AnnotationPainter.HIGHLIGHTER;
     this.inkColor = p.getInt('hl_ink_color', 0x66FFDE59) | 0; this.inkWidth = Math.max(.004, Math.min(.04, p.getFloat('hl_ink_width', .016)));
     this.pageView.setInkPen(this.inkPen);
@@ -774,14 +792,68 @@ const methods = {
   leaveHighlighter() {
     if (!this.highlighterMode) return;
     this.saveHighlighterPrefs();
+    this.restoreStashedPen(); this.highlighterMode = false;
+  },
+  restoreStashedPen() {
     const s = this.penStash || { pen: 0, color: this.inkColor, width: this.inkWidth };
-    this.highlighterMode = false; this.penStash = null; this.inkPen = s.pen; this.inkColor = s.color; this.inkWidth = s.width;
+    this.penStash = null; this.inkPen = s.pen; this.inkColor = s.color; this.inkWidth = s.width;
     this.pageView.setInkPen(this.inkPen);
   },
   saveHighlighterPrefs() { if (this.highlighterMode) { this.recentPrefs.putInt('hl_ink_color', this.inkColor | 0); this.recentPrefs.putFloat('hl_ink_width', this.inkWidth); } },
-  /** The pen as the pen button shows it (the stashed one while the highlighter is active). */
-  penView() { return this.highlighterMode && this.penStash ? this.penStash : { pen: this.inkPen, color: this.inkColor, width: this.inkWidth }; },
+  /** 테이프 (masking tape): a flat opaque band drawn like a straight highlighter stroke; tapping it later fades it out and back. */
+  tapeTap(anchor) {
+    if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
+    if (!this.writeMode) this.setWriteMode(true);
+    if (this.tapeMode && (this.inkMode === 1 || this.inkMode === 3)) this.showTapeMenu(anchor); else this.setInkMode(this.tapeStraight ? 3 : 1, 'tape');
+  },
+  enterTape() {
+    if (this.tapeMode) return;
+    const p = this.recentPrefs;
+    if (this.highlighterMode) { this.saveHighlighterPrefs(); this.highlighterMode = false; } else this.penStash = { pen: this.inkPen, color: this.inkColor, width: this.inkWidth };
+    this.tapeMode = true; this.inkPen = AnnotationPainter.TAPE;
+    this.inkColor = (p.getInt('tape_color', TAPE_COLORS[0] | 0) | 0xFF000000) | 0; this.inkWidth = Math.max(.008, Math.min(.08, p.getFloat('tape_width', .03)));
+    this.pageView.setInkPen(this.inkPen);
+  },
+  leaveTape() {
+    if (!this.tapeMode) return;
+    this.saveTapePrefs(); this.restoreStashedPen(); this.tapeMode = false;
+  },
+  saveTapePrefs() { if (this.tapeMode) { this.recentPrefs.putInt('tape_color', this.inkColor | 0); this.recentPrefs.putFloat('tape_width', this.inkWidth); } },
+  /** The pen as the pen button shows it (the stashed one while the highlighter or the tape is active). */
+  penView() { return (this.highlighterMode || this.tapeMode) && this.penStash ? this.penStash : { pen: this.inkPen, color: this.inkColor, width: this.inkWidth }; },
   hlInkView() { return this.highlighterMode ? { color: this.inkColor, width: this.inkWidth } : { color: this.recentPrefs.getInt('hl_ink_color', 0x66FFDE59) | 0, width: this.recentPrefs.getFloat('hl_ink_width', .016) }; },
+  tapeInkView() { return this.tapeMode ? { color: this.inkColor | 0, width: this.inkWidth } : { color: this.recentPrefs.getInt('tape_color', TAPE_COLORS[0] | 0) | 0, width: this.recentPrefs.getFloat('tape_width', .03) }; },
+  /** Panel of the tape tool (Samsung Notes: size + colour only; 직선 / 자유형 as in the highlighter). */
+  showTapeMenu(anchor) {
+    const box = h('div', { class: 'm-menubox m-penpanel', dataset: { tag: 'tape_menu' } });
+    const range = [0.008, 0.08], PW = 700;
+    const fracOf = v => range[0] + (range[1] - range[0]) * (v - 1) / 99;
+    const valueOf = f => Math.max(1, Math.min(100, Math.round(1 + (f - range[0]) / (range[1] - range[0]) * 99)));
+    const preview = h('canvas', { class: 'm-pp-preview', dataset: { tag: 'tape_preview' } });
+    preview.draw = () => {
+      const dpr = window.devicePixelRatio || 1, w = 276, hgt = 56;
+      preview.width = Math.round(w * dpr); preview.height = Math.round(hgt * dpr); preview.style.width = w + 'px'; preview.style.height = hgt + 'px';
+      const g = preview.getContext('2d'); if (!g) return; g.scale(dpr, dpr);
+      const s = new AnnotationStore.InkStroke(); s.pen = AnnotationPainter.TAPE; s.color = this.inkColor | 0; s.width = this.inkWidth * PW / w;
+      sampleCurve(s, .08, .92, this.inkMode === 3 ? 0 : .24, 72);
+      const saveDark = AnnotationPainter.dark; AnnotationPainter.dark = false;
+      try { AnnotationPainter.stroke(g, new RectF(0, 0, w, hgt), s); } finally { AnnotationPainter.dark = saveDark; }
+    };
+    const apply = () => { this.pageView.setInkTool(this.inkMode, this.inkColor, this.inkWidth); this.saveTapePrefs(); this.syncOtherTools(); this.updateInkButton(); preview.draw(); };
+    box.append(h('div', { class: 'm-pp-title' }, '테이프'), preview);
+    const wNum = h('span', { class: 'm-pp-val' });
+    const wBar = h('input', { type: 'range', min: 1, max: 100, step: 1, class: 'm-opbar', 'aria-label': '크기', title: '크기', dataset: { tag: 'tape_width' } });
+    wBar.value = valueOf(this.inkWidth); wNum.textContent = wBar.value;
+    wBar.addEventListener('input', () => { this.inkWidth = fracOf(+wBar.value); wNum.textContent = wBar.value; apply(); });
+    box.append(h('div', { class: 'm-pp-row' }, h('div', { class: 'm-pp-lbl' }, '크기'), wBar, wNum));
+    box.append(h('div', { class: 'm-pp-sec' }, '색상'));
+    const row = swatchesView(TAPE_COLORS, () => this.inkColor | 0, c => { this.inkColor = (c | 0xFF000000) | 0; apply(); }, 28, 1, TAPE_COLORS);
+    row.dataset.tag = 'tape_colors'; box.append(row);
+    box.append(h('div', { class: 'm-pp-sec' }, '모양 · 직선 / 자유형'), segmentedView(['직선', '자유형'], () => this.inkMode === 3 ? 0 : 1, i => { this.tapeStraight = i === 0; this.recentPrefs.putBoolean('tape_straight', this.tapeStraight); this.setInkMode(i === 0 ? 3 : 1, 'tape'); preview.draw(); }),
+      h('div', { class: 'm-pp-sec' }, '그린 테이프를 탭하면 투명해져 아래 글자가 보이고, 다시 탭하면 가려집니다.'));
+    preview.draw();
+    AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
+  },
   widthIndex() {
     let best = 0;
     for (let i = 0; i < INK_WIDTHS.length; i++) if (Math.abs(INK_WIDTHS[i] - this.inkWidth) < Math.abs(INK_WIDTHS[best] - this.inkWidth)) best = i;
@@ -1077,10 +1149,8 @@ const methods = {
     if (base.trim() === '') base = '문서';
     return this.library.importPdf(pdf, base + '.pdf', await this.importDestination());
   },
-  async importDestination() {
-    try { if (this.libraryFolder && (await host.stat(this.libraryFolder)).isDir) return this.libraryFolder; } catch (e) { /* fall through */ }
-    return this.library.root;
-  },
+  /** Newly imported or created documents are always stored in the library's top folder (v3.27.0), wherever the shelf was browsing. */
+  async importDestination() { return this.library.root; },
   async tempFile(ext) {
     const dir = (this.hostInfo && this.hostInfo.temp) || joinPath((this.hostInfo && this.hostInfo.data) || 'C:\\', 'tmp');
     await host.mkdir(dir).catch(() => {});
@@ -1482,16 +1552,18 @@ const methods = {
     this.paintTool(this.textButton, typing, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.lassoButton, this.pageView != null && this.pageView.isLassoMode(), ACTIVE_BG, ACTIVE_FG);
   },
-  stopInk() { this.leaveHighlighter(); this.pageView.setLassoMode(false); this.inkMode = 0; this.pageView.setInkTool(0, this.inkColor, this.inkWidth); this.updateInkButton(); },
+  stopInk() { this.leaveHighlighter(); this.leaveTape(); this.pageView.setLassoMode(false); this.inkMode = 0; this.pageView.setInkTool(0, this.inkColor, this.inkWidth); this.updateInkButton(); },
   /** hl: the stroke is the ink highlighter (형광펜); only modes 1 (free) and 3 (straight) can be one. */
   setInkMode(mode, hl = false) {
     this.placementKind = ''; if (this.renderer == null) return;
-    if (hl && (mode === 1 || mode === 3)) { this.enterHighlighter(); this.hlStraight = mode === 3; } else this.leaveHighlighter();
+    const tape = hl === 'tape' && (mode === 1 || mode === 3); if (tape) hl = false;
+    if (hl && (mode === 1 || mode === 3)) { this.enterHighlighter(); this.hlStraight = mode === 3; } else if (tape) { this.enterTape(); this.tapeStraight = mode === 3; } else { this.leaveHighlighter(); this.leaveTape(); }
     this.pageView.setLassoMode(false); this.inkMode = mode; this.pageView.setDirectTextSelection(false); this._textSelectWanted = false;
     this.highlightMode = this.memoMode = this.outlineMode = false;
     this.pageView.setHighlightMode(false, this.selectedColor); this.pageView.setMemoMode(false); this.pageView.setOutlineMode(false);
     this.pageView.setInkTool(mode, this.inkColor, this.inkWidth); this.updateToolStates(); this.updateInkButton();
-    toast(hl ? (mode === 3 ? '형광펜 직선: 시작점에서 끝점까지 드래그하세요' : '형광펜: 필기하듯 자유롭게 칠하세요')
+    toast(tape ? (mode === 3 ? '테이프 직선: 시작점에서 끝점까지 드래그해 글자를 가리세요' : '테이프: 드래그해 글자를 가리세요. 탭하면 투명해집니다')
+      : hl ? (mode === 3 ? '형광펜 직선: 시작점에서 끝점까지 드래그하세요' : '형광펜: 필기하듯 자유롭게 칠하세요')
       : mode === 3 ? '직선: 시작점에서 끝점까지 드래그하세요'
       : mode === 1 ? (this.fingerInk ? '손가락 또는 S펜으로 필기하세요' : 'S펜으로 필기하세요. 손가락 필기는 필기도구에서 켤 수 있습니다')
       : mode === 2 ? '지울 획을 터치하세요'
@@ -1501,12 +1573,14 @@ const methods = {
   updateInkButton() {
     this.updateLassoBar();
     const mark = this.highlightMode, inkOn = this.inkMode === 1 || this.inkMode === 3;
-    const hl = !!this.highlighterMode && inkOn && !mark, eraser = this.inkMode === 2 && !mark, pen = !mark && !hl && inkOn;
-    const penColor = (this.penView().color | 0xFF000000) >>> 0, hlColor = (this.hlInkView().color | 0xFF000000) >>> 0;
+    const hl = !!this.highlighterMode && inkOn && !mark, tape = !!this.tapeMode && inkOn && !mark, eraser = this.inkMode === 2 && !mark, pen = !mark && !hl && !tape && inkOn;
+    const penColor = (this.penView().color | 0xFF000000) >>> 0, hlColor = (this.hlInkView().color | 0xFF000000) >>> 0, tapeColor = (this.tapeInkView().color | 0xFF000000) >>> 0;
     if (this.penButton) this.baseTint.set(this.penButton, penColor);
     if (this.hlButton) this.baseTint.set(this.hlButton, hlColor);
+    if (this.tapeButton) this.baseTint.set(this.tapeButton, tapeColor);
     this.paintTool(this.penButton, pen, this.soft(penColor), penColor);
     this.paintTool(this.hlButton, hl, this.soft(hlColor), hlColor);
+    this.paintTool(this.tapeButton, tape, this.soft(tapeColor), tapeColor);
     this.paintTool(this.eraserButton, eraser, 0xFFFFE3E8, 0xFFFF3B30);
     this.paintTool(this.eraserBarButton, eraser && !!this.writeMode, 0xFFFFE3E8, 0xFFFF3B30);
     this.updateInkOptions();
@@ -1516,6 +1590,7 @@ const methods = {
       this.penButton.setAttribute('aria-label', '펜'); this.penButton.title = '펜 · ' + (AnnotationPainter.PEN_NAMES[this.penView().pen] || '');
     }
     if (this.hlButton) this.hlButton.title = '형광펜';
+    if (this.tapeButton) this.tapeButton.title = '테이프';
     if (this.eraserButton) this.eraserButton.title = '지우개';
     if (this.inkButton) this.inkButton.setAttribute('aria-label', '필기 모드');
   },
@@ -1538,29 +1613,35 @@ const methods = {
   },
 
   // ============================================================ undo / redo / bookmarks
-  undoInk() {
+  /** 실행 취소: steps back the latest edit of any kind (ink, highlights, memos, inserted items, bookmarks, ...). While a text box is open the text field's own undo is used. */
+  undoInk() { this.stepHistory(false); },
+  redoInk() { this.stepHistory(true); },
+  stepHistory(forward) {
     if (this.store == null) return;
-    const cu = this.activeSession && this.activeSession.clearUndo;
-    if (cu && cu.page === this.currentPage) {   // the last edit was "clear page": bring it back
-      this.activeSession.clearUndo = null;
-      this.store.strokes.push(...cu.strokes); this.store.marks.push(...cu.marks); this.store.save(); this.pageView.invalidate(); this.refreshStudyPanel();
-      toast('지운 필기를 되살렸습니다'); return;
-    }
-    const strokes = this.store.strokes;
-    for (let i = strokes.length - 1; i >= 0; i--) {
-      const s = strokes[i];
-      if (s.page === this.currentPage) {
-        strokes.splice(i, 1); this.activeSession.redoStrokes.push(s); this.store.save(); this.pageView.invalidate();
-        toast('마지막 필기를 취소했습니다'); return;
-      }
-    }
-    toast('취소할 필기가 없습니다');
+    const edit = this.inlineEdit && document.activeElement === this.inlineEdit;
+    if (edit) { try { document.execCommand(forward ? 'redo' : 'undo'); } catch (e) { /* ignore */ } return; }
+    this.finishEditorsForHistory();
+    const done = forward ? this.store.redo() : this.store.undo();
+    if (!done) { toast(forward ? '다시 실행할 작업이 없습니다' : '취소할 작업이 없습니다'); return; }
+    this.historyApplied(done.page);
+    toast(forward ? '다시 실행했습니다' : '실행을 취소했습니다');
   },
-  redoInk() {
-    if (this.activeSession == null || this.activeSession.redoStrokes.length === 0) { toast('다시 실행할 필기가 없습니다'); return; }
-    const s = this.activeSession.redoStrokes.pop();
-    this.store.strokes.push(s); this.store.save();
-    if (s.page !== this.currentPage) this.showPage(s.page); else this.pageView.invalidate();
+  /** Saves/ends any open editor first so its pending change is a history step of its own. */
+  finishEditorsForHistory() { if (this.inlineElement && this.commitInlineText) this.commitInlineText(); },
+  /** The annotation set was replaced by a history step: drop references to the old objects and redraw everything that shows them. */
+  historyApplied(page) {
+    for (const v of this.allPageViews()) { if (v.selectElement) v.selectElement(null); if (v.clearSelection) v.clearSelection(); }
+    if (this.activeSession) { this.activeSession.redoStrokes.length = 0; this.activeSession.clearUndo = null; }
+    if (page != null && page >= 0 && this.renderer && page < this.renderer.pageCount && page !== this.currentPage && !this.twoPage) this.showPage(page);
+    else this.redrawPages();
+    this.updateBookmarkButton();
+    this.thumbInkRefresh && this.thumbInkRefresh();
+    this.refreshStudyPanel && this.refreshStudyPanel();
+    if (this.sidebarVisible) {
+      if (this.panelTab === 4 && this.rebuildInsertions) this.rebuildInsertions();
+      if (this.panelTab === 3 && this.rebuildRecordings) this.rebuildRecordings();
+      if (!this.showAllThumbnails && this.rebuildThumbnails) this.rebuildThumbnails();
+    }
   },
   showInkHelp() {
     new AlertDialog.Builder().setTitle('필기 안내')
@@ -1738,7 +1819,7 @@ const methods = {
   onMarkTapped(mark) { this.editMark(mark); },
   onPageSwipe(direction) { this.animatePage(direction); },
   onOutlinePointRequested(page, x, y) { this.promptOutline(page, x, y, ''); },
-  onInkChanged() { if (this.store != null) { this.store.save(); this.thumbInkRefresh(); if (this.activeSession != null) { this.activeSession.redoStrokes.length = 0; this.activeSession.clearUndo = null; } } },
+  onInkChanged() { if (this.store != null) { this.store.save(); this.thumbInkRefresh(); } },
   /** The 필기 filter of the preview panel lists pages by their ink: refresh it (debounced) when the ink changes. */
   thumbInkRefresh() {
     if (!this.thumbInkOnly || !this.showAllThumbnails || !this.sidebarVisible || this.panelTab !== 1) return;
@@ -1787,24 +1868,56 @@ const methods = {
   },
   /** Slide page turn (style 1, curl fallback, vertical mode): the old page is pushed out and the new one pushed in, inside the page area (the whole reading area, or only the active split screen). */
   async slidePage(direction, target) {
-    const papers = this.papers, viewport = this.viewportLayer, vertical = this.verticalPageSwipe;
     const done = () => { this.resetPageTransforms(); this.pageAnimating = false; };
     try {
       if (!this.pagesCached(target)) await this.ensurePages(target);
-      const pane = this.splitSession ? this.firstPageView.el : null;
-      const rl = pane ? pane.offsetLeft : 0, rt = pane ? pane.offsetTop : 0, w = pane ? pane.clientWidth : papers.clientWidth, hh = pane ? pane.clientHeight : papers.clientHeight;
-      if (!papers || w < 8 || hh < 8) { await this.showPage(target); done(); return; }
-      const oldFull = this.snapshot(papers); this.showPage(target); this.resetPageTransforms(); const newFull = this.snapshot(papers);
-      const oldC = this.slice(oldFull, rl, rt, w, hh), newC = this.slice(newFull, rl, rt, w, hh);
-      const box = h('div', { class: 'm-slide', style: { left: (papers.offsetLeft + rl) + 'px', top: (papers.offsetTop + rt) + 'px', width: w + 'px', height: hh + 'px' } }, oldC, newC);
-      viewport.insertBefore(box, viewport.children[1] || null);
-      const span = vertical ? hh : w, axis = vertical ? 'translateY' : 'translateX', ease = 'cubic-bezier(.2,.7,.2,1)', dur = 260;
-      const fin = () => { box.remove(); done(); };
-      if (!newC.animate) { fin(); return; }
-      newC.animate([{ transform: `${axis}(${direction * span}px)` }, { transform: `${axis}(0px)` }], { duration: dur, easing: ease, fill: 'both' });
-      const out = oldC.animate([{ transform: `${axis}(0px)` }, { transform: `${axis}(${-direction * span}px)` }], { duration: dur, easing: ease, fill: 'both' });
-      out.onfinish = fin; setTimeout(() => { if (box.isConnected) fin(); }, dur + 150);
+      const s = this.beginSlide(direction, target);
+      if (!s) { if (!this.curlConsumed) await this.showPage(target); done(); return; }
+      this.finishSlide(s, 0, 1);
     } catch (e) { try { await this.showPage(target); } catch (e2) { /* ignore */ } done(); }
+  },
+  /** Builds the slide overlay (old and new page snapshots) over the page area and switches the pages underneath; null when it cannot. Needs the target bitmaps cached. */
+  beginSlide(direction, target) {
+    this.curlConsumed = false;
+    const papers = this.papers, viewport = this.viewportLayer;
+    const pane = this.splitSession ? this.firstPageView.el : null;
+    const rl = pane ? pane.offsetLeft : 0, rt = pane ? pane.offsetTop : 0, w = pane ? pane.clientWidth : (papers ? papers.clientWidth : 0), hh = pane ? pane.clientHeight : (papers ? papers.clientHeight : 0);
+    if (!papers || w < 8 || hh < 8 || !this.pagesCached(target)) return null;
+    this.curlOrigin = this.currentPage;
+    let oldFull, newFull;
+    try { oldFull = this.snapshot(papers); this.showPage(target); this.resetPageTransforms(); newFull = this.snapshot(papers); }
+    catch (error) { this.showPage(target); this.curlConsumed = true; return null; }
+    const oldC = this.slice(oldFull, rl, rt, w, hh), newC = this.slice(newFull, rl, rt, w, hh);
+    const box = h('div', { class: 'm-slide', style: { left: (papers.offsetLeft + rl) + 'px', top: (papers.offsetTop + rt) + 'px', width: w + 'px', height: hh + 'px' } }, oldC, newC);
+    viewport.insertBefore(box, viewport.children[1] || null);
+    const s = { box, oldC, newC, direction, vertical: this.verticalPageSwipe, span: this.verticalPageSwipe ? hh : w };
+    this.slideFrame(s, 0);
+    return s;
+  },
+  /** Slide overlay at progress p (0 = old page in place, 1 = new page in place). */
+  slideFrame(s, p) {
+    p = Math.max(0, Math.min(1, p));
+    const axis = s.vertical ? 'translateY' : 'translateX';
+    s.oldC.style.transform = `${axis}(${-s.direction * p * s.span}px)`;
+    s.newC.style.transform = `${axis}(${s.direction * (1 - p) * s.span}px)`;
+    s.progress = p;
+  },
+  /** Animates the slide overlay from progress `from` to `to` (1 = turn the page, 0 = snap back), then removes it. */
+  finishSlide(s, from, to) {
+    let ended = false;
+    const end = () => {
+      if (ended) return; ended = true;
+      if (to < 0.5) { this.carryZoom(); this.showPage(this.curlOrigin); }
+      s.box.remove(); this.resetPageTransforms(); this.pageAnimating = false;
+    };
+    const dur = Math.max(90, 260 * Math.abs(to - from)), t0 = performance.now();
+    const step = now => {
+      const t = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - t, 3);
+      this.slideFrame(s, from + (to - from) * e);
+      if (t < 1) requestAnimationFrame(step); else end();
+    };
+    requestAnimationFrame(step);
+    setTimeout(end, dur + 250);
   },
   /** Snapshot of the papers area (both page views composed) at device resolution; background black in dark mode. */
   snapshot(papers) {

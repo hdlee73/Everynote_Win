@@ -170,12 +170,12 @@ export class InkPoint {
 }
 
 export class InkStroke {
-  constructor() { this.page = 0; this.color = 0; /** 0 ballpoint, 1 pencil, 2 fountain pen, 3 brush, 4 felt marker, 5 highlighter. */ this.pen = 0; this.width = 0; this.points = []; }
+  constructor() { this.page = 0; this.color = 0; /** 0 ballpoint, 1 pencil, 2 fountain pen, 3 brush, 4 felt marker, 5 highlighter, 6 masking tape. */ this.pen = 0; this.width = 0; this.points = []; }
   toJson() { return { page: i32(this.page), color: i32(this.color), width: f(this.width), pen: i32(this.pen), points: this.points.map(p => p.toJson()) }; }
   static fromJson(o) {
     const s = new InkStroke();
     s.page = optInt(o, 'page'); s.color = optInt(o, 'color', 0xFF1C1C1E | 0); s.width = optFloat(o, 'width', .004);
-    s.pen = Math.max(0, Math.min(5, optInt(o, 'pen', 0)));
+    s.pen = Math.max(0, Math.min(6, optInt(o, 'pen', 0)));
     const a = optArray(o, 'points');
     if (a) for (let i = 0; i < a.length; i++) s.points.push(InkPoint.fromJson(itemObj(a, i)));
     return s;
@@ -371,6 +371,8 @@ export class AnnotationStore {
     /** document key = absolute path of the PDF; null until open()/rebind(). */
     this.key = null;
     this._timer = 0; this._dirty = false; this._waiters = [];
+    /** Undo history (v3.27.0): snapshots of the whole annotation set, so every kind of edit (ink, highlights, memos, inserted items, bookmarks ...) can be undone. */
+    this._h = { undo: [], redo: [], last: null, timer: 0, restoring: false, chars: 0 };
   }
 
   // ---------------------------------------------------------------- paths / statics
@@ -487,6 +489,7 @@ export class AnnotationStore {
     this.outlines.splice(0, Infinity, ...t.outlines); this.strokes.splice(0, Infinity, ...t.strokes);
     this.translations.splice(0, Infinity, ...t.translations); this.studyEntries.splice(0, Infinity, ...t.studyEntries);
     this.elements.splice(0, Infinity, ...t.elements);
+    this._historyReset(this.toJson());
     return this.save();
   }
 
@@ -495,13 +498,14 @@ export class AnnotationStore {
   async open(key) {
     if (this._dirty) this._commit();               // snapshot the old document now (sync) - written in the background
     this.key = norm(key);
-    this._clear();
+    this._clear(); this._historyReset(null);
     try {
       const path = await AnnotationStore.sidecarPath(this.key);
       if (queues.has(path)) await queues.get(path);
       if (this.key !== norm(key)) return this;     // re-opened meanwhile
-      if (await host.exists(path)) this.loadJson(await host.readText(path));
+      if (await host.exists(path)) { const text = await host.readText(path); this.loadJson(text); this._historyReset(text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text); }
     } catch (e) { /* unreadable / corrupt sidecar -> empty (Java: ignored JSONException/IOException) */ }
+    if (this._h.last == null) this._historyReset(this.toJson());
     return this;
   }
   /** Java rebind(uri): the document moved/renamed - keep the data, switch the key, save. */
@@ -510,6 +514,7 @@ export class AnnotationStore {
   /** Debounced non-blocking save. Resolves true when written (false if nothing to save or failed); never rejects. */
   save() {
     if (this.key == null) return Promise.resolve(false);
+    if (!this._h.restoring) this._historyDefer();
     this._dirty = true; dirtyStores.add(this);
     const p = new Promise(res => this._waiters.push(res));
     clearTimeout(this._timer);
@@ -538,6 +543,52 @@ export class AnnotationStore {
     return true;
   }
 
+  // ---------------------------------------------------------------- undo / redo
+  static HISTORY_STEPS = 200;
+  static HISTORY_CHARS = 60e6;
+  _historyReset(base) { const h = this._h; clearTimeout(h.timer); h.timer = 0; h.undo.length = 0; h.redo.length = 0; h.chars = 0; h.last = base; }
+  _historyDefer() { const h = this._h; clearTimeout(h.timer); h.timer = setTimeout(() => this._historyRecord(), 140); }
+  /** Takes the snapshot of the state after the latest edit; the state before it becomes the next undo step. */
+  _historyRecord() {
+    const h = this._h; clearTimeout(h.timer); h.timer = 0;
+    if (h.last == null || this.key == null) return;
+    let now; try { now = this.toJson(); } catch (e) { return; }
+    if (now === h.last) return;
+    h.undo.push(h.last); h.chars += h.last.length; h.redo.length = 0; h.last = now;
+    while (h.undo.length > AnnotationStore.HISTORY_STEPS || (h.chars > AnnotationStore.HISTORY_CHARS && h.undo.length > 1)) h.chars -= h.undo.shift().length;
+  }
+  canUndo() { this._historyRecord(); return this._h.undo.length > 0; }
+  canRedo() { this._historyRecord(); return this._h.redo.length > 0; }
+  /** Steps back one edit. Returns { page } (the first page the edit touched, -1 when it touched none) or null when there is nothing to undo. */
+  undo() {
+    this._historyRecord(); const h = this._h; if (!h.undo.length) return null;
+    const text = h.undo.pop(); h.chars -= text.length; h.redo.push(h.last); return this._historyApply(text);
+  }
+  redo() {
+    this._historyRecord(); const h = this._h; if (!h.redo.length) return null;
+    const text = h.redo.pop(); h.undo.push(h.last); h.chars += h.last.length; return this._historyApply(text);
+  }
+  _historyApply(text) {
+    const h = this._h, before = h.last, page = AnnotationStore._firstChangedPage(before, text);
+    h.restoring = true;
+    try { this.loadJson(text); h.last = this.toJson(); this.save(); } finally { h.restoring = false; }
+    return { page };
+  }
+  static _firstChangedPage(a, b) {
+    try {
+      const x = JSON.parse(a), y = JSON.parse(b); let min = -1;
+      const note = p => { if (typeof p === 'number' && (min < 0 || p < min)) min = p; };
+      for (const k of ['elements', 'studyEntries', 'marks', 'outlines', 'strokes', 'translations']) {
+        const g = list => { const m = new Map(); for (const it of list || []) { const key = it.page; (m.get(key) || m.set(key, []).get(key)).push(JSON.stringify(it)); } return m; };
+        const ga = g(x[k]), gb = g(y[k]);
+        for (const p of new Set([...ga.keys(), ...gb.keys()])) if ((ga.get(p) || []).join('|') !== (gb.get(p) || []).join('|')) note(p);
+      }
+      const ba = new Set(x.bookmarks || []), bb = new Set(y.bookmarks || []);
+      for (const p of new Set([...ba, ...bb])) if (ba.has(p) !== bb.has(p)) note(p);
+      return min;
+    } catch (e) { return -1; }
+  }
+
   // ---------------------------------------------------------------- page edits (Java removePage / insertPageAfter; do not save)
   /** Removes everything anchored to a deleted page and renumbers the pages after it. Does not save. */
   removePage(index) {
@@ -545,9 +596,10 @@ export class AnnotationStore {
     keep(this.marks); keep(this.strokes); keep(this.translations); keep(this.outlines); keep(this.elements); keep(this.studyEntries);
     this.bookmarks.delete(index);
     this._shiftPages(index + 1, -1);
+    this._historyReset(this.toJson());   // page numbers changed: older snapshots no longer fit the document
   }
   /** Makes room for a page inserted right after afterIndex. Does not save. */
-  insertPageAfter(afterIndex) { this._shiftPages(afterIndex + 1, 1); }
+  insertPageAfter(afterIndex) { this._shiftPages(afterIndex + 1, 1); this._historyReset(this.toJson()); }
   _shiftPages(from, delta) {
     for (const list of [this.marks, this.strokes, this.translations, this.outlines, this.elements, this.studyEntries])
       for (const x of list) if (x.page >= from) x.page += delta;

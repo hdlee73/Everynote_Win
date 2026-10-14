@@ -48,7 +48,7 @@
 .m3-lchip.on{background:#E5F0FF;color:#007AFF;box-shadow:inset 0 0 0 2px #007AFF}
 
 /* ---- v3: typing toolbar (two icon rows) + list markers ---- */
-.m3-inline-bar{width:min(380px,calc(100% - 16px))}
+.m3-inline-bar{width:min(424px,calc(100% - 16px))}
 .m3-inline-row{flex-wrap:nowrap}
 .m3-inline-row2{height:36px;padding-bottom:2px}
 .m3-tbtn{flex:none;width:34px;height:32px;margin:0 1px;padding:0;border:0;border-radius:16px;background:transparent;color:#3A3A3C;display:flex;align-items:center;justify-content:center;cursor:pointer;
@@ -77,3 +77,11 @@
 .m3-line-row{height:38px;align-items:center}
 .m3-line-label{font-size:13px;color:#1C1C1E;padding:0 6px}
 .m3-fit-ruler{margin-left:8px;height:32px;padding:0 10px;border:0;border-radius:16px;background:#E8F1FF;color:#007AFF;font-size:13px;font-weight:700;cursor:pointer}
+
+/* ---- v3.27.0: selected-item bar (cut / copy / duplicate / paste / delete) ---- */
+.m-elbar{position:absolute;z-index:41;display:flex;align-items:center;padding:3px 4px;background:rgba(255,255,255,.97);border-radius:22px;box-shadow:0 3px 12px rgba(0,0,0,.22);white-space:nowrap}
+.m-elbtn{flex:none;height:36px;padding:0 10px;margin:0 1px;border:0;border-radius:18px;background:transparent;color:#1C1C1E;display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer}
+.m-elbtn:hover{background:rgba(0,0,0,.06)}
+.m-elbtn:focus{outline:none}
+.m-elbtn[data-tag=element_delete]{color:#FF3B30}
+@media (max-width:640px){.m-elbtn .t{display:none}.m-elbtn{padding:0 9px}}

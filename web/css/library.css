@@ -188,3 +188,10 @@
 .set-dot.on::after{content:"";position:absolute;inset:3px;border-radius:50%;background:#007AFF}
 .lib-railfill{flex:1}
 .lib-rail .lib-ib.st{margin-top:8px}
+
+/* docked folder tree (wide window, default): a column beside the document list instead of a sheet over it */
+.lib-root.docked .lib-rail{display:none}
+.lib-root.docked .lib-drawer{position:relative;inset:auto;display:block;order:-1;flex:none;width:300px;z-index:auto;border-right:1px solid #ECECF0;background:#fff}
+.lib-root.docked .lib-scrim{display:none}
+.lib-root.docked .lib-panel{position:relative;width:100%;height:100%;border-radius:0;box-shadow:none;transform:none!important}
+.lib-root.docked .lib-menu-btn{display:none}
