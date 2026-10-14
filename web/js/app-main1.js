@@ -22,7 +22,7 @@ import { ColorPicker } from './ui/colorpicker.js';
 import { buildSplit } from './app-split.js';
 
 // ------------------------------------------------------------------------------------------------ constants
-const NAVY = 0xFF1C1C1E, ACCENT = 0xFF007AFF, ACTIVE_BG = 0xFFE5F0FF, ACTIVE_FG = 0xFF007AFF;
+const NAVY = 0xFF1C1C1E, ACCENT = 0xFF3E6DF0, ACTIVE_BG = 0xFFE8EEFD, ACTIVE_FG = 0xFF3E6DF0, TOOL_GRAY = 0xFF4A4F5E;
 const INK_COLORS = [0xFF1C1C1E, 0xFF636366, 0xFF007AFF, 0xFF16835B, 0xFF7C3AED, 0xFFEA580C, 0xFFDB2777, 0xFFFF3B30];
 const INK_COLORS2 = [0xFF8E1B14, 0xFFB35900, 0xFF8A6D00, 0xFF00746E, 0xFF0040A8, 0xFF2E2C8A, 0xFFFF9AA2, 0xFFA6CBFF];
 const RAINBOW = 'conic-gradient(#FF3B30,#FFCC00,#34C759,#00C7BE,#007AFF,#AF52DE,#FF3B30)';
@@ -72,6 +72,13 @@ function penSample(draw) {
   return c;
 }
 /** Fills stroke s with a smooth S-curve from x0 to x1 (n points, eased pressure) so previews and pen icons are drawn without visible corners. amp 0 = straight. */
+/** Samsung Notes style slider row: "label  value" above, then − slider ＋ (the buttons nudge the slider by one step). */
+function sliderRow(label, bar, num) {
+  const step = d => () => { bar.value = String(Math.max(+bar.min, Math.min(+bar.max, +bar.value + d))); bar.dispatchEvent(new Event('input', { bubbles: true })); };
+  const btn = (name, text, d) => { const b = h('button', { class: 'm-pp-step', type: 'button', 'aria-label': label + ' ' + text, title: label + ' ' + text }, mkIcon(name, 16, 'currentColor')); b.addEventListener('click', step(d)); return b; };
+  return h('div', { class: 'm-pp-slider' }, h('div', { class: 'm-pp-head' }, h('div', { class: 'm-pp-lbl' }, label), num),
+    h('div', { class: 'm-pp-row' }, btn('ic_minus', '줄이기', -1), bar, btn('ic_plus', '늘리기', 1)));
+}
 function sampleCurve(s, x0, x1, amp, n = 72) {
   for (let k = 0; k <= n; k++) {
     const t = k / n, ease = Math.sin(Math.PI * t);
@@ -424,19 +431,31 @@ const methods = {
     const content = h('div', { class: 'm-content' });
     root.append(content);
 
-    // ---- header (52)
+    // ---- header: Samsung Notes Windows top bar (‹ + title at the left, text + icon buttons at the right)
     this.header = h('div', { class: 'm-header', dataset: { tag: 'header' } });
-    const libraryButton = h('button', { class: 'm-libbtn', type: 'button', 'aria-label': '문서함', title: '문서함' });
-    libraryButton.append(new FolderIconDrawable(LibraryRepository.FOLDER_COLORS[1], 30).el());
-    libraryButton.addEventListener('click', () => this.showLibrary());
+    const backButton = h('button', { class: 'm-back', type: 'button', 'aria-label': '문서함', title: '문서함으로 돌아가기', dataset: { tag: 'library_button' } });
+    backButton.append(mkIcon('ic_chevron_left', 24, 'currentColor'));
+    backButton.addEventListener('click', () => this.showLibrary());
     this.titleView = h('div', { class: 'm-title', dataset: { tag: 'document_title' }, role: 'button' });
     this.titleView.addEventListener('click', () => { if (this.activeSession != null) this.beginTitleEdit(); else this.showLibrary(); });
-    this.header.append(libraryButton, this.titleView, h('div', { class: 'm-spacer' }),
-      this.icon('ic_sidebar', '페이지 목록', 0xFF007AFF, () => this.toggleSidebar()),
-      this.icon('ic_search', '문서·필기 검색', 0xFF30B0C7, () => this.searchDocument()),
-      this.splitButton = this.icon('ic_dual', '화면 나누기 · 문서 두 개를 나란히', 0xFF5856D6, () => this.toggleSplit()),
-      this.icon('ic_fullscreen', '전체 화면', 0xFFAF52DE, () => this.toggleFullscreen()),
-      this.icon('ic_more_vert', '도구', NAVY, v => this.showMainMenu(v, false)));
+    // hb(icon, visible label, aria-label, click): every entry maps to an action the app already had
+    const hb = (name, text, label, click, tag) => {
+      const b = h('button', { class: 'm-ib m-hb', type: 'button', 'aria-label': label, title: label, dataset: tag ? { tag } : {} }, mkIcon(name, 18, 'currentColor'), text ? h('span', { class: 't' }, text) : null);
+      b.addEventListener('click', () => click(b)); return b;
+    };
+    const needDoc = fn => b => { if (this.renderer == null) { toast('문서를 먼저 여세요'); return; } fn(b); };
+    this.header.append(backButton, this.titleView, h('div', { class: 'm-spacer' }),
+      hb('ic_fullscreen', '전체 화면', '전체 화면', () => this.toggleFullscreen()),
+      this.readModeButton = hb('ic_book', '읽기 모드', '읽기 모드 켜기·끄기', needDoc(() => this.setWriteMode(!this.writeMode)), 'read_mode_button'),
+      hb('ic_sidebar', '페이지 관리', '페이지 목록', () => this.toggleSidebar()),
+      hb('ic_page', '노트 스타일', '노트 스타일 · 보기 방법', needDoc(b => this.showViewMenu(b))),
+      hb('ic_insert', '삽입', '삽입 · 메모 하이라이트 사진 스티커 도형 표', needDoc(b => this.showInsertMenu(b))),
+      hb('ic_share', '공유', '공유 · 탐색기에서 파일 보기', needDoc(async () => { try { await host.reveal(this.documentUri); } catch (e) { toast('공유할 수 없습니다'); } })),
+      hb('ic_export', '파일로 저장', 'PDF 파일로 저장', needDoc(() => this.callUi2('exportPdf'))),
+      hb('ic_print', '인쇄', '인쇄', needDoc(() => this.callUi2('printDocument'))),
+      hb('ic_search', '검색', '문서·필기 검색', () => this.searchDocument()),
+      this.splitButton = hb('ic_dual', '화면 나누기', '화면 나누기 · 문서 두 개를 나란히', () => this.toggleSplit()),
+      hb('ic_more_vert', '', '도구', b => this.showMainMenu(b, false)));
     content.append(this.header);
 
     // ---- tab strip (40)
@@ -497,21 +516,21 @@ const methods = {
     this.pageLabel.addEventListener('click', () => { if (this.renderer == null) this.showAddDocumentMenu(); else this.showPageJumpMenu(this.pageLabel); });
     this.pageLabel.title = '페이지 이동'; this.pageLabel.setAttribute('aria-label', '페이지 이동');
     readBar.append(this.pageLabel);
-    this.barIcon(readBar, 'ic_eye', '보기 방법', 0xFF30B0C7, v => this.showViewMenu(v));
-    this.readButton = this.barIcon(readBar, 'ic_book', '읽기 모드', 0xFF007AFF, () => this.setWriteMode(false));
-    this.inkButton = this.barIcon(readBar, 'ic_ink', '필기 모드', 0xFF5856D6, () => this.inkModeTap());
-    this.eraserBarButton = this.barIcon(readBar, 'ic_eraser', '지우개', 0xFFFF6B8A, v => this.eraserBarTap(v));
-    this.textButton = this.barIcon(readBar, 'ic_text', '타이핑', 0xFF34C759, () => this.toggleTyping());
-    this.bookmarkButton = this.barIcon(readBar, 'ic_star_outline', '즐겨찾기', 0xFFF5A623, () => this.toggleBookmark());
-    this.lassoButton = this.barIcon(readBar, 'ic_lasso', '올가미 선택', 0xFFAF52DE, () => this.toggleLasso());
-    this.insertButton = this.barIcon(readBar, 'ic_insert', '삽입 · 메모 하이라이트 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
+    this.barIcon(readBar, 'ic_eye', '보기 방법', TOOL_GRAY, v => this.showViewMenu(v));
+    this.readButton = this.barIcon(readBar, 'ic_book', '읽기 모드', TOOL_GRAY, () => this.setWriteMode(false));
+    this.inkButton = this.barIcon(readBar, 'ic_ink', '필기 모드', TOOL_GRAY, () => this.inkModeTap());
+    this.eraserBarButton = this.barIcon(readBar, 'ic_eraser', '지우개', TOOL_GRAY, v => this.eraserBarTap(v));
+    this.textButton = this.barIcon(readBar, 'ic_text', '타이핑', TOOL_GRAY, () => this.toggleTyping());
+    this.bookmarkButton = this.barIcon(readBar, 'ic_star_outline', '즐겨찾기', TOOL_GRAY, () => this.toggleBookmark());
+    this.lassoButton = this.barIcon(readBar, 'ic_lasso', '올가미 선택', TOOL_GRAY, () => this.toggleLasso());
+    this.insertButton = this.barIcon(readBar, 'ic_insert', '삽입 · 메모 하이라이트 사진 스티커 도형 표', TOOL_GRAY, v => this.showInsertMenu(v));
     // pen tools float on the page as their own strip (can be kept visible or hidden while writing)
-    this.penButton = this.barIcon(writeBar, 'ic_ink', '펜', 0xFF1C1C1E, v => this.penTap(v));
-    this.hlButton = this.barIcon(writeBar, 'ic_highlight', '형광펜', 0xFFF5C400, v => this.highlightTap(v));
-    this.eraserButton = this.barIcon(writeBar, 'ic_eraser', '지우개 · 한 번 더 누르면 지울 범위', 0xFFFF6B8A, v => this.eraserTap(v));
+    this.penButton = this.barIcon(writeBar, 'ic_ink', '펜', TOOL_GRAY, v => this.penTap(v));
+    this.hlButton = this.barIcon(writeBar, 'ic_highlight', '형광펜', TOOL_GRAY, v => this.highlightTap(v));
+    this.eraserButton = this.barIcon(writeBar, 'ic_eraser', '지우개 · 한 번 더 누르면 지울 범위', TOOL_GRAY, v => this.eraserTap(v));
     writeBar.append(h('div', { class: 'm-tbsep', 'aria-hidden': 'true' }));
-    this.barIcon(writeBar, 'ic_undo', '실행 취소', 0xFF8E8E93, () => this.undoInk());
-    this.barIcon(writeBar, 'ic_redo', '다시 실행', 0xFF8E8E93, () => this.redoInk());
+    this.undoButton = this.barIcon(writeBar, 'ic_undo', '실행 취소', TOOL_GRAY, () => this.undoInk());
+    this.redoButton = this.barIcon(writeBar, 'ic_redo', '다시 실행', TOOL_GRAY, () => this.redoInk());
     // the strip floats: its dotted grip drags it anywhere; the width / colour rows (shared by pen and highlighter) hang under it
     this.stripBox = h('div', { class: 'm-stripbox', dataset: { tag: 'write_strip_box' } });
     this.stripGrip = this.makeGrip(this.stripBox, 'strip'); this.stripGrip.style.display = ''; writeBar.prepend(this.stripGrip);
@@ -520,7 +539,8 @@ const methods = {
     viewport.append(h('div', { class: 'm-stripwrap', style: { display: 'none' } }, this.stripBox));
     this.barGrip = this.makeGrip(this.bottomBar, 'bar');
     this.bottomBar.append(this.barGrip, readBar);
-    this.barIcon(this.bottomBar, 'ic_float', '하단 메뉴 위치·방향', 0xFF8E8E93, v => this.showBarLayoutMenu(v)).classList.add('m-barlayout');
+    this._barParts = { read: [...readBar.children], write: [...writeBar.children] };
+    this.barIcon(this.bottomBar, 'ic_float', '하단 메뉴 위치·방향', TOOL_GRAY, v => this.showBarLayoutMenu(v)).classList.add('m-barlayout');
     content.append(this.bottomBar); this.contentCol = content;
     if (this.floatBar()) this.applyBarMode();
 
@@ -665,7 +685,7 @@ const methods = {
     toast(on ? '필기 도구 줄을 계속 보여줍니다' : '필기 도구 줄을 숨겼습니다. 필기 모드 단추를 눌러 다시 볼 수 있습니다');
   },
   updateWriteStrip() {
-    const show = !!this.writeMode && this.writeStripShown();
+    const show = !!this.writeMode && this.writeStripShown() && !this._railTools;
     const wrap = this.stripBox.parentElement, was = wrap.style.display !== 'none';
     wrap.style.display = show ? '' : 'none';
     if (show && !was) this.applyFloatPos(this.stripBox, 'strip');
@@ -834,7 +854,7 @@ const methods = {
     const wBar = h('input', { type: 'range', min: 1, max: 100, step: 1, class: 'm-opbar', 'aria-label': '굵기', title: '굵기', dataset: { tag: 'pen_width' } });
     const syncW = () => { const v = valueOf(this.inkWidth); wBar.value = v; wNum.textContent = v; };
     wBar.addEventListener('input', () => { this.inkWidth = fracOf(+wBar.value); wNum.textContent = wBar.value; applyPen(); });
-    box.append(h('div', { class: 'm-pp-row' }, h('div', { class: 'm-pp-lbl' }, '굵기'), wBar, wNum));
+    box.append(sliderRow('굵기', wBar, wNum));
 
     // opacity slider (10-100 %)
     const oNum = h('span', { class: 'm-pp-val' });
@@ -845,7 +865,7 @@ const methods = {
       const a = Math.max(hl ? 26 : 1, Math.round(+oBar.value * 255 / 100)); oNum.textContent = oBar.value + '%';
       this.inkColor = ((a << 24) | (this.inkColor & 0xFFFFFF)) | 0; applyPen();
     });
-    box.append(h('div', { class: 'm-pp-row' }, h('div', { class: 'm-pp-lbl' }, '투명도'), oBar, oNum));
+    box.append(sliderRow('투명도', oBar, oNum));
 
     // colours
     box.append(h('div', { class: 'm-pp-sec' }, '색상'));
@@ -896,7 +916,7 @@ const methods = {
     const wBar = h('input', { type: 'range', min: 1, max: 100, step: 1, class: 'm-opbar', 'aria-label': '굵기', title: '굵기', dataset: { tag: 'mark_width' } });
     wBar.value = valueOf(this.highlightThick); wNum.textContent = wBar.value;
     wBar.addEventListener('input', () => { this.highlightThick = fracOf(+wBar.value); wNum.textContent = wBar.value; this.applyHighlightStyle(); preview.draw(); });
-    box.append(h('div', { class: 'm-pp-title' }, '하이라이트'), preview, h('div', { class: 'm-pp-row' }, h('div', { class: 'm-pp-lbl' }, '굵기'), wBar, wNum),
+    box.append(h('div', { class: 'm-pp-title' }, '하이라이트'), preview, sliderRow('굵기', wBar, wNum),
       h('div', { class: 'm-pp-sec' }, '문장을 따라 직선으로 드래그합니다. 색은 정해져 있고 굵기만 바꿀 수 있습니다.'));
     preview.draw();
     AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
@@ -1478,6 +1498,7 @@ const methods = {
     const typing = this.typingActive(), memo = this.memoMode && !typing;
     this.paintTool(this.insertButton, memo || this.highlightMode, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.readButton, !this.writeMode, ACTIVE_BG, ACTIVE_FG);
+    this.paintTool(this.readModeButton, !this.writeMode && this.renderer != null, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.inkButton, !!this.writeMode, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.textButton, typing, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.lassoButton, this.pageView != null && this.pageView.isLassoMode(), ACTIVE_BG, ACTIVE_FG);
@@ -1619,7 +1640,7 @@ const methods = {
   },
   // ---- floating menus: the bottom bar as a draggable pill, the fullscreen toolbar that stays open
   /** 'bottom' | 'float' | 'left' | 'right' (migrates the old float_bar flag). */
-  barPlace() { const p = this.recentPrefs.getString('bar_place', null); return p || (this.recentPrefs.getBoolean('float_bar', false) ? 'float' : 'bottom'); },
+  barPlace() { const p = this.recentPrefs.getString('bar_place', null); return p || (this.recentPrefs.getBoolean('float_bar', false) ? 'float' : (window.__barPlaceDefault || 'right')); },
   barVertical() { const p = this.barPlace(); return p === 'left' || p === 'right' || (p === 'float' && this.recentPrefs.getBoolean('bar_vertical', false)); },
   floatBar() { return this.barPlace() !== 'bottom'; },
   setBarPlace(place) { this.recentPrefs.putString('bar_place', place); this.applyBarMode(); },
@@ -1658,8 +1679,26 @@ const methods = {
     b.classList.toggle('vert', vert);
     b.classList.toggle('rail-left', place === 'left'); b.classList.toggle('rail-right', place === 'right');
     this.barGrip.style.display = place === 'float' ? '' : 'none';
+    this.arrangeBarTools(place === 'left' || place === 'right');
     if (f) { this.root.append(b); if (place === 'float') this.applyFloatPos(b, vert ? 'barv' : 'bar'); } else this.contentCol.append(b);
     this.railMargin(); this.enforceChrome(); this.reclampFloaters();
+  },
+  /** Side rail (Samsung Notes Windows): the pen tools live in the rail itself (keyboard, pen, highlighter, eraser, lasso, undo, redo, insert ...) and the floating pen strip is not used. */
+  arrangeBarTools(rail) {
+    const P = this._barParts; if (!P) return;
+    this._railTools = rail;
+    const sep = () => h('div', { class: 'm-tbsep', 'aria-hidden': 'true' });
+    if (rail) {
+      this.railSeps = this.railSeps || [sep(), sep()];
+      this.readBar.replaceChildren(this.pageLabel, this.textButton, this.penButton, this.hlButton, this.eraserButton, this.lassoButton, this.railSeps[0],
+        this.undoButton, this.redoButton, this.railSeps[1], this.insertButton, this.bookmarkButton);
+      this.writeBar.replaceChildren(this.stripGrip);
+    } else {
+      this.readBar.replaceChildren(...P.read); this.writeBar.replaceChildren(...P.write);
+    }
+    this.bottomBar.classList.toggle('tools-in-rail', !!rail);
+    if (this.updateWriteStrip) this.updateWriteStrip();
+    if (this.updateToolStates && this.renderer != null) this.updateToolStates();
   },
   railMargin() {
     const p = this.barPlace(), on = !this.fullscreen;

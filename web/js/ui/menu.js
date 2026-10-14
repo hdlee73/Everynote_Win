@@ -38,6 +38,7 @@ export function placeAvoiding(avoid, w, h, screenW, screenH, margin = 8, gap = 6
  *  @param avoid optional {left,top,right,bottom} viewport rectangle the card must not cover (the selected text) */
 export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0, isChild = false, rowRect = null) {
   anchor = anchor || document.body;
+  if (anchor.closest && anchor.closest('.m-header')) above = false;   // the top bar's buttons open their menu below them
   if (!isChild) dismissMenu();
   const beside = mode === 1;
   // a vertical toolbar rail (left/right/floating vertical bottom bar): menus open beside it, never on top of it
@@ -130,6 +131,14 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
     x = railOnRight ? railRect.left - w - gap - 2 : railRect.right + gap + 2;
     x = Math.max(margin, Math.min(screenW - w - margin, x));
     y = Math.max(margin, Math.min(screenH - hgt - margin, r.top + r.height / 2 - hgt / 2));
+  }
+  // tool options of a right-side rail (pen / highlighter / eraser panel): a full-height panel docked next to the rail, like Samsung Notes
+  const toolPanel = rows.some(r => r.customEl && (r.customEl.classList.contains('m-penpanel') || r.customEl.classList.contains('m-eraserbox')));
+  if (toolPanel && railRect && railOnRight && !isChild) {
+    const pw = Math.min(280, screenW - railRect.width - 24);
+    w = pw; card.style.width = pw + 'px'; card.classList.add('docked');
+    x = railRect.left - pw; y = railRect.top; card.style.height = (screenH - railRect.top) + 'px';
+    backdrop.style.right = (screenW - railRect.left) + 'px';
   }
   if (mode === 2) { x = (screenW - w) / 2; y = Math.max(margin, (screenH - hgt) / 3); }
   card.style.left = x + 'px'; card.style.top = y + 'px'; card.style.visibility = 'visible';

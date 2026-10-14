@@ -14,7 +14,7 @@ const page = await (await browser.newContext({ viewport: { width: 1200, height: 
 page.on('pageerror', e => console.log('[pageerror]', e.message));
 await page.addInitScript(() => { for (const C of [Map, WeakMap]) { if (!C.prototype.getOrInsertComputed) C.prototype.getOrInsertComputed = function (k, f) { if (!this.has(k)) this.set(k, f(k)); return this.get(k); }; if (!C.prototype.getOrInsert) C.prototype.getOrInsert = function (k, v) { if (!this.has(k)) this.set(k, v); return this.get(k); }; } });
 let fails = 0; const check = (n, ok, x = '') => { console.log((ok ? 'PASS ' : 'FAIL ') + n + (x ? '  ' + x : '')); if (!ok) fails++; };
-await page.goto(`http://localhost:${server.address().port}/`);
+await page.addInitScript(() => { window.__barPlaceDefault = 'bottom'; }); await page.goto(`http://localhost:${server.address().port}/`);
 await page.waitForFunction(() => window.app && window.app.library, null, { timeout: 30000 });
 await page.waitForTimeout(1200);
 const open = async (file, name) => page.evaluate(async ([b64, name]) => { const { host } = await import('/js/host.js'); const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0)); const p = app.library.root + '\\' + name; host._fake.put(p, bytes); await app.openPdf(p, false, 0, true); return p; }, [fs.readFileSync(path.join(here, 'samples', file)).toString('base64'), name]);

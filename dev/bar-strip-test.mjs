@@ -14,7 +14,7 @@ const page = await (await browser.newContext({ viewport: { width: 1200, height: 
 page.on('pageerror', e => console.log('[pageerror]', e.message));
 await page.addInitScript(() => { for (const C of [Map, WeakMap]) { if (!C.prototype.getOrInsertComputed) C.prototype.getOrInsertComputed = function (k, f) { if (!this.has(k)) this.set(k, f(k)); return this.get(k); }; if (!C.prototype.getOrInsert) C.prototype.getOrInsert = function (k, v) { if (!this.has(k)) this.set(k, v); return this.get(k); }; } });
 let fails = 0; const check = (n, ok, x = '') => { console.log((ok ? 'PASS ' : 'FAIL ') + n + (x ? '  ' + x : '')); if (!ok) fails++; };
-await page.goto(`http://localhost:${server.address().port}/`);
+await page.addInitScript(() => { window.__barPlaceDefault = 'bottom'; }); await page.goto(`http://localhost:${server.address().port}/`);
 await page.waitForFunction(() => window.app && window.app.library, null, { timeout: 30000 });
 await page.waitForTimeout(1200);
 const open = async (file, name) => page.evaluate(async ([b64, name]) => { const { host } = await import('/js/host.js'); const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0)); const p = app.library.root + '\\' + name; host._fake.put(p, bytes); await app.openPdf(p, false, 0, true); return p; }, [fs.readFileSync(path.join(here, 'samples', file)).toString('base64'), name]);
@@ -52,7 +52,7 @@ await ev(() => app.switchDocument(app.sessions[0])); await page.waitForTimeout(5
 await ev(() => app.toggleSplit()); await page.waitForTimeout(1200);
 const geo = () => ev(() => { const p = app.firstPageView.el.getBoundingClientRect(), pv = app.previousOverlay.getBoundingClientRect(), nx = app.nextOverlay.getBoundingClientRect(), cs = getComputedStyle(app.firstPageView.el, '::after'); return { p: p.toJSON(), pv: pv.toJSON(), nx: nx.toJSON(), bw: cs.borderTopWidth, bc: cs.borderTopColor, bl: cs.borderLeftWidth, br: cs.borderRightWidth, bb: cs.borderBottomWidth, vis: [app.previousOverlay, app.nextOverlay].map(e => getComputedStyle(e).display) }; });
 let g = await geo(); console.log(JSON.stringify(g));
-check('active pane has 5px blue frame on all four sides', g.bw === '5px' && g.bl === '5px' && g.br === '5px' && g.bb === '5px' && g.bc === 'rgb(0, 122, 255)');
+check('active pane has 5px blue frame on all four sides', g.bw === '5px' && g.bl === '5px' && g.br === '5px' && g.bb === '5px' && g.bc === 'rgb(62, 109, 240)');
 check('arrows sit inside the active pane edges', g.pv.left >= g.p.left && g.pv.left < g.p.left + 20 && g.nx.right <= g.p.right && g.nx.right > g.p.right - 20, `${g.pv.left} ${g.p.left} ${g.nx.right} ${g.p.right}`);
 await ev(() => app.swapSplitPanes()); await page.waitForTimeout(200);
 g = await geo(); const pl = await ev(() => parseFloat(app.previousOverlay.style.left)); check('after swap the arrows follow the active pane', Math.abs(pl - (g.p.left + 8)) < 1 && g.nx.right <= g.p.right + 1 && g.nx.right > g.p.right - 20, `${pl} ${g.p.left} ${g.nx.right} ${g.p.right}`);

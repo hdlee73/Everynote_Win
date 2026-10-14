@@ -6,7 +6,7 @@ const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/ch
 const pg=await b.newPage({viewport:{width:1100,height:800}});
 const errs=[]; pg.on('pageerror',e=>errs.push('PE '+e.message)); pg.on('console',m=>{if(m.type()==='error'&&!/404/.test(m.text()))errs.push('CE '+m.text())});
 await pg.addInitScript(()=>{Map.prototype.getOrInsertComputed??=function(k,f){if(!this.has(k))this.set(k,f(k));return this.get(k)}});
-await pg.goto(`http://localhost:${PORT}/index.html`); await pg.waitForTimeout(1500);
+await pg.addInitScript(() => { window.__barPlaceDefault = 'bottom'; }); await pg.goto(`http://localhost:${PORT}/index.html`); await pg.waitForTimeout(1500);
 let fails=0; const check=(n,ok,x='')=>{console.log((ok?'PASS ':'FAIL ')+n+(x?'  '+x:''));if(!ok)fails++};
 const bytes=[...fs.readFileSync('dev/samples/sample-ko.pdf')];
 await pg.evaluate(async([b,p])=>{const {host}=await import('./js/host.js');host._fake.put(p,new Uint8Array(b));await app.openPdf(p);},[bytes,'C:\\Users\\dev\\Documents\\PDF Note\\sample.pdf']);

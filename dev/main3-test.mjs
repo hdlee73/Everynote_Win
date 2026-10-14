@@ -18,7 +18,7 @@ page.on('response', r => { if (r.status() >= 400) console.log('[http]', r.status
 page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') { console.log('[console]', m.text()); if (m.type() === 'error') errors++; } });
 page.on('pageerror', e => { console.log('[pageerror]', e.message); errors++; });
 await page.addInitScript(() => { for (const C of [Map, WeakMap]) { if (!C.prototype.getOrInsertComputed) C.prototype.getOrInsertComputed = function (k, f) { if (!this.has(k)) this.set(k, f(k)); return this.get(k); }; if (!C.prototype.getOrInsert) C.prototype.getOrInsert = function (k, v) { if (!this.has(k)) this.set(k, v); return this.get(k); }; } });
-await page.goto(`http://localhost:${port}/dev/main3-test.html`);
+await page.addInitScript(() => { window.__barPlaceDefault = 'bottom'; }); await page.goto(`http://localhost:${port}/dev/main3-test.html`);
 await page.waitForFunction(() => window.READY, null, { timeout: 30000 });
 await page.evaluate(async () => { window.AP = (await import('/js/painter.js')).AnnotationPainter; });
 let fails = 0;

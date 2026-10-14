@@ -7,7 +7,7 @@ const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/ch
 const pg=await b.newPage({viewport:{width:1280,height:800}});
 const errs=[]; pg.on('pageerror',e=>errs.push('PE '+e.message)); pg.on('console',m=>{if(m.type()==='error')errs.push('CE '+m.text())});
 await pg.addInitScript(()=>{Map.prototype.getOrInsertComputed??=function(k,f){if(!this.has(k))this.set(k,f(k));return this.get(k)}});
-await pg.goto(`http://localhost:${PORT}/index.html`); await pg.waitForTimeout(1500);
+await pg.addInitScript(() => { window.__barPlaceDefault = 'bottom'; }); await pg.goto(`http://localhost:${PORT}/index.html`); await pg.waitForTimeout(1500);
 const ko=[...fs.readFileSync('dev/samples/sample-ko.pdf')], en=[...fs.readFileSync('dev/samples/sample.pdf')];
 await pg.evaluate(async([a,c])=>{const {host}=await import('./js/host.js');host._fake.init();const L=host._fake.lib;host._fake.put(L+'\\한글.pdf',new Uint8Array(a));host._fake.put(L+'\\English.pdf',new Uint8Array(c));localStorage.clear()},[ko,en]);
 let fails=0; const check=(n,ok,info='')=>{console.log((ok?'PASS ':'FAIL ')+n+(info?' '+info:'')); if(!ok)fails++;};

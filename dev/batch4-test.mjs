@@ -6,7 +6,7 @@ const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/ch
 const pg=await b.newPage({viewport:{width:1100,height:800}});
 const errs=[]; pg.on('pageerror',e=>errs.push('PE '+e.message)); pg.on('console',m=>{if(m.type()==='error'&&!/404/.test(m.text()))errs.push('CE '+m.text())});
 await pg.addInitScript(()=>{Map.prototype.getOrInsertComputed??=function(k,f){if(!this.has(k))this.set(k,f(k));return this.get(k)}});
-await pg.goto(`http://localhost:${PORT}/index.html`); await pg.waitForTimeout(1500);
+await pg.addInitScript(() => { window.__barPlaceDefault = 'bottom'; }); await pg.goto(`http://localhost:${PORT}/index.html`); await pg.waitForTimeout(1500);
 let fails=0; const check=(n,ok,x='')=>{console.log((ok?'PASS ':'FAIL ')+n+(x?'  '+x:''));if(!ok)fails++};
 const bytes=[...fs.readFileSync('dev/samples/sample-ko.pdf')];
 const LIB='C:\\Users\\dev\\Documents\\PDF Note\\sample.pdf';
@@ -16,8 +16,8 @@ await pg.waitForTimeout(1500);
 // 7: bar placement
 const place=async(p)=>pg.evaluate(async p=>{app.setBarPlace(p);await new Promise(r=>setTimeout(r,200));const r=document.querySelector('[data-tag="reading_toolbar"]').getBoundingClientRect();const c=document.querySelector('.m-content').getBoundingClientRect();return {w:r.width,h:r.height,l:r.left,r:r.right,cl:parseFloat(getComputedStyle(document.querySelector('.m-content')).paddingLeft),cr:parseFloat(getComputedStyle(document.querySelector('.m-content')).paddingRight),cls:document.querySelector('[data-tag="reading_toolbar"]').className};},p);
 const bt=await place('bottom'); check('bottom: wide horizontal bar', bt.w>800&&bt.h<80, JSON.stringify(bt));
-const lf=await place('left'); check('left rail: narrow, vertical, content shifted', lf.w<70&&lf.h>400&&lf.cl>=50&&lf.cls.includes('vert'), JSON.stringify(lf));
-const rt=await place('right'); check('right rail: content right edge shifted', rt.w<70&&rt.cr>=50&&rt.cl===0, JSON.stringify(rt));
+const lf=await place('left'); check('left rail: narrow, vertical, content shifted', lf.w<70&&lf.h>400&&lf.cl>=44&&lf.cls.includes('vert'), JSON.stringify(lf));
+const rt=await place('right'); check('right rail: content right edge shifted', rt.w<70&&rt.cr>=44&&rt.cl===0, JSON.stringify(rt));
 const fl=await place('float'); check('float horizontal', fl.w>300&&fl.h<80&&fl.cls.includes('float'), JSON.stringify(fl));
 await pg.evaluate(()=>app.setBarOrientation(true)); await pg.waitForTimeout(200);
 const fv=await pg.evaluate(()=>{const r=document.querySelector('[data-tag="reading_toolbar"]').getBoundingClientRect();return {w:r.width,h:r.height}});

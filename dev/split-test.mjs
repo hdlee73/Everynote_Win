@@ -13,7 +13,7 @@ const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromi
 const page = await browser.newPage({ viewport: { width: 1100, height: 500 } });
 page.on('pageerror', e => console.log('[pageerror]', e.message));
 await page.addInitScript(() => { for (const C of [Map, WeakMap]) { if (!C.prototype.getOrInsertComputed) C.prototype.getOrInsertComputed = function (k, f) { if (!this.has(k)) this.set(k, f(k)); return this.get(k); }; if (!C.prototype.getOrInsert) C.prototype.getOrInsert = function (k, v) { if (!this.has(k)) this.set(k, v); return this.get(k); }; } });
-await page.goto(`http://localhost:${server.address().port}/dev/split-test.html`);
+await page.addInitScript(() => { window.__barPlaceDefault = 'bottom'; }); await page.goto(`http://localhost:${server.address().port}/dev/split-test.html`);
 await page.waitForFunction(() => window.__R, null, { timeout: 30000 });
 const R = await page.evaluate(() => window.__R);
 await page.waitForTimeout(300); await page.screenshot({ path: path.join(out, 'split-pages.png') });

@@ -19,7 +19,7 @@ page.on('response', r => { if (r.status() === 404) console.log('[404]', r.url())
 page.on('console', m => { if (m.type() === 'error') { console.log('[console.error]', m.text()); errors++; } });
 page.on('pageerror', e => { console.log('[pageerror]', e.message); errors++; });
 await page.addInitScript(() => { for (const C of [Map, WeakMap]) { if (!C.prototype.getOrInsertComputed) C.prototype.getOrInsertComputed = function (k, f) { if (!this.has(k)) this.set(k, f(k)); return this.get(k); }; if (!C.prototype.getOrInsert) C.prototype.getOrInsert = function (k, v) { if (!this.has(k)) this.set(k, v); return this.get(k); }; } });
-await page.goto(`http://localhost:${port}/dev/main2-test.html`);
+await page.addInitScript(() => { window.__barPlaceDefault = 'bottom'; }); await page.goto(`http://localhost:${port}/dev/main2-test.html`);
 await page.waitForFunction(() => window.READY && window.T.PageElement, null, { timeout: 30000 });
 let fails = 0;
 const ev = (fn, a) => page.evaluate(fn, a);

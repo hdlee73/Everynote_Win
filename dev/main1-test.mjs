@@ -21,7 +21,7 @@ await page.addInitScript(() => { for (const C of [Map, WeakMap]) { if (!C.protot
 let fails = 0;
 const check = (n, ok, x = '') => { console.log((ok ? 'PASS ' : 'FAIL ') + n + (x ? '  ' + x : '')); if (!ok) fails++; };
 const shot = async n => { await page.waitForTimeout(450); await page.screenshot({ path: path.join(out, 'main1-' + n + '.png') }); };
-await page.goto(`http://localhost:${port}/`);
+await page.addInitScript(() => { window.__barPlaceDefault = 'bottom'; }); await page.goto(`http://localhost:${port}/`);
 await page.waitForFunction(() => window.app && window.app.library, null, { timeout: 30000 }).catch(() => {});
 await page.waitForTimeout(1500);
 await shot('00-boot');
