@@ -9,7 +9,7 @@
 .m3-llabel{font-size:13px;padding-left:5px}
 
 /* ---- inline typing ---- */
-.m3-inline-text{position:absolute;z-index:40;box-sizing:border-box;margin:0;padding:2px 3px;resize:none;overflow:hidden;background:rgba(255,255,255,.4);border:1px solid #007AFF;border-radius:4px;outline:none;user-select:text;-webkit-user-select:text;touch-action:auto;white-space:pre-wrap;word-break:break-all}
+.m3-inline-text{position:absolute;z-index:40;box-sizing:border-box;margin:0;padding:2px 3px;resize:none;overflow:hidden;background:rgba(255,255,255,.4);border:1px solid var(--accent);border-radius:4px;outline:none;user-select:text;-webkit-user-select:text;touch-action:auto;white-space:pre-wrap;word-break:break-all}
 .m3-inline-text::placeholder{color:var(--ph,rgba(28,28,30,.4));opacity:1}
 .m3-handle{position:absolute;z-index:41;width:30px;height:30px;border-radius:15px;color:#fff;font-size:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:pointer;touch-action:none;user-select:none}
 .m3-inline-bar{position:absolute;z-index:42;left:50%;transform:translateX(-50%);top:0;width:min(330px,calc(100% - 16px));padding:2px 6px;background:rgba(255,255,255,.95);border-radius:20px;box-shadow:0 3px 12px rgba(0,0,0,.22);box-sizing:border-box}
@@ -21,7 +21,7 @@
 .m3-rectime{font-size:15px;font-weight:700;color:#1C1C1E;padding:0 12px 0 8px}
 .m3-audio{padding:8px 16px 4px;display:flex;flex-direction:column}
 .m3-audio-time{height:32px;display:flex;align-items:center;justify-content:center;font-size:15px;color:#1C1C1E}
-.m3-seek{width:100%;height:36px;accent-color:#007AFF;margin:0}
+.m3-seek{width:100%;height:36px;accent-color:var(--accent);margin:0}
 
 /* ---- recordings tab rows (same look as the outline rows of the side panel) ---- */
 .m3-empty{text-align:center;font-size:12px;color:#8E8E93;padding:18px 4px 8px;white-space:pre-wrap;word-break:keep-all}
@@ -35,17 +35,17 @@
 .m3-help-title{font-size:21px;font-weight:700;color:#1C1C1E}
 .m3-help-ver{font-size:13px;color:#8E8E93;padding:2px 0 8px}
 .m3-help-body{flex:1 1 0;min-height:0;overflow-y:auto;padding-right:4px}
-.m3-help-h{font-size:17px;font-weight:700;color:#007AFF;padding:20px 0 4px}
+.m3-help-h{font-size:17px;font-weight:700;color:var(--accent);padding:20px 0 4px}
 .m3-help-h:first-child{padding-top:6px}
 .m3-help-item{font-size:15px;line-height:1.3;color:#2C2C2E;padding-top:8px;white-space:pre-wrap;user-select:text;-webkit-user-select:text}
 .m3-help-line{height:1px;background:#E5E5EA;margin-top:10px;transform:scaleY(.5);flex:none}
-.m3-help-ok{flex:none;height:50px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#007AFF;cursor:pointer}
+.m3-help-ok{flex:none;height:50px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:var(--accent);cursor:pointer}
 .m3-help-ok:hover{background:rgba(0,0,0,.035)}
 
 /* ---- v3: icon-only lasso shapes ---- */
 .m3-lchip{width:40px;height:36px;justify-content:center;padding:0;margin:0 1px;border-radius:14px;background:#F2F2F7;color:#3A3A3C}
 .m3-lchip:hover{background:#E8E8EE}
-.m3-lchip.on{background:#E5F0FF;color:#007AFF;box-shadow:inset 0 0 0 2px #007AFF}
+.m3-lchip.on{background:var(--accent-soft);color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent)}
 
 /* ---- v3: typing toolbar (two icon rows) + list markers ---- */
 .m3-inline-bar{width:min(380px,calc(100% - 16px))}
@@ -54,7 +54,7 @@
 .m3-tbtn{flex:none;width:34px;height:32px;margin:0 1px;padding:0;border:0;border-radius:16px;background:transparent;color:#3A3A3C;display:flex;align-items:center;justify-content:center;cursor:pointer;
   font:700 14px/1 inherit;-webkit-user-select:none;user-select:none}
 .m3-tbtn:hover{background:rgba(0,0,0,.06)}
-.m3-tbtn.on{background:#E5F0FF;color:#007AFF;box-shadow:inset 0 0 0 1.5px #007AFF}
+.m3-tbtn.on{background:var(--accent-soft);color:var(--accent);box-shadow:inset 0 0 0 1.5px var(--accent)}
 .m3-tbtn:focus{outline:none}
 .m3-tbtn:focus-visible{outline:2px solid rgba(0,122,255,.55);outline-offset:1px}
 .m3-aa{width:38px;margin-right:4px;background:#F2F2F7;font-family:inherit;font-weight:700;font-size:14px}
@@ -76,4 +76,4 @@
 .m3-inline-bar>*{width:max-content;min-width:100%;box-sizing:border-box}
 .m3-line-row{height:38px;align-items:center}
 .m3-line-label{font-size:13px;color:#1C1C1E;padding:0 6px}
-.m3-fit-ruler{margin-left:8px;height:32px;padding:0 10px;border:0;border-radius:16px;background:#E8F1FF;color:#007AFF;font-size:13px;font-weight:700;cursor:pointer}
+.m3-fit-ruler{margin-left:8px;height:32px;padding:0 10px;border:0;border-radius:16px;background:#E8F1FF;color:var(--accent);font-size:13px;font-weight:700;cursor:pointer}

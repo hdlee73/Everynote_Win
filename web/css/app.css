@@ -1,7 +1,31 @@
 /* PDF Note (Windows) — UI ported from the Android app. 1dp == 1px. */
+/* Everynote UI tokens (Samsung Notes style). One place; every stylesheet reuses these. */
+:root{
+  --bg:#F7F8FB;            /* app background */
+  --surface:#FFFFFF;       /* cards, bars, panels */
+  --surface-2:#F2F4F8;     /* sidebar, chips, inputs */
+  --surface-hover:rgba(20,24,40,.05);
+  --line:#E6E8EE;          /* thin separators */
+  --text:#1A1C22;
+  --text-2:#5F6475;
+  --muted:#9097A6;
+  --accent:#3E6DF0;
+  --accent-soft:#E8EEFD;
+  --danger:#E5484D;
+  --radius-s:8px;--radius-m:12px;--radius-l:18px;--radius-xl:24px;
+  --shadow-s:0 1px 3px rgba(20,24,40,.10);
+  --shadow-m:0 6px 24px rgba(20,24,40,.16);
+  --font:"Malgun Gothic","Segoe UI","Noto Sans KR","Noto Sans CJK KR","Roboto",sans-serif;
+  --topbar-h:44px;
+}
+:root[data-theme="dark"]{
+  --bg:#16181D;--surface:#20232A;--surface-2:#1B1E24;--surface-hover:rgba(255,255,255,.07);--line:#33373F;
+  --text:#ECEDF1;--text-2:#B3B8C4;--muted:#868C99;--accent:#7A9BFF;--accent-soft:#2A3558;--danger:#FF6B70;
+  --shadow-s:0 1px 3px rgba(0,0,0,.5);--shadow-m:0 6px 24px rgba(0,0,0,.5);
+}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;overflow:hidden;background:#F2F2F7;color:#1C1C1E;
-  font-family:"Segoe UI","Malgun Gothic","Roboto","Noto Sans KR","Noto Sans CJK KR",sans-serif;font-size:14px;
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font-family:var(--font);font-size:14px;
   -webkit-user-select:none;user-select:none;touch-action:none}
 input,textarea{font-family:inherit;-webkit-user-select:text;user-select:text}
 button{font-family:inherit}
@@ -20,18 +44,18 @@ button{font-family:inherit}
 .ad-root.in .ad-dim{background:rgba(0,0,0,.36)}
 .ad-root.sheet.in .ad-dim{background:rgba(0,0,0,.12)}
 .ad-root.out .ad-dim{background:rgba(0,0,0,0);transition:background .15s}
-.ad-card{width:min(calc(100vw - 48px),320px);background:rgba(255,255,255,.98);border-radius:20px;overflow:hidden;opacity:0;transform:scale(.92);transition:opacity .18s,transform .18s cubic-bezier(.2,.9,.3,1.2);box-shadow:0 12px 44px rgba(0,0,0,.22),0 0 0 .5px rgba(0,0,0,.06)}
+.ad-card{width:min(calc(100vw - 48px),320px);background:var(--surface);border-radius:var(--radius-xl);overflow:hidden;opacity:0;transform:scale(.92);transition:opacity .18s,transform .18s cubic-bezier(.2,.9,.3,1.2);box-shadow:0 12px 44px rgba(0,0,0,.22),0 0 0 .5px rgba(0,0,0,.06)}
 .ad-root.in .ad-card{opacity:1;transform:none}
 .ad-root.out .ad-card{opacity:0;transform:scale(.95);transition:opacity .12s,transform .12s}
 .ad-body{padding:22px 20px 18px}
-.ad-title{font-size:17px;font-weight:600;letter-spacing:-.2px;color:#1C1C1E;text-align:center}
+.ad-title{font-size:16px;font-weight:700;letter-spacing:-.2px;color:var(--text);text-align:center}
 .ad-msg{max-height:50vh;overflow:auto}
 .ad-msg-inner{font-size:14px;line-height:1.4;color:#636366;text-align:center;white-space:pre-wrap;word-break:keep-all;overflow-wrap:anywhere}
-.hair{height:1px;background:#E5E5EA;flex:none}
-.vhair{width:1px;background:#E5E5EA;flex:none}
+.hair{height:1px;background:var(--line);flex:none}
+.vhair{width:1px;background:var(--line);flex:none}
 .ad-bar{display:flex;flex-direction:column}
 .ad-bar.row{flex-direction:row}
-.ad-btn{min-height:50px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;text-align:center;font-size:17px;color:#007AFF;padding:4px 14px;cursor:pointer;line-height:1.25;overflow:hidden;-webkit-user-select:none;user-select:none;transition:background .12s}
+.ad-btn{min-height:46px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;text-align:center;font-size:15px;color:var(--accent);padding:4px 14px;cursor:pointer;line-height:1.25;overflow:hidden;-webkit-user-select:none;user-select:none;transition:background .12s}
 .ad-btn-label{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:keep-all;overflow-wrap:anywhere}
 .ad-btn:active{background:rgba(0,0,0,.07)}
 .ad-btn:focus-visible{outline:2px solid rgba(0,122,255,.5);outline-offset:-3px}
@@ -55,7 +79,7 @@ button{font-family:inherit}
 
 /* ---- AnchoredMenu ---- */
 .amenu-backdrop{position:fixed;inset:0;z-index:9500}
-.amenu{position:fixed;z-index:9501;background:#fff;border-radius:18px;border:1px solid rgba(0,0,0,.08);padding:6px;box-shadow:0 6px 24px rgba(0,0,0,.22);
+.amenu{position:fixed;z-index:9501;background:var(--surface);border-radius:var(--radius-l);border:1px solid rgba(0,0,0,.08);padding:6px;box-shadow:0 6px 24px rgba(0,0,0,.22);
   opacity:0;transform:scale(.96);transition:opacity .12s,transform .12s;transform-origin:center bottom}
 .amenu.in{opacity:1;transform:none}
 .amenu-scroll{max-height:60vh;overflow:auto}
@@ -69,8 +93,8 @@ button{font-family:inherit}
 .amenu-sc:hover{background:rgba(0,0,0,.04)}
 
 /* ---- form fields (field_background.xml) ---- */
-.field{background:#F2F2F7;border:2px solid #F2F2F7;border-radius:12px;padding:12px 16px;font-size:16px;color:#1C1C1E;width:100%;outline:none}
-.field:focus{background:#fff;border-color:#007AFF}
+.field{background:var(--surface-2);border:2px solid var(--surface-2);border-radius:var(--radius-m);padding:12px 16px;font-size:16px;color:#1C1C1E;width:100%;outline:none}
+.field:focus{background:#fff;border-color:var(--accent)}
 
 .amenu-scrollbox{position:relative}
 .amenu-more{position:absolute;left:0;right:0;bottom:0;height:30px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:3px;box-sizing:border-box;cursor:pointer;background:linear-gradient(to bottom,rgba(255,255,255,0),rgba(255,255,255,.96) 60%);border-radius:0 0 12px 12px}.amenu-more svg{display:block;animation:amenu-bob 1.6s ease-in-out infinite}@keyframes amenu-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(2px)}}
