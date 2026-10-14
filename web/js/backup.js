@@ -16,7 +16,7 @@ export async function builtinTemplate(name) {
   return file;
 }
 const extOf = p => { const n = baseName(p), i = n.lastIndexOf('.'); return i > 0 ? n.slice(i + 1).replace(/[^A-Za-z0-9]/g, '') || 'pdf' : 'pdf'; };
-import { ASSET_NAME, relPath } from './sync.js';
+import { ASSET_NAME, relPath, referencedAssets } from './sync.js';
 
 export const BACKUP_FORMAT = 'Everynote backup v1';
 export const BACKUP_MANIFEST = 'everynote-backup.json';
@@ -29,19 +29,24 @@ export function safeRel(rel, pdf) {
 }
 const toWin = rel => rel.split('/').join('\\');
 
-/** Writes every document, its notes and all pictures / recordings / videos into one zip. Returns the number of documents. */
-export async function createBackup(env, outPath) {
+/** Writes every document, its notes and all pictures / recordings / videos into one zip. Returns the number of documents.
+ *  opts.folder (absolute path of a library folder): only the documents inside that folder (and its subfolders) with the pictures / recordings / videos they use;
+ *  paths stay relative to the library, so restoring on another device recreates the same folders. */
+export async function createBackup(env, outPath, opts = {}) {
   const lib = env.library, docs = [], folders = [];
+  const start = opts.folder && relPath(lib.root, opts.folder) != null ? opts.folder : null;
   const walk = async dir => {
     for (const f of await lib.list(dir)) {
       const rel = relPath(lib.root, f); if (rel == null) continue;
       if (lib.isDirectory(f)) { folders.push({ path: rel, color: lib.folderColor(f) | 0 }); await walk(f); } else docs.push({ file: f, rel });
     }
   };
-  await walk(lib.root);
-  const assetNames = [];
-  try { for (const e of await host.list(await AnnotationStore.assetsDir())) if (!e.isDir && ASSET_NAME.test(e.name)) assetNames.push(e.name); } catch { /* no assets yet */ }
-  const manifest = { format: BACKUP_FORMAT, created: Date.now(), app: 'windows', version: env.version || '', documents: [], folders, assets: assetNames };
+  if (start) { folders.push({ path: relPath(lib.root, start), color: lib.folderColor(start) | 0 }); await walk(start); } else await walk(lib.root);
+  const diskAssets = new Set();
+  try { for (const e of await host.list(await AnnotationStore.assetsDir())) if (!e.isDir && ASSET_NAME.test(e.name)) diskAssets.add(e.name); } catch { /* no assets yet */ }
+  const used = new Set();
+  const manifest = { format: BACKUP_FORMAT, created: Date.now(), app: 'windows', version: env.version || '', documents: [], folders, assets: [] };
+  if (start) manifest.folder = relPath(lib.root, start);
   const entries = [{ name: BACKUP_MANIFEST, text: '' }];
   for (let i = 0; i < docs.length; i++) {
     const d = docs[i], o = { i, path: d.rel, favorite: !!lib.favorite(d.file) };
@@ -53,8 +58,12 @@ export async function createBackup(env, outPath) {
     }
     manifest.documents.push(o);
     entries.push(...tpl);
-    entries.push({ name: `docs/${i}.pdf`, file: d.file }, { name: `notes/${i}.json`, text: await env.exportNote(d.rel) });
+    const note = await env.exportNote(d.rel);
+    if (start) { try { for (const n of referencedAssets(note)) if (diskAssets.has(n)) used.add(n); } catch { /* unreadable note: no attachments */ } }
+    entries.push({ name: `docs/${i}.pdf`, file: d.file }, { name: `notes/${i}.json`, text: note });
   }
+  const assetNames = start ? [...used] : [...diskAssets];
+  manifest.assets = assetNames;
   for (const n of assetNames) entries.push({ name: 'assets/' + n, file: await AnnotationStore.assetPath(n) });
   entries[0].text = JSON.stringify(manifest, null, 2);
   await host.zipCreate(outPath, entries);

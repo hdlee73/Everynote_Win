@@ -8,11 +8,12 @@ import { installMain1, initMain1 } from './app-main1.js';
 import { installMain2, initMain2 } from './app-main2.js';
 import { installMain3, initMain3 } from './app-main3.js';
 import { installSplit } from './app-split.js';
+import { installEdit, initEdit } from './app-edit.js';
 
 export class MainActivity {
   constructor() {
     this.initState();
-    initMain1(this); initMain2(this); initMain3(this);
+    initMain1(this); initMain2(this); initMain3(this); initEdit(this);
   }
 
   /** Fields declared at the top of MainActivity.java (types/defaults per spec/main1.md §6). Each mixin's initMainN adds its own extras. */
@@ -32,7 +33,7 @@ export class MainActivity {
     this.twoPage = false;
     this.selectedColor = 0x66FFDE59;
     this.highlightFree = false; this.highlightThick = 0.022;   // 하이라이트 (text Mark tool): straight only, thickness adjustable
-    this.highlighterMode = false; this.penStash = null; this.hlStraight = false;   // 형광펜 (ink highlighter): borrows the pen slots, see enterHighlighter
+    this.highlighterMode = false; this.penStash = null; this.hlStraight = false; this.tapeMode = false; this.tapeStraight = true;   // 형광펜 (ink highlighter): borrows the pen slots, see enterHighlighter
     this.highlightMode = false; this.memoMode = false; this.outlineMode = false; this.fullscreen = false;
     this.verticalPageSwipe = false; this.fingerInk = false; this.swipeEnabled = true;
     this.inkMode = 0; this.inkColor = 0xFF1C1C1E; this.inkWidth = 0.004;
@@ -52,4 +53,4 @@ export class MainActivity {
   /** Android onCreate(); called once from index.html after DOM is ready. */
   async onCreate() { /* implemented in app-main1.js (assigned onto the prototype) */ }
 }
-installMain1(MainActivity); installMain2(MainActivity); installMain3(MainActivity); installSplit(MainActivity);
+installMain1(MainActivity); installMain2(MainActivity); installMain3(MainActivity); installSplit(MainActivity); installEdit(MainActivity);

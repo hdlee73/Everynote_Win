@@ -464,7 +464,7 @@ export class PdfPageView {
     this.invalidate();
   }
   /** Pen type of new strokes: 0 ballpoint, 1 pencil, 2 fountain pen, 3 brush, 4 felt marker. */
-  setInkPen(pen) { this.inkPen = Math.max(0, Math.min(5, pen | 0)); }
+  setInkPen(pen) { this.inkPen = Math.max(0, Math.min(6, pen | 0)); }
   setInkTool(mode, color, width) {
     this.inkMode = mode; this.inkColor = color; this.inkWidth = width;
     if (mode !== 0) { this.setLassoMode(false); this.highlightMode = this.memoMode = this.outlineMode = false; }
@@ -818,6 +818,29 @@ export class PdfPageView {
     if (!this.darkPage) return this.bitmap;
     if (!this._darkBitmap || this._darkBitmap.src !== this.bitmap) { this._darkBitmap = darkFilterCanvas(this.bitmap); this._darkBitmap.src = this.bitmap; }
     return this._darkBitmap;
+  }
+
+  /** A tap on a masking tape fades it out (to read what is under it) and brings it back. Returns true when a tape was hit. */
+  _toggleTapeAt(x, y, dest) {
+    const list = this.strokes || []; const near = (px, py, ax, ay, bx, by) => {
+      const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy, t = l2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l2)) : 0;
+      return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+    };
+    for (let i = list.length - 1; i >= 0; i--) {
+      const s = list[i]; if (s.page !== this.page || s.pen !== AnnotationPainter.TAPE || !s.points.length) continue;
+      const half = Math.max(4, s.width * dest.width() / 2);
+      let hit = false;
+      for (let k = 0; k < s.points.length && !hit; k++) {
+        const a = s.points[k], b = s.points[Math.min(k + 1, s.points.length - 1)];
+        hit = near(x, y, dest.left + a.x * dest.width(), dest.top + a.y * dest.height(), dest.left + b.x * dest.width(), dest.top + b.y * dest.height()) <= half;
+      }
+      if (hit) {
+        const set = AnnotationPainter.revealedTapes;
+        if (set.has(s)) set.delete(s); else set.add(s);
+        this.invalidate(); return true;
+      }
+    }
+    return false;
   }
 
   /** Java onDraw. ctx is in view px (already scaled for devicePixelRatio). */
@@ -1733,6 +1756,7 @@ export class PdfPageView {
             return true;
           }
         }
+        if (this._toggleTapeAt(e.x, e.y, dest)) return true;
         for (let i = this.marks.length - 1; i >= 0; i--) {
           const m = this.marks[i];
           if (m.page === this.page && nx >= m.left && nx <= m.right && ny >= m.top && ny <= m.bottom) { this._L('onMarkTapped', m); return true; }

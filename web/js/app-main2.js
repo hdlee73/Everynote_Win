@@ -800,7 +800,7 @@ M.showDeviceSync = function () {
   const addr = inputField({ hint: '주소 (예: 192.168.0.12:43125)', text: this.recentPrefs.getString('sync_address', '') });
   const code = inputField({ hint: '코드 6자리', text: '' });
   code.input.inputMode = 'numeric'; code.input.maxLength = 6;
-  const note = h('div', { class: 'sync-note' }, '휴대폰 앱의 ‘도구 → 다른 기기와 동기화’를 열어 두고 표시된 주소와 코드를 입력하세요. 다음 화면에서 문서와 방향을 고릅니다. 자동으로 동기화되지 않습니다.');
+  const note = h('div', { class: 'sync-note' }, '같은 Wi-Fi나 휴대폰 핫스팟·USB 테더링으로 연결된 상태에서, 휴대폰 앱의 ‘도구 → 다른 기기와 동기화’를 열어 두고 표시된 주소와 코드를 입력하세요. 다음 화면에서 문서와 방향을 고릅니다. 자동으로 동기화되지 않습니다.');
   alertCard({
     title: '기기 동기화', view: h('div', { class: 'sync-view' }, note, addr.view, code.view),
     positive: ['연결', () => this.connectDeviceSync(addr.input.value, code.input.value)], negative: ['취소'],
@@ -898,11 +898,13 @@ M.showLibrary = function () {
   if (!this.libraryFolder || !this.library.isDirectory(this.libraryFolder)) this.libraryFolder = this.library.root;
   this.libraryDialog = new LibraryDialog(this, this.library, this.libraryFolder, {
     open: file => this.openPdf(file),
-    importFiles: folder => { this.libraryFolder = folder; this.choosePdf(); },
-    newNote: (folder, refresh) => this.createNotebook(folder, refresh),
+    importFiles: () => this.choosePdf(),
+    newNote: (folder, refresh) => this.createNotebook(this.library.root, refresh),
     settings: () => this.showSettings(),
     changed: (source, target, moved) => { if (moved) this.libraryChanged(source, target); },
     selectedFolder: folder => { this.libraryFolder = folder; },
+    backupFolder: folder => this.startLibraryBackup(folder),
+    restoreBackup: () => this.startLibraryRestore(),
     removed: files => { for (const s of [...this.sessions]) if (files.some(f => samePath(f, s.uri))) this.closeDocument(s); },
   });
   this.libraryDialog.show();
@@ -923,7 +925,7 @@ M.receiveTemplate = async function (source) {
     if (target.setTemplate) target.setTemplate(copy);
   } catch (e) { toast('서식 파일을 가져오지 못했습니다'); }
 };
-M.newNotebook = function () { this.createNotebook(this.libraryFolder == null ? this.library.root : this.libraryFolder, () => {}); };
+M.newNotebook = function () { this.createNotebook(this.library.root, () => {}); };
 M.createNotebook = function (folder, refresh) {
   const panel = h('div');
   const name = inputField({ hint: '노트 이름', text: '새 노트', cls: 'lib-notename' });
@@ -1262,6 +1264,9 @@ M.onElementTapped = function (element) {
   if (kind === 'table') { rows.push(new R('셀 내용 편집', 'ic_table', () => this.editTableCells(element)).tint('#30B0C7')); rows.push(new R('행·열·색상', 'ic_sliders', () => this.showTableDialog(element)).tint('#AF52DE')); }
   if (kind === 'link' || !['youtube', 'shape', 'table', 'image', 'sticker', 'video'].includes(kind)) rows.push(new R('수정', 'ic_compose', () => this.editPageElement(element, false)).tint('#007AFF'));
   rows.push(new R('위치·크기', 'ic_fullscreen', () => this.editElementGeometry(element)).tint('#34C759'));
+  rows.push(new R('잘라내기', 'ic_cut', () => this.copySelectedElement(true)).tint('#5856D6'));
+  rows.push(new R('복사', 'ic_copy', () => this.copySelectedElement(false)).tint('#5856D6'));
+  rows.push(new R('복제', 'ic_duplicate', () => this.duplicateSelectedElement()).tint('#5856D6'));
   if (AnnotationPainter.rotates(element)) rows.push(R.custom(this.opacityRow(element)));
   rows.push(new R('삭제', 'ic_delete', () => this.deleteElement(element)).danger());
   AnchoredMenu.showCentered('페이지 ' + (element.page + 1), rows);
@@ -1301,8 +1306,8 @@ M.deleteElement = function (element) {
   const remove = pred => { for (let i = els.length - 1; i >= 0; i--) if (pred(els[i])) els.splice(i, 1); };
   if (element.kind === 'hyperlink') remove(e => e.kind === 'hyperlink' && e.page === element.page && e.color === element.color && e.text === element.text);
   else remove(e => e === element);
-  if (element.kind === 'video') AnnotationStore.deleteAsset(element.text).catch(() => {});
-  this.store.save(); this.pageView.selectElement(null); this.redrawPages();
+  this.store.save(); this.pageView.selectElement(null);   // the video file stays so that 실행 취소 can bring the item back
+  this.redrawPages();
   if (this.sidebarVisible && this.panelTab === 4) this.rebuildInsertions();
 };
 
@@ -1548,6 +1553,7 @@ M.showStickerPicker = function () {
 M.insertRows = function () {
   const R = AnchoredMenu.Row;
   return [
+    ...this.pasteElementRow(R),
     new R('사진·이미지', 'ic_image', () => this.insertImage()).tint('#007AFF'),
     new R('스티커', 'ic_sticker', () => this.showStickerPicker()).tint('#FF9500'),
     new R('도형', 'ic_rect', () => this.showShapeDialog(null)).tint('#AF52DE'),
@@ -1800,8 +1806,10 @@ M.onPasteEvent = function (e) {
   const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
   const cd = e.clipboardData; if (!cd) return;
   const img = [...(cd.files || [])].find(f => f.type.startsWith('image/'));
+  const text = cd.getData('text/plain');
+  if (this.elementClip && (text === this.elementClip.sys || (!img && text === ''))) { e.preventDefault(); this.pasteElement(); return; }   // an item copied inside the app
   if (img) { e.preventDefault(); this.importImage(img); return; }
-  const text = cd.getData('text/plain'); const id = youtubeId(text);
+  const id = youtubeId(text);
   if (id != null) { e.preventDefault(); this.importYoutube(id); return; }
   e.preventDefault(); this._pasteDialog();
 };
@@ -2118,13 +2126,12 @@ M.confirmClearContent = function (page) {
   const whole = page == null, store = this.store, session = this.activeSession;
   if (this.pageContentCount(page, store) === 0) { toast(whole ? '지울 필기나 삽입 항목이 없습니다' : '이 페이지에는 지울 필기나 삽입 항목이 없습니다'); return; }
   new AlertDialog.Builder().setTitle(whole ? '문서 전체 필기·삽입 지우기' : '이 페이지 필기·삽입 지우기')
-    .setMessage((whole ? '문서 전체의' : (page + 1) + '쪽의') + ' 필기, 형광펜, 하이라이트, 메모와 삽입한 항목(사진·도형·표·타이핑 등)을 모두 지웁니다.\n음성 녹음은 지워지지 않습니다. 되돌릴 수 없습니다. 계속할까요?')
+    .setMessage((whole ? '문서 전체의' : (page + 1) + '쪽의') + ' 필기, 형광펜, 하이라이트, 메모와 삽입한 항목(사진·도형·표·타이핑 등)을 모두 지웁니다.\n음성 녹음은 지워지지 않습니다. 지운 직후에는 ‘실행 취소’로 되살릴 수 있습니다. 계속할까요?')
     .setPositiveButton('모두 지우기', () => {
       if (this.store !== store) return;
       const keep = (arr, drop) => { for (let i = arr.length - 1; i >= 0; i--) if (drop(arr[i])) arr.splice(i, 1); };   // in place: the page views share these arrays
       const on = x => whole || x.page === page;
       keep(store.strokes, on); keep(store.marks, on); keep(store.translations, on); keep(store.elements, e => on(e) && e.kind !== 'audio');
-      session.redoStrokes.length = 0; session.clearUndo = null;
       for (const v of this.allPageViews()) { if (v.selectElement) v.selectElement(null); }
       this.commitInlineText && this.commitInlineText();
       store.save(); this.redrawPages(); this.rebuildThumbnails(); this.refreshStudyPanel && this.refreshStudyPanel();
@@ -2439,23 +2446,26 @@ M.backupEnv = function () {
   const env = this.syncEnv();
   return { library: this.library, version: this.appVersion(), exportNote: env.exportNote, isOpenPath: async p => this.sessions.some(s => samePath(s.uri, p)) };
 };
-M.startLibraryBackup = async function () {
+/** folder: absolute path of a library folder to back up (its documents and subfolders); omitted = every document. */
+M.startLibraryBackup = async function (folder) {
   try {
     if (typeof this.commitInlineText === 'function') this.commitInlineText();
+    const scoped = typeof folder === 'string' && folder && !samePath(folder, this.library.root);
     const d = new Date(), z = n => String(n).padStart(2, '0');
     const stamp = `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`;
-    const out = await host.saveDialog('모든 문서 백업', `Everynote-백업-${stamp}.zip`, [{ name: 'Everynote 백업', exts: ['zip'] }]);
+    const label = scoped ? `폴더 ${baseName(folder)}` : '모든 문서';
+    const out = await host.saveDialog(label + ' 백업', `Everynote-${scoped ? baseName(folder) : '백업'}-${stamp}.zip`.replace(/[\\/:*?"<>|]/g, '_'), [{ name: 'Everynote 백업', exts: ['zip'] }]);
     if (!out) return;
-    const progress = ProgressDialog.show('전체 백업', '문서와 필기를 모으는 중… 잠시 기다려 주세요');
+    const progress = ProgressDialog.show(scoped ? '폴더 백업' : '전체 백업', '문서와 필기를 모으는 중… 잠시 기다려 주세요');
     try {
-      const n = await createBackup(this.backupEnv(), out); progress.dismiss();
+      const n = await createBackup(this.backupEnv(), out, scoped ? { folder } : {}); progress.dismiss();
       alertCard({ title: '백업 완료', message: `문서 ${n}개 (필기·사진·녹음·동영상 포함)\n${out}`, positive: ['확인'], neutral: ['폴더 열기', () => host.reveal(out).catch(() => {})] });
     } catch (e) { progress.dismiss(); toast('백업 실패: ' + errMsg(e)); }
   } catch (e) { toast('백업 실패: ' + errMsg(e)); }
 };
 M.startLibraryRestore = async function () {
   try {
-    const picked = await host.openDialog('모든 문서 복원', [{ name: 'Everynote 백업', exts: ['zip'] }], false);
+    const picked = await host.openDialog('백업 불러오기', [{ name: 'Everynote 백업', exts: ['zip'] }], false);
     if (!picked || !picked.length) return;
     const zip = picked[0];
     const run = async overwrite => {
@@ -2466,8 +2476,8 @@ M.startLibraryRestore = async function () {
       } catch (e) { progress.dismiss(); toast('복원 실패: ' + errMsg(e)); }
     };
     alertCard({
-      title: '모든 문서 복원',
-      message: '백업의 문서·필기·사진·녹음·동영상을 문서함으로 복원합니다.\n\n• 추가 복원: 기존 문서는 그대로 두고, 같은 이름은 사본 (1)로 추가\n• 덮어쓰기: 같은 위치·이름의 문서를 백업 내용으로 교체 (열려 있는 문서는 건너뜀)',
+      title: '백업 불러오기',
+      message: '백업의 문서·필기·사진·녹음·동영상을 문서함으로 불러옵니다. 폴더 백업은 같은 폴더 구조로 들어옵니다.\n\n• 추가 복원: 기존 문서는 그대로 두고, 같은 이름은 사본 (1)로 추가\n• 덮어쓰기: 같은 위치·이름의 문서를 백업 내용으로 교체 (열려 있는 문서는 건너뜀)',
       positive: ['추가 복원', () => run(false)], neutral: ['덮어쓰기', () => run(true)], negative: ['취소'],
     });
   } catch (e) { toast('복원 실패: ' + errMsg(e)); }

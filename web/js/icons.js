@@ -1,5 +1,8 @@
 // GENERATED from Android vector drawables (24x24, stroke icons). Do not edit.
 export const ICONS = {
+  "ic_cut": "<path d=\"M6,6 L18,18 M18,6 L6,18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"6\" cy=\"6\" r=\"2.6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\"/><circle cx=\"6\" cy=\"18\" r=\"2.6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\"/>",
+  "ic_duplicate": "<path d=\"M9,9 H19 a1,1 0 0 1 1,1 V20 a1,1 0 0 1 -1,1 H9 a1,1 0 0 1 -1,-1 V10 a1,1 0 0 1 1,-1z M16,9 V5 a1,1 0 0 0 -1,-1 H5 a1,1 0 0 0 -1,1 V15 a1,1 0 0 0 1,1 H8 M14,12.5 V17.5 M11.5,15 H16.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
+  "ic_tape": "<path d=\"M4.2,16.3 L15.9,4.6 a1.5,1.5 0 0 1 2.1,0 L19.4,6 a1.5,1.5 0 0 1 0,2.1 L7.7,19.8 a1.5,1.5 0 0 1 -2.1,0 L4.2,18.4 a1.5,1.5 0 0 1 0,-2.1z M9.4,10.6 L13.4,14.6 M12.1,7.9 L16.1,11.9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "ic_book": "<path d=\"M3,5.5C5.6,4.6 9.3,4.8 12,6.6C14.7,4.8 18.4,4.6 21,5.5V18.5C18.4,17.6 14.7,17.8 12,19.6C9.3,17.8 5.6,17.6 3,18.5Z M12,6.6V19.6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "ic_check": "<path d=\"M5,12.5 l4.5,4.5 L19,7.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",
   "ic_check_bold": "<path d=\"M5.5,12.8 L10,17.2 L18.6,7.4\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>",

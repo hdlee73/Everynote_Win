@@ -369,6 +369,9 @@ export class AnnotationPainter {
   /** Names of the pen types the pen panel offers (InkStroke.pen 0..4); pen 5 is the highlighter (flat, constant width, translucent, no pressure). */
   static PEN_NAMES = ['볼펜', '연필', '만년필', '붓', '사인펜'];
   static HIGHLIGHTER = 5;
+  /** 테이프 (masking tape, v3.27.0): an opaque flat band; tapping it fades it out and back (the faded set is per session, not saved). */
+  static TAPE = 6;
+  static revealedTapes = new WeakSet();
 
   /**
    * Smoothed copy of a stroke's points for drawing (v3.23.0): the raw digitizer samples are jittery and sparse at speed, so drawing
@@ -434,7 +437,8 @@ export class AnnotationPainter {
     const G = AnnotationPainter._geom(s), n = G.x.length;
     const pen = s.pen | 0, argbv = AnnotationPainter.adj(s.color);
     const penAlpha = pen === 1 ? .78 : pen === 3 ? .92 : pen === 4 ? .82 : 1;   // pen 5 (highlighter) keeps the colour's own alpha
-    const eff = Math.round(((argbv >>> 24) & 255) * penAlpha);
+    const tape = pen === 6, faded = tape && AnnotationPainter.revealedTapes.has(s);
+    const eff = tape ? (faded ? 64 : 255) : Math.round(((argbv >>> 24) & 255) * penAlpha);
     const base = s.width * dw;
     const px = new Float64Array(n), py = new Float64Array(n), W = new Float64Array(n);
     for (let i = 0; i < n; i++) { px[i] = d.left + G.x[i] * dw; py[i] = d.top + G.y[i] * dh; }
@@ -446,12 +450,12 @@ export class AnnotationPainter {
         case 2: { const ang = Math.atan2(py[b] - py[a], px[b] - px[a]), cut = Math.abs(Math.sin(ang + Math.PI / 4)); w = base * (.32 + 1.05 * cut) * (.65 + pr * .7); break; }
         case 3: { const t = n <= 1 ? .5 : i / (n - 1), taper = Math.min(1, Math.min(t, 1 - t) * 7); w = base * 2.1 * (.35 + pr * .95) * (.35 + .65 * taper); break; }
         case 4: w = base * 1.5; break;
-        case 5: w = base; break;   // highlighter: flat band, no pressure
+        case 5: case 6: w = base; break;   // highlighter and tape: flat band, no pressure
         default: w = base * (.45 + pr * 1.15);
       }
       W[i] = Math.max(1.5, w);
     }
-    if (pen !== 4 && pen !== 5 && n > 2) {   // smooth the width along the stroke (no steps where the pressure changes)
+    if (pen !== 4 && pen !== 5 && pen !== 6 && n > 2) {   // smooth the width along the stroke (no steps where the pressure changes)
       let prev = W[0];
       for (let i = 1; i < n - 1; i++) { const cur = W[i]; W[i] = (prev + 2 * cur + W[i + 1]) / 4; prev = cur; }
     }
@@ -459,8 +463,9 @@ export class AnnotationPainter {
       g.save();
       try {
         g.strokeStyle = g.fillStyle = argb(argbv | 0xFF000000);
-        g.lineCap = pen === 4 ? 'square' : 'round'; g.lineJoin = 'round';
-        const constW = pen === 4 || pen === 5;
+        g.lineCap = pen === 4 ? 'square' : tape ? 'butt' : 'round'; g.lineJoin = 'round';
+        if (tape && !faded) { g.shadowColor = 'rgba(0,0,0,.28)'; g.shadowBlur = 3; g.shadowOffsetY = 1; }
+        const constW = pen === 4 || pen === 5 || tape;
         if (constW && n > 1) {   // one path: no overlapping caps, no seams
           g.lineWidth = W[0]; g.beginPath(); g.moveTo(px[0] - ox, py[0] - oy);
           for (let i = 1; i < n; i++) g.lineTo(px[i] - ox, py[i] - oy);

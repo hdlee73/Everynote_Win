@@ -615,7 +615,7 @@ const methods = {
   deleteRecording(clip) {
     if (!this.store) return;
     const i = this.store.elements.indexOf(clip); if (i >= 0) this.store.elements.splice(i, 1);
-    this.store.save(); AnnotationStore.deleteAsset(clip.asset).catch(() => {});
+    this.store.save();   // the recording file stays so that 실행 취소 can bring the clip back
     this.redrawPages(); if (this.sidebarVisible && this.panelTab === 3) this.rebuildRecordings();
   },
   async showAudioPlayer(clip) {
