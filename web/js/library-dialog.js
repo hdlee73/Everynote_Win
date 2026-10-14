@@ -118,8 +118,7 @@ function dateText(time) {
     const hr = then.getHours(), mm = String(then.getMinutes()).padStart(2, '0');
     return `${hr < 12 ? '오전' : '오후'} ${hr % 12 === 0 ? 12 : hr % 12}:${mm}`;
   }
-  if (now.getFullYear() === then.getFullYear()) return `${then.getMonth() + 1}월 ${then.getDate()}일`;
-  return `${then.getFullYear()}. ${then.getMonth() + 1}. ${then.getDate()}`;
+  return `${now.getFullYear() === then.getFullYear() ? '' : then.getFullYear() + '년 '}${then.getMonth() + 1}월 ${then.getDate()}일`;
 }
 export { dateText };
 
@@ -285,8 +284,8 @@ export class PaperChoiceView {
 // ================================================================= FolderTreeView =================================================================
 export class FolderTreeView {
   /** @param listener function(folderPath) called when a folder row is clicked */
-  constructor(activity, repository, selected, listener) {
-    this.repository = repository; this.listener = listener || (() => {}); this.sel = selected; this.menu = null;
+  constructor(activity, repository, selected, listener, opts = {}) {
+    this.repository = repository; this.listener = listener || (() => {}); this.sel = selected; this.menu = null; this.hideRoot = !!opts.hideRoot; this.countOf = opts.countOf || null;
     this.expandedSet = new Set(); this._v = 0;
     this.rows = h('div', { class: 'rows' });
     this.el = h('div', { class: 'lib-tree' }, this.rows);
@@ -311,14 +310,16 @@ export class FolderTreeView {
     const children = [];
     for (const f of await repo.list(folder)) if (repo.isDirectory(f)) children.push(f);
     const isSel = this.sel && samePath(folder, this.sel), isRoot = samePath(folder, repo.root);
+    if (isRoot && this.hideRoot) { for (const c of children) await this._add(out, c, depth); return; }
     const expanded = this.expandedSet.has(pathKey(folder));
     const name = isRoot ? '모든 문서' : baseName(folder);
     const arrow = h('div', { class: 'arrow', 'aria-label': baseName(folder) + ' 하위 폴더 펼치기' }, children.length ? icon(expanded ? 'ic_chevron_down' : 'ic_chevron_right', 18, MUTED) : null);
     arrow.addEventListener('click', () => { const k = pathKey(folder); if (!this.expandedSet.delete(k)) this.expandedSet.add(k); this.reload(); });
-    const fname = h('div', { class: 'fname', 'aria-label': '폴더 ' + name }, new FolderIconDrawable(repo.folderColor(folder), 26).el(), h('span', { class: 't' }, name));
+    const fname = h('div', { class: 'fname', 'aria-label': '폴더 ' + name }, new FolderIconDrawable(repo.folderColor(folder), 22).el(), h('span', { class: 't' }, name));
+    if (this.countOf) { const n = await this.countOf(folder); if (n) fname.append(h('span', { class: 'n' }, String(n))); }
     fname.addEventListener('click', () => { this.sel = folder; this.reload(); this.listener(folder); });
     onLongPress(fname, el => { if (this.menu) this.menu(folder, el); });
-    out.push(h('div', { class: 'lib-trow' + (isSel ? ' sel' : ''), style: { paddingLeft: Math.min(depth, 12) * 12 + 'px' } }, arrow, fname));
+    out.push(h('div', { class: 'lib-trow' + (isSel ? ' sel' : ''), style: { paddingLeft: Math.min(depth, 12) * 14 + 'px' } }, arrow, fname));
     if (expanded) for (const c of children) await this._add(out, c, depth + 1);
   }
 }
@@ -404,7 +405,7 @@ export class LibraryDialog {
     this.folder = folder || repository.root; this.mode = FOLDER;
     this.selected = new Set(); this.selectionMode = false;
     this.generation = 0; this.loadVersion = 0; this.busy = false; this.showing = false; this.dismissL = null;
-    this.drawerP = 0; this.drawerWidth = 320; this._items = []; this._meta = new Map(); this._anim = 0;
+    this._items = []; this._meta = new Map(); this._anim = 0;
     this._build();
   }
   setOnDismissListener(fn) { this.dismissL = fn; return this; }
@@ -417,8 +418,9 @@ export class LibraryDialog {
     document.body.append(this.el);
     this._key = e => { if (e.key === 'Escape') { e.preventDefault(); this.onBackPressed(); } };
     window.addEventListener('keydown', this._key);
-    this._ro = new ResizeObserver(() => { const w = this.shelf.clientWidth; if (w !== this._lastW) { this._lastW = w; this._render(++this.generation); } });
+    this._ro = new ResizeObserver(() => { const w = this.shelf.clientWidth; if (w !== this._lastW) { this._lastW = w; this._render(++this.generation); } this.applySide(); });
     this._ro.observe(this.shelf);
+    this.applySide();
     this.refresh();
   }
   dismiss() {
@@ -429,51 +431,91 @@ export class LibraryDialog {
     this.el.remove();
     if (this.dismissL) this.dismissL(this);
   }
+  /** Esc: closes the sidebar overlay, selection, search text, goes up one folder; at the top level it leaves the library (back to the open document, if any). */
   onBackPressed() {
-    if (this.drawer.classList.contains('on')) { this.closeDrawer(); return; }
+    if (this.el.classList.contains('side-open')) { this.closeDrawer(); return; }
     if (this.selectionMode) { this.selectionMode = false; this.selected.clear(); this.refreshGrid(); return; }
-    if (this.searchRow.classList.contains('on')) { this.toggleSearch(); return; }
+    if (this.search.value) { this.search.value = ''; this.search.blur(); this.refreshGrid(); return; }
     if (this.mode === FOLDER && !samePath(this.folder, this.repository.root)) { this.selectFolder(parentOf(this.folder)); return; }
-    this.dismiss();
+    if (this.activity.activeSession) this.dismiss();
   }
 
   openSettings() { if (this.actions.settings) this.actions.settings(); }
 
   // ---------------------------------------------------------------- layout
   _ib(name, label, click, extra = '') {
-    const b = h('button', { class: 'lib-ib ' + extra, 'aria-label': label, title: label, type: 'button' }, icon(name, 24, INK));
+    const b = h('button', { class: 'lib-ib ' + extra, 'aria-label': label, title: label, type: 'button' }, icon(name, 20, 'currentColor'));
+    b.addEventListener('click', e => { e.stopPropagation(); click(b); });
+    return b;
+  }
+  /** Samsung Notes style text + icon button of the top row. */
+  _act(name, label, click, extra = '') {
+    const b = h('button', { class: 'lib-act ' + extra, 'aria-label': label, title: label, type: 'button' }, icon(name, 18, 'currentColor'), h('span', { class: 't' }, label));
     b.addEventListener('click', e => { e.stopPropagation(); click(b); });
     return b;
   }
   _build() {
     const repo = this.repository;
-    // rail
-    const rail = h('div', { class: 'lib-rail' });
-    rail.append(this._ib('ic_menu', '폴더 트리 보기', () => this.openDrawer(), 'sq'), h('div', { class: 'gap' }));
-    const icons = ['ic_document_tab', 'ic_star_outline', 'ic_clock', 'ic_delete'], names = ['전체 문서', '즐겨찾기 문서', '최근 문서', '휴지통'];
-    this.railButtons = icons.map((n, i) => {
-      const b = this._ib(n, names[i], () => { if (i === 3) this.showTrash(); else this.showMode(i); }, 'sq rb'); rail.append(b); return b;
+    // ---- sidebar (always beside the content; folder tree is the default view)
+    const side = h('div', { class: 'lib-side', dataset: { tag: 'library_side' } });
+    this.side = side;
+    side.append(h('div', { class: 'lib-sidetop' }, this._ib('ic_menu', '사이드바 접기·펼치기', () => this.toggleSide())));
+    const names = ['모든 노트', '즐겨찾기', '최근 문서', '휴지통'], labels = ['전체 문서', '즐겨찾기 문서', '최근 문서', '휴지통'];
+    const icons = ['ic_document_tab', 'ic_star_outline', 'ic_clock', 'ic_delete'];
+    this.railButtons = []; this.drawerCounts = [];
+    icons.forEach((n, i) => {
+      const count = h('span', { class: 'ct' });
+      const row = h('div', { class: 'lib-nrow', role: 'button', tabindex: '0', 'aria-label': labels[i], title: names[i], dataset: { tag: 'drawer_row:' + names[i] } }, icon(n, 20, 'currentColor'), h('span', { class: 'nm' }, names[i]), count);
+      row.addEventListener('click', () => { this.closeDrawer(); if (i === 3) this.showTrash(); else this.showMode(i); });
+      side.append(row); this.railButtons.push(row); this.drawerCounts.push(count);
     });
-    rail.append(h('div', { class: 'lib-dots' }), this._ib('ic_folder_open', '폴더 열기', () => this.openDrawer(), 'sq fo'));
-    rail.append(h('div', { class: 'lib-railfill' }), this._ib('ic_settings', '설정', () => this.openSettings(), 'sq st'));
-    this.rail = rail;
-    // top bar
-    const top = h('div', { class: 'lib-top' },
-      this._ib('ic_chevron_left', '문서함 닫기', () => this.dismiss()),
-      (this.menuButton = this._ib('ic_menu', '폴더 트리 보기', () => this.openDrawer(), 'lib-menu-btn')),
-      h('div', { class: 'sp' }),
-      this._ib('ic_search', '문서 이름 검색', () => this.toggleSearch()),
-      this._ib('ic_more_vert', '문서함 메뉴', b => this.libraryMenu(b)));
-    // search row
-    this.search = h('input', { class: 'lib-search', type: 'text', placeholder: '문서 이름 검색', 'aria-label': '문서 이름 입력', spellcheck: 'false' });
-    this.search.addEventListener('input', () => this.refreshGrid());
-    this.searchRow = h('div', { class: 'lib-searchrow' }, this.search);
-    // heading
-    this.upButton = h('div', { class: 'lib-up', role: 'button', 'aria-label': '상위 폴더로', dataset: { tag: 'folder_up' } });
-    this.upButton.addEventListener('click', () => { if (!samePath(this.folder, repo.root)) this.selectFolder(parentOf(this.folder)); });
+    const fcount = h('span', { class: 'ct' });
+    this.folderRow = h('div', { class: 'lib-nrow lib-frow', role: 'button', tabindex: '0', 'aria-label': '폴더', title: '폴더' }, icon('ic_folder_open', 20, 'currentColor'), h('span', { class: 'nm' }, '폴더'), fcount);
+    this.folderRow.addEventListener('click', () => this.selectFolder(repo.root));
+    const manage = h('button', { class: 'lib-fmore', type: 'button', 'aria-label': '폴더 관리', title: '폴더 관리' }, icon('ic_more_vert', 18, 'currentColor'));
+    manage.addEventListener('click', e => { e.stopPropagation(); this.folderManageMenu(manage); });
+    this.folderRow.append(manage);
+    this.drawerCounts.push(fcount);
+    side.append(this.folderRow);
+    this.tree = new FolderTreeView(this.activity, repo, this.folder, f => this.selectFolder(f), { hideRoot: true, countOf: async f => (await repo.list(f)).filter(x => !repo.isDirectory(x)).length });
+    this.tree.setFolderMenu((f, el) => this.folderMenu(f, el));
+    this.tree.el.classList.add('transparent', 'tree');
+    side.append(this.tree.el);
+    this.backRow = h('div', { class: 'lib-nrow lib-backrow', role: 'button', tabindex: '0', 'aria-label': '열린 문서로 돌아가기', title: '열린 문서로 돌아가기' }, icon('ic_chevron_left', 20, 'currentColor'), h('span', { class: 'nm' }, '열린 문서'));
+    this.backRow.addEventListener('click', () => this.dismiss());
+    this.settingsRow = h('div', { class: 'lib-nrow', role: 'button', tabindex: '0', 'aria-label': '설정', title: '설정' }, icon('ic_settings', 20, 'currentColor'), h('span', { class: 'nm' }, '설정'));
+    this.settingsRow.addEventListener('click', () => { this.closeDrawer(); this.openSettings(); });
+    side.append(h('div', { class: 'lib-dots' }), this.backRow, this.settingsRow);
+    const grip = h('div', { class: 'lib-resizer', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': '사이드바 너비 조절', title: '끌어서 사이드바 너비 조절' });
+    side.append(grip); this._resizer(grip);
+    this.scrim = h('div', { class: 'lib-scrim' }); this.scrim.addEventListener('click', () => this.closeDrawer());
+
+    // ---- top row: title at the left, text + icon buttons and the search box at the right
     this.heading = h('span', null);
+    const title = h('div', { class: 'lib-title', dataset: { tag: 'library_heading' } }, this.heading);
+    this.compose = this._act('ic_compose', '노트 작성', () => { const t = this.mode === FOLDER ? this.folder : repo.root; if (this.actions.newNote) this.actions.newNote(t, () => this.refresh()); });
+    this.compose.dataset.tag = 'compose_button';
+    const actions = h('div', { class: 'lib-acts' },
+      this.compose,
+      this._act('ic_import', 'PDF 가져오기', () => { const t = this.mode === FOLDER ? this.folder : repo.root; this.dismiss(); if (this.actions.importFiles) this.actions.importFiles(t); }),
+      this._act('ic_sync', '동기화', () => this.runActivity('showDeviceSync')),
+      this._act('ic_backup', '백업', () => this.runActivity('startLibraryBackup')),
+      this._act('ic_check_circle', '편집', () => { this.selectionMode = !this.selectionMode; this.selected.clear(); this._render(++this.generation); }),
+      this._ib('ic_more_vert', '문서함 메뉴', b => this.libraryMenu(b), 'lib-more'));
+    this.search = h('input', { class: 'lib-search', type: 'text', placeholder: '검색', 'aria-label': '문서 이름 검색', spellcheck: 'false' });
+    this.search.addEventListener('input', () => this.refreshGrid());
+    const searchBox = h('div', { class: 'lib-searchbox' }, this.search, icon('ic_search', 18, 'currentColor'));
+    const top = h('div', { class: 'lib-top' },
+      (this.menuButton = this._ib('ic_menu', '폴더 트리 보기', () => this.openDrawer(), 'lib-menu-btn')),
+      title, h('div', { class: 'sp' }), actions, searchBox);
+    // ---- breadcrumb + sort row
+    this.crumbs = h('div', { class: 'lib-crumbs', dataset: { tag: 'breadcrumb' } });
     this.subtitle = h('div', { class: 'lib-sub' });
-    const head = h('div', { class: 'lib-heading' }, this.upButton, h('div', { class: 'lib-title', dataset: { tag: 'library_heading' } }, this.heading), this.subtitle);
+    this.sortButton = h('button', { class: 'lib-sort', type: 'button', 'aria-label': '정렬', title: '정렬' });
+    this.sortButton.addEventListener('click', () => this.chooseSort());
+    this.viewButton = h('button', { class: 'lib-sort lib-viewbtn', type: 'button', 'aria-label': '보기 방식', title: '보기 방식' }, icon('ic_thumbnails', 18, 'currentColor'), h('span', { class: 't' }, '보기 방식'));
+    this.viewButton.addEventListener('click', () => this.chooseView());
+    const tools = h('div', { class: 'lib-tools' }, this.subtitle, h('div', { class: 'sp' }), this.sortButton, this.viewButton);
     // shelf
     this.grid = h('div', { class: 'lib-grid' });
     this.shelf = h('div', { class: 'lib-shelf' }, this.grid);
@@ -482,13 +524,17 @@ export class LibraryDialog {
     this.selectionCommands = h('div', { class: 'lib-selcmds' });
     this.selectionBar = h('div', { class: 'lib-top lib-seltop' },
       this._ib('ic_chevron_left', '선택 해제', () => this.onBackPressed()), this.selectionCount, h('div', { class: 'sp' }), this.selectionCommands);
-    this.page = h('div', { class: 'lib-page' }, top, this.selectionBar, this.searchRow, head, this.shelf);
-    // FAB
-    this.compose = h('div', { class: 'lib-fab', role: 'button', 'aria-label': '새로 만들기', dataset: { tag: 'compose_button' } }, icon('ic_compose', 26, '#E5484D'));
-    this.compose.addEventListener('click', () => this.newMenu(this.compose));
-    this._buildDrawer();
-    this.el = h('div', { class: 'lib-root', dataset: { tag: 'library_root' } }, rail, this.page, this.compose, this.drawer);
-    this._edgeDrag();
+    this.page = h('div', { class: 'lib-page' }, top, this.selectionBar, this.crumbs, tools, this.shelf);
+    this.el = h('div', { class: 'lib-root', dataset: { tag: 'library_root' } }, side, this.scrim, this.page);
+  }
+  runActivity(name) { if (this.activity && typeof this.activity.callUi2 === 'function') this.activity.callUi2(name); else toast('이 기능은 아직 사용할 수 없습니다'); }
+  chooseSort() {
+    const repo = this.repository;
+    new AlertDialog.Builder().setTitle('정렬').setSingleChoiceItems(LibraryRepository.SORT_NAMES, repo.sortMode(), (d, i) => { repo.sortMode(i); d.dismiss(); this.refreshGrid(); }).show();
+  }
+  chooseView() {
+    const repo = this.repository;
+    new AlertDialog.Builder().setTitle('보기 방법').setSingleChoiceItems(LibraryRepository.VIEW_NAMES, repo.viewMode(), (d, i) => { repo.viewMode(i); d.dismiss(); this._render(++this.generation); }).show();
   }
 
   rebuildSelectionCommands() {
@@ -537,111 +583,55 @@ export class LibraryDialog {
     else this.chooseDestination(files, action === '이동');
   }
 
-  // ---------------------------------------------------------------- drawer
-  _buildDrawer() {
-    const repo = this.repository;
-    this.drawerScrim = h('div', { class: 'lib-scrim' });
-    this.drawerScrim.addEventListener('click', () => this.closeDrawer());
-    const panel = h('div', { class: 'lib-panel' });
-    this.drawerPanel = panel;
-    panel.append(h('div', { class: 'lib-ptop' }, this._ib('ic_menu', '폴더 트리 닫기', () => this.closeDrawer())));
-    const icons = ['ic_document_tab', 'ic_star_outline', 'ic_clock', 'ic_delete'], names = ['전체 문서', '즐겨찾기', '최근 문서', '휴지통'];
-    this.drawerRows = [];
-    this.drawerCounts = [];
-    icons.forEach((n, i) => {
-      const row = this._drawerRow(n, names[i], () => { this.closeDrawer(); if (i === 3) this.showTrash(); else this.showMode(i); });
-      panel.append(row.el); this.drawerRows.push(row.el); this.drawerCounts.push(row.count);
-    });
-    panel.append(h('div', { class: 'lib-dots' }));
-    const fr = this._drawerRow('ic_folder_open', '폴더', null); panel.append(fr.el); this.drawerCounts.push(fr.count);
-    this.tree = new FolderTreeView(this.activity, repo, this.folder, f => this.selectFolder(f));
-    this.tree.setFolderMenu((f, el) => this.folderMenu(f, el));
-    this.tree.el.classList.add('transparent', 'tree');
-    panel.append(this.tree.el);
-    const manage = h('div', { class: 'lib-manage', role: 'button', 'aria-label': '폴더 관리' }, '폴더 관리');
-    manage.addEventListener('click', () => this.folderManageMenu(manage));
-    panel.append(manage);
-    panel.append(h('div', { class: 'lib-dots' }), this._drawerRow('ic_settings', '설정', () => { this.closeDrawer(); this.openSettings(); }).el);
-    this.drawerWidth = Math.min(320, Math.round(window.innerWidth * .86));
-    this.drawer = h('div', { class: 'lib-drawer', dataset: { tag: 'library_drawer' } }, this.drawerScrim, panel);
+  // ---------------------------------------------------------------- sidebar (resizable, collapsible; an overlay when the window is narrow)
+  sidePrefs() { try { return JSON.parse(localStorage.getItem('everynote.libSide') || '{}') || {}; } catch (e) { return {}; } }
+  saveSidePrefs(o) { try { localStorage.setItem('everynote.libSide', JSON.stringify(Object.assign(this.sidePrefs(), o))); } catch (e) { /* storage blocked */ } }
+  narrow() { return this.el.clientWidth > 0 && this.el.clientWidth < 760; }
+  applySide() {
+    const p = this.sidePrefs(), w = Math.max(190, Math.min(420, +p.w || 236));
+    this.el.style.setProperty('--lib-side-w', w + 'px');
+    const narrow = this.narrow();
+    this.el.classList.toggle('narrow', narrow);
+    this.el.classList.toggle('collapsed', !narrow && !!p.collapsed);
+    if (!narrow) this.el.classList.remove('side-open');
   }
-  _drawerRow(iconName, title, click) {
-    const count = h('div', { class: 'ct' });
-    const el = h('div', { class: 'lib-drow' + (click ? ' click' : ''), 'aria-label': title, dataset: { tag: 'drawer_row:' + title } }, icon(iconName, 28, INK), h('div', { class: 'nm' }, title), count);
-    if (click) el.addEventListener('click', click);
-    return { el, count };
+  toggleSide() {
+    if (this.narrow()) { this.closeDrawer(); return; }
+    this.saveSidePrefs({ collapsed: !this.sidePrefs().collapsed }); this.applySide();
+  }
+  openDrawer() { this.tree.select(this.mode === FOLDER ? this.folder : null); this.updateDrawerCounts(); this.el.classList.add('side-open'); }
+  closeDrawer() { this.el.classList.remove('side-open'); }
+  _resizer(grip) {
+    grip.addEventListener('pointerdown', e => {
+      e.preventDefault(); grip.setPointerCapture(e.pointerId);
+      const x0 = e.clientX, w0 = this.side.getBoundingClientRect().width;
+      this.el.classList.add('resizing');
+      const move = ev => { const w = Math.max(190, Math.min(420, Math.round(w0 + ev.clientX - x0))); this.el.style.setProperty('--lib-side-w', w + 'px'); this._w = w; };
+      const up = () => {
+        grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); grip.removeEventListener('pointercancel', up);
+        this.el.classList.remove('resizing'); if (this._w) this.saveSidePrefs({ w: this._w });
+      };
+      grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', up); grip.addEventListener('pointercancel', up);
+    });
   }
   async updateDrawerCounts() {
     const repo = this.repository;
-    for (let i = 0; i < 4; i++) this.drawerRows[i].classList.toggle('on', i < 3 && this.mode === i);
+    this.railButtons.forEach((b, i) => b.classList.toggle('on', i < 3 && this.mode === i));
+    this.folderRow.classList.toggle('on', this.mode === FOLDER && samePath(this.folder, repo.root));
+    this.backRow.style.display = this.activity.activeSession ? '' : 'none';
+    if (this.activity.activeSession) this.backRow.querySelector('.nm').textContent = '열린 문서 · ' + stripPdf(baseName(this.activity.activeSession.uri || '') || '문서');
     const [all, fav, trash, folders] = await Promise.all([repo.allDocuments(''), repo.favorites(''), repo.trashItems(), repo.folderCount()]);
     const counts = [all.length, fav.length, '', trash.length, folders];
     counts.forEach((c, i) => { this.drawerCounts[i].textContent = String(c); });
   }
-  setDrawerProgress(p) {
-    this.drawerP = p;
-    this.drawerWidth = Math.min(320, Math.round(window.innerWidth * .86));
-    this.drawerPanel.style.width = this.drawerWidth + 'px';
-    this.drawerPanel.style.transform = `translateX(${-this.drawerWidth * (1 - p)}px)`;
-    this.drawerScrim.style.opacity = String(p);
-  }
-  settleDrawer(target) {
-    cancelAnimationFrame(this._anim);
-    this.drawer.classList.add('on');
-    const from = this.drawerP, dur = Math.max(80, Math.round(220 * Math.abs(target - from))), t0 = performance.now();
-    const step = now => {
-      const t = Math.min(1, (now - t0) / dur), e = 1 - (1 - t) * (1 - t);
-      this.setDrawerProgress(from + (target - from) * e);
-      if (t < 1) this._anim = requestAnimationFrame(step);
-      else { this.setDrawerProgress(target); if (target === 0) this.drawer.classList.remove('on'); }
-    };
-    this._anim = requestAnimationFrame(step);
-  }
-  openDrawer() {
-    this.tree.select(this.folder); this.updateDrawerCounts();
-    if (!this.drawer.classList.contains('on')) this.setDrawerProgress(0);
-    this.drawer.classList.add('on'); this.settleDrawer(1);
-  }
-  closeDrawer() { if (this.drawer.classList.contains('on')) this.settleDrawer(0); }
-  /** touch edge swipe (Java onInterceptTouchEvent): pen / touch only */
-  _edgeDrag() {
-    let st = null;
-    const el = this.el;
-    el.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse') return; st = { id: e.pointerId, x: e.clientX, y: e.clientY, drag: false, hist: [[performance.now(), e.clientX]] }; });
-    el.addEventListener('pointermove', e => {
-      if (!st || e.pointerId !== st.id) return;
-      const dx = e.clientX - st.x, dy = e.clientY - st.y;
-      if (!st.drag) {
-        const open = this.drawer.classList.contains('on') && this.drawerP > .5;
-        if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy) * 1.5 && ((!open && dx > 0 && st.x >= 28 && st.x <= 150) || (open && dx < 0))) {
-          st.drag = true; st.startX = e.clientX; st.startP = this.drawerP; el.setPointerCapture(e.pointerId); cancelAnimationFrame(this._anim);
-          if (!this.drawer.classList.contains('on')) { this.tree.select(this.folder); this.updateDrawerCounts(); this.setDrawerProgress(0); this.drawer.classList.add('on'); }
-        } else return;
-      }
-      st.hist.push([performance.now(), e.clientX]); if (st.hist.length > 6) st.hist.shift();
-      this.setDrawerProgress(Math.max(0, Math.min(1, st.startP + (e.clientX - st.startX) / this.drawerWidth)));
-    });
-    const end = e => {
-      if (!st || e.pointerId !== st.id) return;
-      const s = st; st = null;
-      if (!s.drag) return;
-      const a = s.hist[0], b = s.hist[s.hist.length - 1], vx = b[0] > a[0] ? (b[1] - a[1]) / (b[0] - a[0]) * 1000 : 0;
-      this.settleDrawer((Math.abs(vx) > 900 ? vx > 0 : this.drawerP > .45) ? 1 : 0);
-    };
-    el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
-  }
-  toggleSearch() {
-    const show = !this.searchRow.classList.contains('on');
-    this.searchRow.classList.toggle('on', show);
-    if (show) this.search.focus(); else { this.search.value = ''; this.search.blur(); this.refreshGrid(); }
-  }
+  toggleSearch() { if (this.search.value) { this.search.value = ''; this.refreshGrid(); } else this.search.focus(); }
 
   // ---------------------------------------------------------------- modes and content
   showMode(m) { this.mode = m; this.selected.clear(); this.selectionMode = false; this.refresh(); }
   selectFolder(f) {
     this.selected.clear(); this.selectionMode = false; this.mode = FOLDER; this.folder = f;
     if (this.actions.selectedFolder) this.actions.selectedFolder(f);
-    this.closeDrawer(); this.refresh();
+    this.closeDrawer(); this.tree.select(f); this.refresh();
   }
   async items() {
     const q = this.search.value, repo = this.repository;
@@ -653,20 +643,30 @@ export class LibraryDialog {
     }
   }
   refresh() { this.styleRail(); return this.refreshGrid(); }
-  styleRail() { this.railButtons.forEach((b, i) => b.classList.toggle('on', i < 3 && this.mode === i)); }
+  styleRail() { this.updateDrawerCounts(); if (this.mode !== FOLDER) this.tree.select(null); }
   _updateHeading(items) {
     const repo = this.repository, root = repo.root;
-    const title = this.mode === ALL ? '전체 문서' : this.mode === FAVORITES ? '즐겨찾기' : this.mode === RECENT ? '최근 문서' : samePath(this.folder, root) ? '문서함' : baseName(this.folder);
+    const title = this.mode === ALL ? '모든 노트' : this.mode === FAVORITES ? '즐겨찾기' : this.mode === RECENT ? '최근 문서' : samePath(this.folder, root) ? '문서함' : baseName(this.folder);
     this.heading.textContent = title;
     let folders = 0, docs = 0;
     for (const f of items) { if (repo.isDirectory(f)) folders++; else docs++; }
     this.subtitle.textContent = (folders > 0 ? `폴더 ${folders}개 · ` : '') + `문서 ${docs}개`;
+    this.sortButton.textContent = '';
+    this.sortButton.append(icon('ic_sliders', 18, 'currentColor'), h('span', { class: 't' }, LibraryRepository.SORT_NAMES[repo.sortMode()] || '정렬'));
+    // breadcrumb: 문서함 › parent › current (every part but the last one is a link)
+    this.crumbs.textContent = '';
     const nested = this.mode === FOLDER && !samePath(this.folder, root);
-    this.upButton.classList.toggle('on', nested);
-    if (nested) {
-      const parent = parentOf(this.folder);
-      this.upButton.textContent = '';
-      this.upButton.append(icon('ic_chevron_left', 18, ACCENT), h('span', { style: 'white-space:pre' }, '  '), h('span', { class: 'nm' }, samePath(parent, root) ? '문서함' : baseName(parent)));
+    this.crumbs.style.display = this.mode === FOLDER ? '' : 'none';
+    if (this.mode === FOLDER) {
+      const chain = []; for (let p = this.folder; p; p = parentOf(p)) { chain.unshift(p); if (samePath(p, root) || !parentOf(p) || parentOf(p) === p) break; }
+      chain.forEach((p, i) => {
+        const last = i === chain.length - 1, isRoot = samePath(p, root);
+        if (i) this.crumbs.append(icon('ic_chevron_right', 14, 'currentColor'));
+        const c = h('span', { class: 'crumb' + (last ? ' cur' : ''), role: last ? null : 'button', 'aria-label': isRoot ? '문서함' : baseName(p) }, isRoot ? icon('ic_folder_open', 16, 'currentColor') : baseName(p));
+        if (isRoot) c.append(h('span', { style: 'margin-left:5px' }, '문서함'));
+        if (!last) c.addEventListener('click', () => this.selectFolder(p));
+        this.crumbs.append(c);
+      });
     }
   }
   /** Loads the current list + per-item data, then renders. */
@@ -695,11 +695,10 @@ export class LibraryDialog {
     this._updateHeading(items);
     this.selectionBar.classList.toggle('on', this.selectionMode);
     this.page.classList.toggle('selecting', this.selectionMode);
-    this.compose.style.display = this.selectionMode ? 'none' : '';
     if (this.selectionMode) { this.selectionCount.textContent = `${this.selected.size}개 선택됨`; this.rebuildSelectionCommands(); }
     const viewMode = repo.viewMode();
-    const usable = Math.max(this.shelf.clientWidth, 240) - 28;
-    const columns = viewMode === 2 ? 1 : Math.max(1, Math.min(6, Math.floor(usable / (viewMode === 1 ? 118 : 164))));
+    const usable = Math.max(this.shelf.clientWidth, 240) - 36;
+    const columns = viewMode === 2 ? 1 : Math.max(1, Math.min(10, Math.floor(usable / (viewMode === 1 ? 110 : 150))));
     const cell = viewMode === 2 ? 0 : Math.floor(usable / columns) - 14;
     this.grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
     this.grid.textContent = '';
@@ -794,6 +793,7 @@ export class LibraryDialog {
   libraryMenu(anchor) {
     const R = AnchoredMenu.Row, repo = this.repository;
     const rows = [
+      new R('폴더 만들기', null, () => this.createFolder(this.mode === FOLDER ? this.folder : repo.root, () => { this.tree.reload(); this.refresh(); })),
       new R('선택', null, () => { this.selectionMode = !this.selectionMode; this.selected.clear(); this._render(++this.generation); }),
       new R('보기 방법', null, () => new AlertDialog.Builder().setTitle('보기 방법').setSingleChoiceItems(LibraryRepository.VIEW_NAMES, repo.viewMode(), (d, i) => { repo.viewMode(i); d.dismiss(); this._render(++this.generation); }).show()),
       new R('정렬', null, () => new AlertDialog.Builder().setTitle('정렬').setSingleChoiceItems(LibraryRepository.SORT_NAMES, repo.sortMode(), (d, i) => { repo.sortMode(i); d.dismiss(); this.refreshGrid(); }).show()),

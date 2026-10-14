@@ -57,17 +57,19 @@ await pg.click('[aria-label="최근 문서"]'); await settle(pg); ok((await pg.t
 await pg.click('[aria-label="전체 문서"]'); await settle(pg); ok((await names(pg)).length === 12 - 0 || true, 'all'); console.log('all docs', (await names(pg)).length);
 await shot(pg, '09-all');
 // search
-await pg.click('[aria-label="문서 이름 검색"]'); await pg.fill('.lib-search', 'lecture'); await settle(pg); await shot(pg, '10-search');
+await pg.fill('.lib-search', 'lecture'); await settle(pg); await shot(pg, '10-search');
 ok((await names(pg)).length === 2, 'search filter');
 await pg.fill('.lib-search', 'zzzz'); await pg.waitForTimeout(300); ok((await pg.textContent('.lib-empty')) === '검색 결과가 없습니다', 'empty search');
 await pg.keyboard.press('Escape'); await pg.waitForTimeout(300);
-// folder navigation
-await pg.click('[aria-label="폴더 열기"]'); await pg.waitForTimeout(600); await shot(pg, '11-drawer');
+ok((await pg.inputValue('.lib-search')) === '', 'esc clears search');
+// folder navigation (the sidebar tree is always visible beside the content)
+await pg.waitForTimeout(300); await shot(pg, '11-sidebar');
 await pg.click('.lib-trow .fname >> text=수학'); await pg.waitForTimeout(700); await settle(pg); await shot(pg, '12-folder-math');
 ok((await pg.textContent('.lib-title')) === '수학', 'folder title');
-ok((await pg.textContent('.lib-up')).includes('문서함'), 'up button label');
+ok((await pg.textContent('.lib-crumbs')).includes('문서함'), 'breadcrumb shows the parent');
+ok(await pg.evaluate("(() => { const t = document.querySelector('.lib-side').getBoundingClientRect(), p = document.querySelector('.lib-page').getBoundingClientRect(); return t.right <= p.left + 1 && p.width > 300; })()"), 'file area sits beside the tree');
 console.log(await log(pg));
-await pg.click('.lib-up'); await settle(pg); ok((await pg.textContent('.lib-title')) === '문서함', 'up works');
+await pg.click('.lib-crumbs [role=button]'); await settle(pg); ok((await pg.textContent('.lib-title')) === '문서함', 'up works');
 await pg.close();
 
 // ---------------------------------------------------------------- selection, rename, favorite, copy, move, delete, trash
@@ -157,8 +159,8 @@ await click(pg, '.ad-btn', '영구 삭제'); await pg.waitForTimeout(800);
 ok((await pg.evaluate(`T.dlg.repository.trashItems().then(a=>a.length)`)) === 0 && !(await pg.evaluate(`T.host.stat(T.root+'\\\\Zap.pdf').then(s=>s.exists)`)), 'trash emptied for good');
 ok((await pg.textContent('.toast')).includes('영구 삭제했습니다'), 'empty trash toast');
 // folder colour
-await pg.click('[aria-label="폴더 열기"]'); await pg.waitForTimeout(500);
-await pg.click('.lib-manage'); await pg.waitForTimeout(300); await shot(pg, '23-manage-menu');
+await pg.waitForTimeout(300);
+await pg.click('.lib-fmore'); await pg.waitForTimeout(300); await shot(pg, '23-manage-menu');
 await click(pg, '.amenu-row', '선택한 폴더 색상'); await pg.waitForTimeout(500); await shot(pg, '24-color-dialog');
 await click(pg, '.ad-cell', '퍼플'); await pg.waitForTimeout(500); await shot(pg, '25-drawer-purple');
 ok((await pg.evaluate('T.library.folderColor(T.root)')) === (await pg.evaluate('T.LibraryRepository.FOLDER_COLORS[3]')), 'root colour saved');
@@ -170,14 +172,14 @@ await pg.close();
 // ---------------------------------------------------------------- narrow layout + FAB menu + new menu
 pg = await open(420, 800);
 await shot(pg, '30-narrow');
-await pg.click('.lib-fab'); await pg.waitForTimeout(300); await shot(pg, '31-fab-menu');
-await click(pg, '.amenu-row', '새 노트'); await pg.waitForTimeout(200); ok((await log(pg)).some(l => l.startsWith('newNote')), 'newNote action');
-await pg.click('.lib-fab'); await click(pg, '.amenu-row', '파일 가져오기'); await pg.waitForTimeout(200);
+await pg.click('.lib-compose, .lib-act[aria-label="노트 작성"]'); await pg.waitForTimeout(300); await shot(pg, '31-compose');
+{ await pg.waitForTimeout(100); ok((await log(pg)).some(l => l.startsWith('newNote')), 'newNote action'); }
+await pg.click('.lib-act[aria-label="PDF 가져오기"]'); await pg.waitForTimeout(200);
 ok((await log(pg)).some(l => l.startsWith('import ')) && !(await pg.evaluate('T.dlg.isShowing()')), 'import action dismisses library');
 await pg.evaluate('T.setup()'); await pg.waitForSelector('.lib-card'); await settle(pg);
 await pg.click('.lib-menu-btn'); await pg.waitForTimeout(500); await shot(pg, '32-narrow-drawer');
 await pg.keyboard.press('Escape'); await pg.waitForTimeout(400);
-ok(!(await pg.evaluate("document.querySelector('.lib-drawer').classList.contains('on')")), 'esc closes drawer');
+ok(!(await pg.evaluate("document.querySelector('.lib-root').classList.contains('side-open')")), 'esc closes sidebar overlay');
 await pg.locator('.lib-card[data-tag="document:Sample.pdf"]').click(); await pg.waitForTimeout(200);
 ok((await log(pg)).some(l => l.startsWith('open ') && l.endsWith('Sample.pdf')) && !(await pg.evaluate('T.dlg.isShowing()')), 'open document dismisses + opens');
 await pg.close();

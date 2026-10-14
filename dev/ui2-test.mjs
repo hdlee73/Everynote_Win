@@ -27,7 +27,7 @@ await pg.evaluate(()=>app.closeSidePanel());
 
 // 3 library add menu
 await pg.evaluate(()=>app.showLibrary()); await pg.waitForTimeout(500);
-await pg.click('.lib-compose, [aria-label="새로 만들기"], .lib-new').catch(async()=>{await pg.evaluate(()=>app.libraryDialog.newMenu(app.libraryDialog.compose))});
+await pg.evaluate(()=>app.libraryDialog.newMenu(app.libraryDialog.compose));
 await pg.waitForTimeout(400);
 const menu=await pg.evaluate(()=>[...document.querySelectorAll('.amenu .amenu-row')].map(e=>e.textContent.trim()));
 check('library add menu = 문서 추가 card with 3 icon rows', menu.length===3&&menu[0].includes('새 노트 만들기')&&menu[1].includes('파일 가져오기')&&menu[2].includes('폴더 만들기'), JSON.stringify(menu));
