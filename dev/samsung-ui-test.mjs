@@ -1,0 +1,62 @@
+// Samsung Notes style UI (library sidebar layout, document top bar, tool rail, docked tool panel). usage: node dev/samsung-ui-test.mjs [outdir]
+import {chromium} from '/tmp/npmtest/node_modules/playwright/index.mjs';
+import {serve} from './server.mjs'; import fs from 'fs';
+const OUT=process.argv[2]||'dev/out'; fs.mkdirSync(OUT,{recursive:true});
+const PORT=8700+Math.floor(Math.random()*200); await serve(PORT);
+const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium-1194/chrome-linux/chrome'});
+const pg=await b.newPage({viewport:{width:1280,height:800}});
+const errs=[]; pg.on('pageerror',e=>errs.push('PE '+e.message));
+await pg.addInitScript(()=>{Map.prototype.getOrInsertComputed??=function(k,f){if(!this.has(k))this.set(k,f(k));return this.get(k)}});
+await pg.goto(`http://localhost:${PORT}/index.html?bar=default`); await pg.waitForTimeout(1500);   // the real default layout (no test override)
+const en=[...fs.readFileSync('dev/samples/sample.pdf')];
+await pg.evaluate(async([c])=>{const {host}=await import('./js/host.js');host._fake.init();const L=host._fake.lib;host._fake.put(L+'\\English.pdf',new Uint8Array(c));host._fake.put(L+'\\f1\\Sub.pdf',new Uint8Array(c));localStorage.clear()},[en]);
+let fails=0; const check=(n,ok,info='')=>{console.log((ok?'PASS ':'FAIL ')+n+(info?' '+info:'')); if(!ok)fails++;};
+const wait=ms=>pg.waitForTimeout(ms);
+await pg.evaluate(()=>{if(app.libraryDialog&&app.libraryDialog.isShowing()) app.libraryDialog.dismiss(); app.showLibrary()}); await wait(1500);
+// ---- library
+const box=s=>pg.evaluate(s=>{const r=document.querySelector(s).getBoundingClientRect();return {l:r.left,r:r.right,w:r.width}},s);
+const side=await box('.lib-side'), page=await box('.lib-page');
+check('folder tree is the default view and the file area sits beside it', side.w>150 && page.l>=side.r-1 && page.w>600, JSON.stringify({side,page}));
+check('no library close button', await pg.locator('[aria-label="문서함 닫기"]').count()===0);
+for (const t of ['노트 작성','PDF 가져오기','동기화','백업','편집']) check('top action '+t, await pg.locator(`.lib-act[aria-label="${t}"]`).count()===1);
+check('search box', await pg.locator('.lib-search').count()===1);
+check('sort control', (await pg.textContent('.lib-sort')).length>0);
+check('tree lists the folder', await pg.locator('.lib-trow .fname', {hasText:'f1'}).count()===1);
+// resize the sidebar
+const g=await box('.lib-resizer'); await pg.mouse.move(g.l+3,300); await pg.mouse.down(); await pg.mouse.move(g.l+103,300,{steps:5}); await pg.mouse.up(); await wait(200);
+const side2=await box('.lib-side'); check('sidebar width is resizable', side2.w>side.w+60, side.w+' -> '+side2.w);
+await pg.locator('.lib-trow .fname', {hasText:'f1'}).click(); await wait(800);
+check('folder click shows its documents beside the tree', (await pg.textContent('.lib-title'))==='f1' && await pg.locator('.lib-card', {hasText:'Sub'}).count()===1);
+check('breadcrumb', (await pg.textContent('.lib-crumbs')).includes('f1'));
+await pg.screenshot({path:`${OUT}/samsung-1-library.png`});
+await pg.locator('.lib-crumbs [role=button]').first().click(); await wait(600);
+await pg.locator('.lib-card[aria-label="English.pdf"]').click(); await wait(2200);
+// ---- document
+check('library closed after opening a note', await pg.locator('.lib-root').count()===0);
+const labels=await pg.$$eval('.m-header .m-hb',e=>e.map(x=>x.textContent.trim()));
+check('top bar actions', ['전체 화면','읽기 모드','페이지 관리','노트 스타일','삽입','공유','파일로 저장','인쇄','검색'].every(t=>labels.includes(t)), labels.join('|'));
+check('back button + title', await pg.locator('.m-back').count()===1 && (await pg.textContent('[data-tag=document_title]')).includes('English'));
+const rail=await pg.evaluate(()=>{const r=document.querySelector('.m-bottom').getBoundingClientRect();return {cls:document.querySelector('.m-bottom').className,l:r.left,r:r.right,w:r.width,h:r.height}});
+check('vertical tool rail at the right edge', rail.cls.includes('rail-right')&&rail.r>=1279&&rail.w<=56&&rail.h>400, JSON.stringify(rail));
+const tools=await pg.$$eval('.m-bottom .m-tb',e=>e.map(x=>x.getAttribute('aria-label')).join('|'));
+check('rail has keyboard/pen/highlighter/eraser/lasso/undo/redo', ['타이핑','펜','형광펜','지우개','올가미','실행 취소','다시 실행'].every(t=>tools.includes(t)), tools);
+await pg.click('.m-bottom [aria-label^="펜"]'); await wait(500);
+check('pen tap starts writing mode', await pg.evaluate(()=>app.writeMode===true));
+await pg.click('.m-bottom [aria-label^="펜"]'); await wait(500);
+const panel=await pg.evaluate(()=>{const c=document.querySelector('.amenu.docked');if(!c)return null;const r=c.getBoundingClientRect(),m=document.querySelector('.m-bottom').getBoundingClientRect();return {l:r.left,r:r.right,t:r.top,b:r.bottom,railL:m.left}});
+check('pen options open as a right-side panel next to the rail', panel&&Math.abs(panel.r-panel.railL)<2&&panel.b>=799&&panel.t>60, JSON.stringify(panel));
+check('panel has thickness/opacity sliders with - and +', await pg.locator('.amenu.docked .m-pp-step').count()===4 && await pg.locator('.amenu.docked [data-tag=pen_width]').count()===1);
+await pg.click('.amenu.docked [aria-label="굵기 늘리기"]'); await wait(100);
+await pg.screenshot({path:`${OUT}/samsung-2-pen-panel.png`});
+await pg.keyboard.press('Escape'); await wait(300);
+check('Esc closes the panel', await pg.locator('.amenu.docked').count()===0);
+await pg.click('.m-header [aria-label="노트 스타일 · 보기 방법"]'); await wait(300);
+const below=await pg.evaluate(()=>{const m=document.querySelector('.amenu').getBoundingClientRect();const h=document.querySelector('.m-header').getBoundingClientRect();return m.top>=h.bottom-2});
+check('top bar menus open below the bar', below);
+await pg.keyboard.press('Escape'); await wait(200);
+await pg.click('.m-back'); await wait(1200);
+check('back (‹) returns to the library', await pg.locator('.lib-root').count()===1);
+await pg.keyboard.press('Escape'); await wait(400);
+check('Esc leaves the library back to the open note', await pg.locator('.lib-root').count()===0);
+check('no page errors', errs.length===0, errs.join(';'));
+console.log(fails?'FAILED '+fails:'ALL OK'); await b.close(); process.exit(fails?1:0);

@@ -252,3 +252,8 @@
 .m-penpanel .m-sw .dot{margin:0 2px}
 .m-penpanel .m-seg{padding:2px 0 4px}
 .m-penpanel .m-opts{padding:2px 0 4px}
+
+/* dark theme (:root[data-theme="dark"], see app.css tokens): icons whose colour is set inline by the tool painter follow the theme */
+:root[data-theme="dark"] .m-bottom .m-tb:not([style*="background"]),:root[data-theme="dark"] .m-dockbtn:not([style*="background"]){color:var(--text-2)!important}
+:root[data-theme="dark"] .m-tab .m-tabname{color:var(--muted)}:root[data-theme="dark"] .m-tab.active .m-tabname{color:var(--text)}
+:root[data-theme="dark"] .m-pagelabel{background:var(--surface-2);color:var(--muted)}

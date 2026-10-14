@@ -547,15 +547,15 @@ const methods = {
     // ---- fullscreen dock + handle (overlays of root)
     const dock = this.fullscreenDock = h('div', { class: 'm-dock', dataset: { tag: 'fullscreen_toolbar' } });
     dock.append(
-      this.dockIcon('ic_outline', '전체 화면 개요', 0xFF007AFF, () => this.showOutlineList()),
-      this.dockIcon('ic_eye', '전체 화면 보기 방법', 0xFF30B0C7, v => this.showViewMenu(v)),
-      this.dockIcon('ic_ink', '전체 화면 필기도구', 0xFF5856D6, v => this.penTap(v)),
-      this.dockIcon('ic_eraser', '전체 화면 지우개', 0xFFFF6B8A, v => this.eraserBarTap(v)),
-      this.dockIcon('ic_insert', '전체 화면 삽입', 0xFFFF2D55, v => this.showInsertMenu(v)),
-      this.dockIcon('ic_text', '전체 화면 타이핑', 0xFF34C759, () => this.toggleTyping()),
-      this.dockIcon('ic_lasso', '전체 화면 올가미', 0xFFAF52DE, () => this.toggleLasso()),
-      this.dockIcon('ic_more_vert', '전체 화면 메뉴', 0xFF8E8E93, v => this.showMainMenu(v, true)),
-      this.fullscreenExit = this.dockIcon('ic_fullscreen_exit', '전체 화면 종료', 0xFFAF52DE, () => this.toggleFullscreen()));
+      this.dockIcon('ic_outline', '전체 화면 개요', TOOL_GRAY, () => this.showOutlineList()),
+      this.dockIcon('ic_eye', '전체 화면 보기 방법', TOOL_GRAY, v => this.showViewMenu(v)),
+      this.dockIcon('ic_ink', '전체 화면 필기도구', TOOL_GRAY, v => this.penTap(v)),
+      this.dockIcon('ic_eraser', '전체 화면 지우개', TOOL_GRAY, v => this.eraserBarTap(v)),
+      this.dockIcon('ic_insert', '전체 화면 삽입', TOOL_GRAY, v => this.showInsertMenu(v)),
+      this.dockIcon('ic_text', '전체 화면 타이핑', TOOL_GRAY, () => this.toggleTyping()),
+      this.dockIcon('ic_lasso', '전체 화면 올가미', TOOL_GRAY, () => this.toggleLasso()),
+      this.dockIcon('ic_more_vert', '전체 화면 메뉴', TOOL_GRAY, v => this.showMainMenu(v, true)),
+      this.fullscreenExit = this.dockIcon('ic_fullscreen_exit', '전체 화면 종료', ACCENT, () => this.toggleFullscreen()));
     this.dockGrip = this.makeGrip(dock, 'dock'); dock.prepend(this.dockGrip);
     root.append(h('div', { class: 'm-dockwrap' }, dock));
     const rearm = () => { if (this.dockShown && !this.dockPinned()) { clearTimeout(this._dockTimer); this._dockTimer = setTimeout(this.dockHider, 6000); } };
