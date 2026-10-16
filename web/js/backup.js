@@ -22,10 +22,11 @@ export const BACKUP_FORMAT = 'Everynote backup v1';
 export const BACKUP_MANIFEST = 'everynote-backup.json';
 
 /** Library-relative path check (slash separated, no dot parts, optionally must end in .pdf). */
+const RESERVED_WIN = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$/i;
 export function safeRel(rel, pdf) {
   if (typeof rel !== 'string' || !rel || rel.length > 400 || rel.startsWith('/') || rel.includes('\\') || rel.includes('\0')) return false;
   if (pdf && !rel.toLowerCase().endsWith('.pdf')) return false;
-  return rel.split('/').every(p => p && p !== '.' && p !== '..' && !p.startsWith('.'));
+  return rel.split('/').every(p => p && p !== '.' && p !== '..' && !p.startsWith('.') && !RESERVED_WIN.test(p));
 }
 const toWin = rel => rel.split('/').join('\\');
 
