@@ -305,6 +305,11 @@ sealed class Bridge
         finally { try { if (File.Exists(tmp)) File.Delete(tmp); } catch { } }
         return new { count };
     }
+    static void CheckZipEntryName(string name)
+    {
+        if (string.IsNullOrEmpty(name) || name.StartsWith("/") || name.Contains("..") || name.Contains('\\') || name.Contains(':'))
+            throw new ArgumentException("bad entry name");
+    }
     static object ZipEntries(string path)
     {
         using var z = System.IO.Compression.ZipFile.OpenRead(path);
@@ -312,6 +317,7 @@ sealed class Bridge
     }
     static object ZipReadText(string path, string name)
     {
+        CheckZipEntryName(name);
         using var z = System.IO.Compression.ZipFile.OpenRead(path);
         var e = z.GetEntry(name) ?? throw new FileNotFoundException("not in zip: " + name);
         if (e.Length > 128L * 1024 * 1024) throw new IOException("항목이 너무 큽니다");
@@ -320,6 +326,7 @@ sealed class Bridge
     }
     static object ZipExtract(string path, string name, string to)
     {
+        CheckZipEntryName(name);
         using var z = System.IO.Compression.ZipFile.OpenRead(path);
         var e = z.GetEntry(name) ?? throw new FileNotFoundException("not in zip: " + name);
         Directory.CreateDirectory(Path.GetDirectoryName(to));

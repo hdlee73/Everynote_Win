@@ -447,10 +447,9 @@ const methods = {
     libraryButton.addEventListener('click', () => this.showLibrary());
     this.titleView = h('div', { class: 'm-title', dataset: { tag: 'document_title' }, role: 'button' });
     this.titleView.addEventListener('click', () => { if (this.activeSession != null) this.beginTitleEdit(); else this.showLibrary(); });
+    // 시안B: 상단은 문서함·제목·검색·전체화면·도구만. 페이지 목록·분할 보기는 보기 메뉴에 유지.
     this.header.append(libraryButton, this.titleView, h('div', { class: 'm-spacer' }),
-      this.icon('ic_sidebar', '페이지 목록', 0xFF007AFF, () => this.toggleSidebar()),
       this.icon('ic_search', '문서·필기 검색', 0xFF30B0C7, () => this.searchDocument()),
-      this.splitButton = this.icon('ic_dual', '화면 나누기 · 문서 두 개를 나란히', 0xFF5856D6, () => this.toggleSplit()),
       this.icon('ic_fullscreen', '전체 화면', 0xFFAF52DE, () => this.toggleFullscreen()),
       this.icon('ic_more_vert', '도구', NAVY, v => this.showMainMenu(v, false)));
     content.append(this.header);
@@ -513,16 +512,13 @@ const methods = {
     this.pageLabel.addEventListener('click', () => { if (this.renderer == null) this.showAddDocumentMenu(); else this.showPageJumpMenu(this.pageLabel); });
     this.pageLabel.title = '페이지 이동'; this.pageLabel.setAttribute('aria-label', '페이지 이동');
     readBar.append(this.pageLabel);
-    this.barIcon(readBar, 'ic_eye', '보기 방법', 0xFF30B0C7, v => this.showViewMenu(v));
-    this.readButton = this.barIcon(readBar, 'ic_book', '읽기 모드', 0xFF007AFF, () => this.setWriteMode(false));
-    this.inkButton = this.barIcon(readBar, 'ic_ink', '필기 모드', 0xFF5856D6, () => this.inkModeTap());
-    this.eraserBarButton = this.barIcon(readBar, 'ic_eraser', '지우개', 0xFFFF6B8A, v => this.eraserBarTap(v));
-    this.textButton = this.barIcon(readBar, 'ic_text', '타이핑', 0xFF34C759, () => this.toggleTyping());
-    this.bookmarkButton = this.barIcon(readBar, 'ic_star_outline', '즐겨찾기', 0xFFF5A623, () => this.toggleBookmark());
-    this.lassoButton = this.barIcon(readBar, 'ic_lasso', '올가미 선택', 0xFFAF52DE, () => this.toggleLasso());
+    // 시안A: 하단 5탭 (홈·보기·필기·삽입·도구). 지우개·타이핑·즐겨찾기·올가미는 필기 패널·삽입/보기 메뉴에,
+    // 실행 취소·다시 실행은 필기 패널과 도구 메뉴에 유지. 읽기 모드 복귀는 보기 메뉴의 '읽기 모드' 행.
+    this.barIcon(readBar, 'ic_folder_open', '홈 · 문서함', 0xFF007AFF, () => this.showLibrary());
+    this.readButton = this.barIcon(readBar, 'ic_eye', '보기 · 이동', 0xFF30B0C7, v => this.showViewMenu(v));
+    this.inkButton = this.barIcon(readBar, 'ic_ink', '필기', 0xFF5856D6, () => this.inkModeTap());
     this.insertButton = this.barIcon(readBar, 'ic_insert', '삽입 · 메모 하이라이트 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
-    this.undoButton = this.barIcon(readBar, 'ic_undo', '실행 취소', 0xFF8E8E93, () => this.undoInk());
-    this.redoButton = this.barIcon(readBar, 'ic_redo', '다시 실행', 0xFF8E8E93, () => this.redoInk());
+    this.barIcon(readBar, 'ic_more_vert', '도구 · 실행 취소·설정', 0xFF8E8E93, v => this.showMainMenu(v, false));
     // pen tools float on the page as their own strip (can be kept visible or hidden while writing)
     this.penButton = this.barIcon(writeBar, 'ic_ink', '펜', 0xFF1C1C1E, v => this.penTap(v));
     this.hlButton = this.barIcon(writeBar, 'ic_highlight', '형광펜', 0xFFF5C400, v => this.highlightTap(v));
@@ -979,6 +975,7 @@ const methods = {
   showViewMenu(anchor) {
     if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
     AnchoredMenu.show(anchor, true, [
+      new Row('읽기 모드', 'ic_book', () => this.setWriteMode(false)).tint('#007AFF'),
       new Row('페이지 미리보기', 'ic_sidebar', () => this.toggleSidebar()).tint('#007AFF').selected(this.sidebarVisible),
       new Row('두 쪽 보기', 'ic_book', () => this.toggleTwoPage()).tint('#5856D6').selected(this.twoPage),
       new Row(this.splitSession ? '화면 나누기 끝내기' : '화면 나누기 (문서 두 개)', 'ic_dual', () => this.toggleSplit()).tint('#5856D6').selected(!!this.splitSession),
@@ -1031,6 +1028,8 @@ const methods = {
       rows.push(new Row('삽입', 'ic_insert', null).children(this.rowsOf(2)).tint('#5856D6'));
       rows.push(new Row('학습·주석', 'ic_study', null).children(this.rowsOf(3)).tint('#30B0C7'));
       rows.push(new Row('내보내기·백업', 'ic_share', null).children(this.rowsOf(4)).tint('#007AFF'));
+      rows.push(new Row('실행 취소', 'ic_undo', () => this.undoInk()).tint('#8E8E93'));
+      rows.push(new Row('다시 실행', 'ic_redo', () => this.redoInk()).tint('#8E8E93'));
     } else {
       rows.push(Row.divider());
       rows.push(new Row('내보내기·백업', 'ic_share', null).tint('#007AFF').children([
