@@ -1567,7 +1567,9 @@ M.showInsertMenu = function (anchor) {
   this.dropTarget = null;
   const R = AnchoredMenu.Row;
   const rows = [new R('메모', 'ic_note_add', () => this.toggleMemoMode()).tint('#FF9500').selected(!!this.memoMode),
-    new R('하이라이트', 'ic_highlight', () => this.toggleHighlight()).tint('#F5C400').selected(!!this.highlightMode)];
+    new R('하이라이트', 'ic_highlight', () => this.toggleHighlight()).tint('#F5C400').selected(!!this.highlightMode),
+    new R('올가미 · 영역 캡처', 'ic_lasso', () => this.toggleLasso()).tint('#AF52DE'),
+    new R('타이핑', 'ic_text', () => this.toggleTyping()).tint('#34C759')];
   if (this.highlightMode) rows.push(new R('하이라이트 굵기', 'ic_highlight', () => later(() => this.showMarkHighlightMenu(anchor))).tint('#F5C400'));
   AnchoredMenu.show(anchor, true, [...rows, ...this.insertRows()], null);
 };
