@@ -309,20 +309,30 @@ const methods = {
     this.placeHandle(this.inlineMove, left - 8, top - 34);
     this.placeHandle(this.inlineDelete, left + width - 22, top - 34);
     this.placeHandle(this.inlineResize, left + width - 12, editBottom - 10);
-    this.placeInlineBar(top, editBottom);
+    this.placeInlineBar(left, left + width, top, editBottom);
   },
   /** Keeps the toolbar clear of the text being typed: above the box first (the keyboard covers the lower part), else below, else at the top. */
   showInlineBar(shown) { if (this.inlineBar) this.inlineBar.style.display = shown ? '' : 'none'; },
-  placeInlineBar(editTop, editBottom) {
+  placeInlineBar(editLeft, editRight, editTop, editBottom) {
     const bar = this.inlineBar, layer = this.viewportLayer;
     if (!bar || !layer || layer.clientHeight <= 0) return;
-    const barH = bar.offsetHeight > 0 ? bar.offsetHeight : 42, H = layer.clientHeight, gap = 4;
+    const barH = bar.offsetHeight > 0 ? bar.offsetHeight : 42, H = layer.clientHeight, W = layer.clientWidth, gap = 6, minSide = 200;
+    // beside the text first (right, else left), level with the top of the box; above / below only when neither side has room
+    const right = W - editRight - gap - 4, left = editLeft - gap - 4;
+    const side = right >= minSide ? 1 : left >= minSide ? -1 : 0;
+    const set = (k, v) => { if (bar.style[k] !== v) bar.style[k] = v; };
+    if (side) {
+      const w = Math.min(424, side === 1 ? right : left), x = side === 1 ? editRight + gap : editLeft - gap - w;
+      set('width', w + 'px'); set('left', x + 'px'); set('transform', 'none');
+      set('top', Math.max(0, Math.min(editTop, Math.max(0, H - barH))) + 'px');
+      return;
+    }
+    set('width', ''); set('left', '50%'); set('transform', 'translateX(-50%)');
     let topMargin;
     if (editTop - 36 - barH - gap >= 2) topMargin = editTop - 36 - barH - gap;
     else if (H - editBottom - 14 >= barH + gap) topMargin = editBottom + 14 + gap;
     else topMargin = 4;
-    topMargin = Math.max(0, Math.min(topMargin, Math.max(0, H - barH)));
-    if (bar.style.top !== topMargin + 'px') bar.style.top = topMargin + 'px';
+    set('top', Math.max(0, Math.min(topMargin, Math.max(0, H - barH))) + 'px');
   },
   placeHandle(handle, left, top) {
     if (!handle) return;
