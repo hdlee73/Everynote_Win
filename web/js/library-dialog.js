@@ -524,7 +524,7 @@ export class LibraryDialog {
     a.append(
       this._tb('ic_compose', '노트 작성', () => { if (this.actions.newNote) this.actions.newNote(this._target(), () => this.refresh()); }, 'library_new_note'),
       this._tb('ic_pdf_import', 'PDF 가져오기', () => { this.dismiss(); if (this.actions.importFiles) this.actions.importFiles(this._target()); }, 'library_import'),
-      this._tb('ic_check_circle', '편집', () => this.startSelection(), 'library_edit'),
+      this._tb(null, '편집', () => this.startSelection(), 'library_edit'),
       this._tb('ic_grid', '보기 방식', b => this.viewMenu(b), 'library_view'));
   }
   startSelection() { this.selectionMode = true; this.selected.clear(); this._render(++this.generation); }
