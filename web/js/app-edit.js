@@ -31,6 +31,48 @@ E.copySelectedElement = function (cut) {
   return true;
 };
 
+/** Several items at once (the lasso's 선택한 개체 복사 / 잘라내기): the clipboard keeps a copy of each; a paste puts the group back with its top-left corner at the pointed spot. */
+E.copyElements = function (items, cut) {
+  if (!this.store) return false;
+  const ok = items.filter(e => e.kind !== 'hyperlink' && e.kind !== 'audio' && this.store.elements.includes(e));
+  if (!ok.length) { toast('복사할 수 있는 개체가 없습니다'); return false; }
+  const group = ok.map(e => JSON.parse(JSON.stringify(e.toJson())));
+  const sys = 'Everynote 개체 ' + ok.length + '개';
+  this.elementClip = { json: group[0], group: group.length > 1 ? group : null, sys, source: this.store, page: ok[0].page, cut: !!cut, pastes: 0 };
+  try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(sys).catch(() => {}); } catch (e) { /* the app's own copy is enough */ }
+  if (cut) {
+    const set = new Set(ok), els = this.store.elements;
+    for (let i = els.length - 1; i >= 0; i--) if (set.has(els[i])) els.splice(i, 1);
+    this.store.save();
+    for (const v of this.allPageViews()) if (v.selectElement) v.selectElement(null);
+    this.redrawPages();
+    if (this.sidebarVisible && this.panelTab === 4 && this.rebuildInsertions) this.rebuildInsertions();
+  }
+  this.refreshElementBar();
+  toast(`${ok.length}개 개체를 ${cut ? '잘라냈습니다' : '복사했습니다'} · 붙여넣기: Ctrl+V`);
+  return true;
+};
+
+/** Pastes the copied group: its top-left corner at the pointed spot, else a little down and right of where it was (a cut group comes back exactly where it was). */
+E._placeGroup = function (clip, steps, at) {
+  const view = this.pageView, page = at && at.page != null ? at.page : (view ? view.getPageNumber() : this.currentPage);
+  const items = clip.group.map(j => { const d = JSON.parse(JSON.stringify(j)); d.page = page; return PageElement.fromJson(d); });
+  let minL = 1, minT = 1, maxR = 0, maxB = 0;
+  for (const e of items) { minL = Math.min(minL, e.left); minT = Math.min(minT, e.top); maxR = Math.max(maxR, e.right); maxB = Math.max(maxB, e.bottom); }
+  let dx = at && at.x != null ? at.x - minL : SHIFT * steps, dy = at && at.y != null ? at.y - minT : SHIFT * steps;
+  dx = clamp(dx, -minL, 1 - maxR); dy = clamp(dy, -minT, 1 - maxB);
+  let skipped = 0;
+  for (const e of items) {
+    if (e.kind === 'video' && clip.source !== this.store) { skipped++; continue; }   // a video file belongs to the document it was added to
+    e.left += dx; e.right += dx; e.top += dy; e.bottom += dy; this.store.elements.push(e);
+  }
+  this.store.save();
+  for (const v of this.allPageViews()) if (v.selectElement) v.selectElement(null);
+  this.redrawPages();
+  if (this.sidebarVisible && this.panelTab === 4 && this.rebuildInsertions) this.rebuildInsertions();
+  return skipped;
+};
+
 /** Adds a copy of `json` to the current page of the active view. at = { page, x, y } puts its centre at that point. */
 E._placeCopy = function (json, shiftSteps, at) {
   const view = this.pageView, page = at && at.page != null ? at.page : (view ? view.getPageNumber() : this.currentPage);
@@ -56,6 +98,7 @@ E.pasteElement = function (at) {
   const pageNow = at && at.page != null ? at.page : (this.pageView ? this.pageView.getPageNumber() : this.currentPage);
   const same = clip.source === this.store && clip.page === pageNow;
   const steps = at && at.x != null ? 0 : same ? (clip.cut ? clip.pastes : clip.pastes + 1) : clip.pastes;   // a cut item comes back exactly where it was
+  if (clip.group) { const skipped = this._placeGroup(clip, steps, at); clip.pastes++; toast(skipped ? '붙여넣었습니다 (동영상은 제외)' : '붙여넣었습니다'); return true; }
   this._placeCopy(clip.json, steps, at);
   clip.pastes++;
   toast('붙여넣었습니다');

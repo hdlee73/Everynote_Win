@@ -122,7 +122,7 @@ const methods = {
   /** One scrolling sheet with every tool group. */
   showTools() {
     const sections = [];
-    if (!this.renderer) sections.push(this.sectionOf(0, true));
+    if (!this.renderer) sections.push(section(CATEGORY_TITLES[0], [...this.categoryTiles(0), tile('다른 기기와 동기화', 'ic_sync', run('showDeviceSync'))]));
     else for (let c = 0; c < CATEGORY_TITLES.length; c++) sections.push(this.sectionOf(c, true));
     const awake = prefs.getBoolean('keep_awake', false);
     sections.push(section('읽기 편의', [tile('화면 켜 둠', 'ic_clock', () => {

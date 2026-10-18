@@ -22,7 +22,7 @@ import { ColorPicker } from './ui/colorpicker.js';
 import { printDocument } from './print.js';
 import { showAboutOffline } from './offline.js';
 import { createBackup, restoreBackup, compareVersions, AUTHOR_LINE, APP_NAME, RELEASE_DATE } from './backup.js';
-import { SyncClient, SyncError, transferDocument, buildRows, relPath } from './sync.js';
+import { SyncClient, SyncError, transferDocument, transferFolder, buildRows, recordState, relPath } from './sync.js';
 
 // ------------------------------------------------------------------------------------------------------------------ constants
 export const NAVY = '#1C1C1E', ACCENT = '#007AFF', ACTIVE_BG = '#E5F0FF', ACTIVE_FG = '#007AFF', GRAY = '#8E8E93', RED = '#FF3B30';
@@ -489,10 +489,10 @@ M.showMemoDisplayOptions = function (mark) {
   const checked = !mark.visible ? 2 : (mark.minimized ? 1 : 0);
   this.showActionSheet('메모 포스트잇 표시', DISPLAY_CHOICES, checked, w => { mark.visible = w !== 2; mark.minimized = w === 1; this.store.save(); this.redrawPages(); });
 };
-/** Android addDocumentRows: 새 노트 만들기 / 파일 가져오기 / 저장된 문서 열기. */
+/** Android addDocumentRows: 새 노트 만들기 / 파일 가져오기 / 폴더 일괄 불러오기 / 저장된 문서 열기. */
 M.addDocumentRows = function () {
   const R = AnchoredMenu.Row;
-  return [new R('새 노트 만들기', 'ic_compose', () => this.newNotebook()).tint('#34C759'), new R('파일 가져오기', 'ic_import', () => this.choosePdf()).tint('#007AFF'), new R('저장된 문서 열기', 'ic_folder_open', () => this.showLibrary()).tint('#F5A623')];
+  return [new R('새 노트 만들기', 'ic_compose', () => this.newNotebook()).tint('#34C759'), new R('파일 가져오기', 'ic_import', () => this.choosePdf()).tint('#007AFF'), new R('폴더 일괄 불러오기', 'ic_folder_open', () => this.importFolder(this.library.root)).tint('#007AFF'), new R('저장된 문서 열기', 'ic_folder_open', () => this.showLibrary()).tint('#F5A623')];
 };
 M.showAddDocumentMenu = function () { AnchoredMenu.showCentered('문서 추가', this.addDocumentRows()); };
 M.showOutlineList = function () {
@@ -581,6 +581,15 @@ M.onLassoSelectionFinished = function () {
     const t = h('button', { class: 'm2-ltile', type: 'button', 'aria-label': label, title: label }, icon(iconName, 22, tint), h('span', { class: 'm2-ltile-l' }, label));
     t.addEventListener('click', () => action()); group.append(t);
   };
+  const picked = this.pageView.lassoElements ? this.pageView.lassoElements() : [];
+  if (picked.length) {   // inserted objects inside the lasso: copy / cut / delete them together
+    panel.append(h('div', { class: 'm-pp-sec' }, '선택한 개체 ' + picked.length + '개'));
+    const g = h('div', { class: 'm2-lgrid' }); panel.append(g);
+    const act = fn => () => { handedOff = true; dialog.dismiss(); fn(); };
+    mk(g, '복사', 'ic_copy', act(() => this.copyElements(picked, false)), '#007AFF');
+    mk(g, '잘라내기', 'ic_cut', act(() => this.copyElements(picked, true)), '#5856D6');
+    mk(g, '삭제', 'ic_delete', act(() => { for (const e of picked) this.deleteElement(e); toast('삭제했습니다'); }), '#FF3B30');
+  }
   panel.append(h('div', { class: 'm-pp-sec' }, '이 영역으로'));
   for (let row = 0; row < 2; row++) {
     const group = h('div', { class: 'm2-lgrid' }); panel.append(group);
@@ -798,12 +807,12 @@ M.importSidecar = async function () {
   });
 };
 
-// ---- same-network device sync (phone shows address + code; user picks documents + direction; whole-document overwrite) -----------------
+// ---- same-network device sync (phone shows address + code; both libraries are compared by modification time and the newer side wins; the user can pick what to sync) ----
 M.showDeviceSync = function () {
   const addr = inputField({ hint: '주소 (예: 192.168.0.12:43125)', text: this.recentPrefs.getString('sync_address', '') });
   const code = inputField({ hint: '코드 6자리', text: '' });
   code.input.inputMode = 'numeric'; code.input.maxLength = 6;
-  const note = h('div', { class: 'sync-note' }, '같은 Wi-Fi나 휴대폰 핫스팟·USB 테더링으로 연결된 상태에서, 휴대폰 앱의 ‘도구 → 다른 기기와 동기화’를 열어 두고 표시된 주소와 코드를 입력하세요. 다음 화면에서 문서와 방향을 고릅니다. 자동으로 동기화되지 않습니다.');
+  const note = h('div', { class: 'sync-note' }, '같은 Wi-Fi나 휴대폰 핫스팟·USB 테더링으로 연결된 상태에서, 휴대폰 앱의 문서함 ⋮ → ‘다른 기기와 동기화’를 열어 두고 표시된 주소와 코드를 입력하세요. 다음 화면에서 문서·폴더를 수정 시각으로 비교한 결과를 보고 동기화할 항목을 고릅니다. 자동으로 동기화되지 않습니다.');
   alertCard({
     title: '기기 동기화', view: h('div', { class: 'sync-view' }, note, addr.view, code.view),
     positive: ['연결', () => this.connectDeviceSync(addr.input.value, code.input.value)], negative: ['취소'],
@@ -821,11 +830,35 @@ M.syncEnv = function () {
       const open = sessionOf(rel); if (open && open.store) return open.store.exportJson(open.uri, open.title);
       const st = new AnnotationStore(); await st.open(full(rel)); return st.exportJson(full(rel), baseName(rel));
     },
-    importNote: async (rel, text) => { const st = new AnnotationStore(); await st.open(full(rel)); await st.importJson(text, Infinity); },
+    importNote: async (rel, text) => { const st = new AnnotationStore(); await st.open(full(rel)); await st.importJson(text, Infinity); await st.flush(); },
+    mkdir: async rel => { await host.mkdir(full(rel)); },
+    // a document open here cannot be rewritten under its renderer: its notes are saved and it is closed, then afterReplace opens it again
+    beforeReplace: async rel => {
+      const s = sessionOf(rel); if (!s) return null;
+      if (s.store) await s.store.flush();
+      const was = { uri: s.uri, page: s === this.activeSession ? this.currentPage : s.page, active: s === this.activeSession };
+      this.closeDocument(s); return was;
+    },
+    afterReplace: async (rel, was) => { if (was) await this.openPdf(was.uri, false, Math.max(0, was.page | 0), was.active); },
     assetPath: n => AnnotationStore.assetPath(n),
     hasAsset: n => AnnotationStore.hasAsset(n),
   };
 };
+/** This PC's library as documents ({path, size, mtime}) and folders (relative, slash separated). */
+M.syncPcLibrary = async function () {
+  const lib = this.library, docs = [], folders = [];
+  const walk = async dir => {
+    for (const f of await lib.list(dir)) {
+      const rel = relPath(lib.root, f); if (rel == null) continue;
+      if (lib.isDirectory(f)) { folders.push(rel); await walk(f); continue; }
+      const st = await host.stat(f);
+      docs.push({ path: rel, size: st.size, mtime: Math.max(st.mtime, await AnnotationStore.modified(f)) });
+    }
+  };
+  await walk(lib.root);
+  return { docs, folders };
+};
+M.syncStateKey = id => 'sync_state_' + String(id || '').replace(/[^A-Za-z0-9-]/g, '');
 M.connectDeviceSync = async function (address, codeText) {
   const retry = msg => alertCard({ title: '동기화 실패', message: msg, positive: ['다시 시도', () => this.showDeviceSync()], negative: ['닫기'] });
   let progress = null;
@@ -834,62 +867,104 @@ M.connectDeviceSync = async function (address, codeText) {
     this.recentPrefs.putString('sync_address', address.trim());
     progress = ProgressDialog.show('기기 동기화', '연결하는 중…');
     const phone = await client.library();
-    const pc = [];
-    for (const f of await this.library.allDocuments('')) {
-      const rel = relPath(this.library.root, f); if (rel == null) continue;
-      const st = await host.stat(f);
-      pc.push({ path: rel, size: st.size, mtime: Math.max(st.mtime, await AnnotationStore.modified(f)) });
-    }
+    let phoneFolders = []; try { phoneFolders = await client.folders(); } catch (e) { /* an older phone app lists documents only */ }
+    const info = await client.info().catch(() => ({})), key = this.syncStateKey(info.id || address);
+    const pc = await this.syncPcLibrary();
+    let state = {}; try { state = JSON.parse(this.recentPrefs.getString(key, '{}')) || {}; } catch (e) { state = {}; }
     progress.dismiss(); progress = null;
-    this.pickSyncDocuments(client, buildRows(phone, pc), address, codeText);
+    this.pickSyncDocuments(client, buildRows(phone, pc.docs, state, phoneFolders, pc.folders), { key, name: info.name || '휴대폰', state });
   } catch (e) {
     if (progress) progress.dismiss();
     retry(e instanceof SyncError ? e.message : '연결에 실패했습니다: ' + errMsg(e));
   }
 };
-M.pickSyncDocuments = function (client, rows, address, codeText) {
+M.pickSyncDocuments = function (client, rows, ctx) {
   const fmt = t => { const d = new Date(t); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-  let dir = 'push'; const picked = new Set();
-  const dirRow = h('div', { class: 'sync-dir' });
+  const dirName2 = d => d === 'push' ? 'PC → 휴대폰' : '휴대폰 → PC';
+  const picked = new Map(), byPath = new Map(rows.map(r => [r.path, r]));   // path -> direction
+  for (const r of rows) if (r.dir) picked.set(r.path, r.dir);
+  let showSame = false;
+  const summary = h('div', { class: 'sync-note sync-sum' });
   const list = h('div', { class: 'sync-list' });
   const foot = h('div', { class: 'sync-note' });
-  const render = () => {
-    const src = dir === 'push' ? 'pc' : 'phone', dst = dir === 'push' ? 'phone' : 'pc';
-    for (const r of rows) if (!r[src]) picked.delete(r.path);
-    list.textContent = '';
-    for (const r of rows) {
-      const usable = !!r[src], cb = h('input', { type: 'checkbox' }); cb.checked = picked.has(r.path); cb.disabled = !usable;
-      cb.addEventListener('change', () => { if (cb.checked) picked.add(r.path); else picked.delete(r.path); render2(); });
-      const info = `PC ${r.pc ? fmt(r.pc.mtime) : '없음'} · 휴대폰 ${r.phone ? fmt(r.phone.mtime) : '없음'}` + (r.newer ? ` · ${r.newer === 'pc' ? 'PC' : '휴대폰'}가 더 최신` : '');
-      list.append(h('label', { class: 'sync-row' + (usable ? '' : ' off') }, cb, h('span', {}, h('b', {}, r.path), h('small', {}, info + (r[dst] ? '' : ' · 새로 만들어짐')))));
+  const folderOf = r => r.kind === 'folder' ? r.path : (r.path.lastIndexOf('/') < 0 ? '' : r.path.slice(0, r.path.lastIndexOf('/')));
+  const nameOf = r => r.kind === 'folder' ? '📁 ' + baseName(r.path) : r.path.slice(r.path.lastIndexOf('/') + 1);
+  const why = r => {
+    switch (r.why) {
+      case 'pc-only': return r.kind === 'folder' ? 'PC에만 있는 폴더 · 휴대폰에 만들어짐' : 'PC에만 있음 · 휴대폰에 새로 만들어짐';
+      case 'phone-only': return r.kind === 'folder' ? '휴대폰에만 있는 폴더 · PC에 만들어짐' : '휴대폰에만 있음 · PC에 새로 만들어짐';
+      case 'pc-newer': return `PC가 더 최신 · PC ${fmt(r.pc.mtime)} / 휴대폰 ${fmt(r.phone.mtime)}`;
+      case 'phone-newer': return `휴대폰이 더 최신 · PC ${fmt(r.pc.mtime)} / 휴대폰 ${fmt(r.phone.mtime)}`;
+      case 'both': return `양쪽 모두 바뀜 · 더 최신인 ${r.newer === 'pc' ? 'PC' : '휴대폰'} 기준 (PC ${fmt(r.pc.mtime)} / 휴대폰 ${fmt(r.phone.mtime)})`;
+      default: return `같음 · PC ${fmt(r.pc.mtime)} / 휴대폰 ${fmt(r.phone.mtime)}`;
     }
-    if (!rows.length) list.append(h('div', { class: 'sync-note' }, '양쪽 모두 문서가 없습니다.'));
-    render2();
   };
-  const render2 = () => { foot.textContent = picked.size ? `선택한 ${picked.size}개를 ${dir === 'push' ? '휴대폰' : '이 PC'}에 통째로 덮어씁니다 (PDF·노트·그림·녹음). 같은 이름의 문서는 되돌릴 수 없습니다.` : '덮어쓸 문서를 고르세요.'; };
-  for (const [v, label] of [['push', 'PC → 휴대폰'], ['pull', '휴대폰 → PC']]) {
-    const r = h('input', { type: 'radio', name: 'sync-dir' }); r.checked = v === dir; r.addEventListener('change', () => { dir = v; render(); });
-    dirRow.append(h('label', { class: 'sync-dirbtn' }, r, h('b', {}, label)));
-  }
+  const render = () => {
+    list.textContent = '';
+    const visible = rows.filter(r => r.dir || showSame).sort((a, b) => folderOf(a).localeCompare(folderOf(b), 'ko') || nameOf(a).localeCompare(nameOf(b), 'ko'));
+    let last = null;
+    for (const r of visible) {
+      const folder = folderOf(r);
+      if (folder !== last) {
+        last = folder;
+        const group = visible.filter(x => folderOf(x) === folder);
+        const gcb = h('input', { type: 'checkbox' }); gcb.checked = group.every(x => picked.has(x.path));
+        gcb.addEventListener('change', () => { for (const x of group) { if (gcb.checked) picked.set(x.path, x.dir || 'push'); else picked.delete(x.path); } render(); });
+        list.append(h('label', { class: 'sync-group' }, gcb, h('b', {}, folder === '' ? '문서함' : folder)));
+      }
+      const cb = h('input', { type: 'checkbox' }); cb.checked = picked.has(r.path);
+      cb.addEventListener('change', () => { if (cb.checked) picked.set(r.path, r.dir || 'push'); else picked.delete(r.path); render(); });
+      const both = r.pc && r.phone && r.kind === 'doc', cur = picked.get(r.path) || r.dir || 'push';
+      const flip = both ? h('button', { type: 'button', class: 'sync-flip', title: '방향 바꾸기' }, dirName2(cur)) : h('span', { class: 'sync-flip off' }, dirName2(r.dir || cur));
+      if (both) flip.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); picked.set(r.path, cur === 'push' ? 'pull' : 'push'); render(); });
+      const note = why(r) + (picked.has(r.path) && r.dir && cur !== r.dir ? ' · ※ 방향을 직접 바꿈' : '');
+      list.append(h('label', { class: 'sync-row' + (r.conflict ? ' warn' : '') }, cb, h('span', { class: 'sync-main' }, h('b', {}, nameOf(r)), h('small', {}, note)), flip));
+    }
+    if (!visible.length) list.append(h('div', { class: 'sync-note', style: { padding: '10px' } }, rows.length ? '양쪽의 문서와 폴더가 모두 같습니다.' : '양쪽 모두 문서가 없습니다.'));
+    const push = [...picked.values()].filter(d => d === 'push').length, pull = picked.size - push, same = rows.filter(r => !r.dir).length, conflicts = rows.filter(r => r.conflict).length;
+    summary.textContent = `PC → 휴대폰 ${rows.filter(r => r.dir === 'push').length}개 · 휴대폰 → PC ${rows.filter(r => r.dir === 'pull').length}개 · 같음 ${same}개` + (conflicts ? ` · 양쪽 모두 바뀐 문서 ${conflicts}개(최신 기준)` : '');
+    foot.textContent = picked.size ? `선택한 ${picked.size}개를 동기화합니다 (PC → 휴대폰 ${push}개 · 휴대폰 → PC ${pull}개). 받는 쪽의 같은 문서는 통째로 바뀌고, 삭제는 전달하지 않습니다.` : '동기화할 항목을 고르세요.';
+  };
+  const mini = (label, fn) => { const b = h('button', { type: 'button', class: 'sync-mini' }, label); b.addEventListener('click', fn); return b; };
+  const sameCb = h('input', { type: 'checkbox' }); sameCb.addEventListener('change', () => { showSame = sameCb.checked; render(); });
+  const tools = h('div', { class: 'sync-tools' },
+    mini('모두 선택', () => { for (const r of rows) if (r.dir) picked.set(r.path, r.dir); render(); }),
+    mini('모두 해제', () => { picked.clear(); render(); }),
+    h('label', { class: 'sync-same' }, sameCb, '같은 문서도 보기'));
   render();
   const dlg = alertCard({
-    title: '덮어쓸 문서 선택', view: h('div', { class: 'sync-view' }, dirRow, list, foot),
-    positive: ['덮어쓰기', () => { if (picked.size) this.runDeviceSync(client, rows.filter(r => picked.has(r.path)).map(r => r.path), dir); else toast('문서를 먼저 고르세요'); }],
+    title: '동기화할 항목 선택 · ' + ctx.name, view: h('div', { class: 'sync-view' }, summary, tools, list, foot),
+    positive: ['동기화', () => {
+      if (!picked.size) { toast('동기화할 항목을 먼저 고르세요'); return; }
+      this.runDeviceSync(client, [...picked].map(([path, dir]) => ({ kind: byPath.get(path).kind, path, dir })), ctx);
+    }],
     negative: ['취소'],
   });
-  dialogWidth(dlg, { width: '520px', maxWidth: '94vw', maxHeight: '86vh' });
+  dialogWidth(dlg, { width: '560px', maxWidth: '94vw', maxHeight: '86vh' });
 };
-M.runDeviceSync = async function (client, paths, dir) {
-  const progress = ProgressDialog.show('기기 동기화', '준비 중…'); const failed = []; let done = 0;
-  for (let i = 0; i < paths.length; i++) {
-    const rel = paths[i];
-    try { await transferDocument(client, rel, dir, t => progress.setMessage(`(${i + 1}/${paths.length}) ${baseName(rel)}\n${t}`)); done++; }
-    catch (e) { failed.push(`${rel}: ${e instanceof SyncError ? e.message : errMsg(e)}`); if (/코드/.test(String(e && e.message))) break; }
+M.runDeviceSync = async function (client, items, ctx) {
+  const progress = ProgressDialog.show('기기 동기화', '준비 중…'); const failed = [], done = new Set(); let count = 0;
+  // folders first, so a document never lands before its folder exists
+  items = [...items].sort((a, b) => (a.kind === 'folder' ? 0 : 1) - (b.kind === 'folder' ? 0 : 1));
+  for (let i = 0; i < items.length; i++) {
+    const { kind, path: rel, dir } = items[i];
+    try {
+      if (kind === 'folder') await transferFolder(client, rel, dir);
+      else await transferDocument(client, rel, dir, t => progress.setMessage(`(${i + 1}/${items.length}) ${baseName(rel)}\n${dir === 'push' ? 'PC → 휴대폰' : '휴대폰 → PC'} · ${t}`));
+      done.add(rel); count++;
+    } catch (e) { failed.push(`${rel}: ${e instanceof SyncError ? e.message : errMsg(e)}`); if (/코드/.test(String(e && e.message))) break; }
   }
+  // remember how both sides look now, so the next sync only offers what changed after this one
+  try {
+    progress.setMessage('결과를 기록하는 중…');
+    const phone = await client.library(), pc = await this.syncPcLibrary(), keep = done;
+    const next = recordState(ctx.state || {}, phone.filter(d => keep.has(d.path)), pc.docs.filter(d => keep.has(d.path)));
+    this.recentPrefs.putString(ctx.key, JSON.stringify(next));
+  } catch (e) { /* the next sync simply compares times without the record */ }
   progress.dismiss();
-  if (this.libraryDialog && this.libraryDialog.isShowing && this.libraryDialog.isShowing() && this.libraryDialog.refresh) { try { this.libraryDialog.refresh(); } catch (e) { /* */ } }
-  if (!failed.length) toast(`동기화 완료 (${done}개)`);
-  else alertCard({ title: `동기화 완료 ${done}개 · 실패 ${failed.length}개`, message: failed.join('\n'), positive: ['확인'] });
+  if (this.libraryDialog && this.libraryDialog.isShowing && this.libraryDialog.isShowing() && this.libraryDialog.refresh) { try { this.libraryDialog.tree.reload(); this.libraryDialog.refresh(); } catch (e) { /* */ } }
+  if (!failed.length) toast(`동기화 완료 (${count}개)`);
+  else alertCard({ title: `동기화 완료 ${count}개 · 실패 ${failed.length}개`, message: failed.join('\n'), positive: ['확인'] });
 };
 
 // ---- 758-858: library glue, notebooks, page insert/delete ------------------------------------------------------------------------------
@@ -909,6 +984,7 @@ M.showLibrary = function () {
     selectedFolder: folder => { this.libraryFolder = folder; },
     backupFolder: folder => this.startLibraryBackup(folder),
     restoreBackup: () => this.startLibraryRestore(),
+    deviceSync: () => this.showDeviceSync(),
     removed: files => { for (const s of [...this.sessions]) if (files.some(f => samePath(f, s.uri))) this.closeDocument(s); },
   }, { mode: samePath(this.libraryFolder, this.library.root) ? 0 : 3 });   // Samsung Notes opens on 모든 노트; a sub-folder reopens where it was
   this.libraryDialog.show();

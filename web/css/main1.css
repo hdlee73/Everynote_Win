@@ -170,6 +170,9 @@
 .m-root.m-pad-l>.m-content{padding-left:56px;box-sizing:border-box}
 .m-root.m-pad-r>.m-content{padding-right:56px;box-sizing:border-box}
 
+/* bar drag (press the ⠿ handle of the tool strip and drop it at an edge) */
+.m-barghost{position:absolute;left:0;top:0;z-index:300;pointer-events:none;border-radius:14px;background:rgba(255,255,255,.9);box-shadow:0 6px 22px rgba(0,0,0,.3);outline:1px solid rgba(0,0,0,.1)}
+.m-barzone{position:absolute;z-index:299;pointer-events:none;box-sizing:border-box;border-radius:14px;background:rgba(0,122,255,.15);border:2px solid rgba(0,122,255,.6)}
 /* v3.10 highlighter transparency quick buttons */
 .m-alpha-row{display:flex;gap:6px;padding:2px 10px 8px}
 .m-alpha-chip{flex:1 1 0;height:30px;border-radius:15px;background:#F2F2F7;display:flex;align-items:center;justify-content:center;gap:5px;font-size:12px;color:#3A3A3C;cursor:pointer;-webkit-user-select:none;user-select:none}

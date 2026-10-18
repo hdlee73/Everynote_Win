@@ -1115,6 +1115,13 @@ export class PdfPageView {
     try { this.onDraw(ctx); } finally { this.suppressSelection = false; }
     return cap;
   }
+  /** Inserted objects (typed text, pictures, shapes, tables, stickers...) whose centre lies inside the lasso on this page. */
+  lassoElements() {
+    const st = this.annotationStore, pts = this.lassoPoints;
+    if (!st || !this.bitmap || pts.length < 3 || !this._validLasso(this.contentRect())) return [];
+    const inside = (x, y) => { let on = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const a = pts[i], b = pts[j]; if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) on = !on; } return on; };
+    return st.elements.filter(e => e.page === this.page && e.kind !== 'hyperlink' && e.kind !== 'audio' && inside((e.left + e.right) / 2, (e.top + e.bottom) / 2));
+  }
   /** Words of the text regions whose centre lies inside the lasso, joined by ' ' (same line) or '\n'. */
   lassoText() {
     const pts = this.lassoPoints; if (pts.length < 3) return '';

@@ -1,4 +1,4 @@
-// UI check of 기기 동기화 (dialog -> merge with a fake phone). usage: node dev/sync-ui-test.mjs  (screenshots dev/out/sync-*.png)
+// UI check of 기기 동기화 (dialog -> compare with a fake phone -> pick items -> sync). usage: node dev/sync-ui-test.mjs  (screenshots dev/out/sync-*.png)
 import {chromium} from '/tmp/npmtest/node_modules/playwright/index.mjs';
 import {serve} from './server.mjs'; import fs from 'fs';
 const PORT=8200+Math.floor(Math.random()*700); const s=await serve(PORT);
@@ -17,6 +17,9 @@ await pg.evaluate(async()=>{
   host._fake.netHandler=async o=>{ calls.push((o.method||'GET')+' '+o.url);
     if(o.headers['X-Code']!=='123456')return{status:403,text:'wrong code'};
     const u=new URL(o.url), p=u.searchParams.get('p'), m=o.method||'GET';
+    if(u.pathname==='/v1/info')return{status:200,text:JSON.stringify({app:'HDnotes',platform:'android',name:'SM-TEST',id:'phone-1',version:'1',port:40000})};
+    if(u.pathname==='/v1/folders')return{status:200,text:JSON.stringify(['폴더','폰빈폴더'])};
+    if(u.pathname==='/v1/folder'&&m==='PUT'){return{status:200,text:'ok'};}
     if(u.pathname==='/v1/library')return{status:200,text:JSON.stringify([{path:'폰문서.pdf',size:12,mtime:Date.now()-3600e3},{path:'폴더/둘.pdf',size:12,mtime:Date.now()}])};
     if(u.pathname==='/v1/pdf'&&m==='GET'){host._fake.put(o.savePath,pdf);return{status:200,text:''};}
     if(u.pathname==='/v1/note'&&m==='GET')return{status:200,text:JSON.stringify({format:'PDF Note annotations v2',elements:[],studyEntries:[],marks:[],bookmarks:[0],outlines:[],strokes:[],translations:[]})};
@@ -34,20 +37,26 @@ await pg.click('.ad-btn:has-text("다시 시도")'); await pg.waitForTimeout(300
 const ins2=pg.locator('.sync-view input.lib-in');
 check('address remembered', (await ins2.nth(0).inputValue())==='192.168.0.9:40000');
 await ins2.nth(1).fill('123456'); await pg.click('.ad-btn:has-text("연결")'); await pg.waitForTimeout(1200);
-check('picker lists phone documents', await pg.locator('.sync-row').count()===3);
+check('picker lists the three documents and the empty phone folder', await pg.locator('.sync-row').count()===4, String(await pg.locator('.sync-row').count()));
+check('everything that differs is ticked by default', await pg.locator('.sync-row input:checked').count()===4);
 await pg.screenshot({path:'dev/out/sync-2-picker.png'});
-check('push disabled for phone-only rows', await pg.locator('.sync-row.off').count()===2);
-await pg.locator('.sync-dirbtn:has-text("휴대폰 → PC") input').check();
-check('pull disables the PC-only row', await pg.locator('.sync-row.off').count()===1);
-await pg.locator('.sync-row:has-text("폰문서.pdf") input').check();
-await pg.screenshot({path:'dev/out/sync-3-pull.png'});
-await pg.click('.ad-btn:has-text("덮어쓰기")'); await pg.waitForTimeout(1500);
-const got=await pg.evaluate(async()=>{const {host}=await import('./js/host.js');return host._fake.files.has('C:\\Users\\dev\\Documents\\Everynote\\폰문서.pdf')});
-check('PDF written into the library', got);
-check('toast / no failure card', await pg.locator('.ad-root:has-text("실패")').count()===0);
+check('summary counts push and pull', /PC → 휴대폰 1개 · 휴대폰 → PC 3개/.test(await pg.locator('.sync-sum').innerText()), await pg.locator('.sync-sum').innerText());
+check('direction chip is shown per row', await pg.locator('.sync-row:has-text("폰문서.pdf") .sync-flip.off').count()===1);
+await pg.locator('.sync-row:has-text("sample-ko.pdf") input').uncheck();       // partial sync: leave the PC-only document out
+await pg.screenshot({path:'dev/out/sync-3-partial.png'});
+await pg.click('.ad-btn:has-text("동기화")'); await pg.waitForTimeout(1800);
+const got=await pg.evaluate(async()=>{const {host}=await import('./js/host.js');window.__keys=[...host._fake.files.keys()].filter(k=>/폰|폴더/.test(k));return [host._fake.files.has('C:\\Users\\dev\\Documents\\PDF Note\\폰문서.pdf'),host._fake.files.has('C:\\Users\\dev\\Documents\\PDF Note\\폴더\\둘.pdf'),host._fake.files.has('C:\\Users\\dev\\Documents\\PDF Note\\폰빈폴더')]});
+check('phone-only documents were pulled into the library', got[0]&&got[1], JSON.stringify(got)+JSON.stringify(await pg.evaluate(()=>window.__keys)));
+check('empty phone folder was created on the PC', got[2]);
+check('the unticked PC document was not pushed', await pg.evaluate(()=>putPdf===null));
+check('no failure card', await pg.locator('.ad-root:has-text("실패")').count()===0);
 await pg.evaluate(()=>app.showDeviceSync()); await pg.waitForTimeout(300);
 await pg.locator('.sync-view input.lib-in').nth(1).fill('123456'); await pg.click('.ad-btn:has-text("연결")'); await pg.waitForTimeout(1200);
-await pg.locator('.sync-row:has-text("sample-ko.pdf") input').check(); await pg.click('.ad-btn:has-text("덮어쓰기")'); await pg.waitForTimeout(1500);
+check('after a sync only what is left differs', await pg.locator('.sync-row').count()===1 && await pg.locator('.sync-row:has-text("sample-ko.pdf")').count()===1, String(await pg.locator('.sync-row').count()));
+await pg.locator('.sync-same input').check();
+check('equal documents can be shown too', await pg.locator('.sync-row').count()>=3);
+await pg.locator('.sync-same input').uncheck();
+await pg.click('.ad-btn:has-text("동기화")'); await pg.waitForTimeout(1500);
 check('push sent the PDF', await pg.evaluate(()=>putPdf==='sample-ko.pdf'), String(await pg.evaluate(()=>putPdf)));
 await pg.evaluate(()=>app.showTools()); await pg.waitForTimeout(300);
 check('tools has sync tile', await pg.locator('.m2-tile[aria-label="다른 기기와 동기화"]').count()===1);

@@ -594,6 +594,7 @@ const methods = {
     this.barGrip = this.makeGrip(this.bottomBar, 'bar');
     const place = this.icon('ic_grip_h', '도구 모음 위치·방향', 0xFF848487, v => this.showBarLayoutMenu(v), 'm-tb m-barlayout');
     this.bottomBar.append(place, this.barGrip, readBar);
+    this.installBarDrag(place);
     this.contentCol = content;
     this.applyBarMode();
     this.applyStripFolded();
@@ -1182,6 +1183,7 @@ const methods = {
     } else {
       rows.push(Row.divider());
       rows.push(new Row('내보내기·백업', 'ic_share', null).tint('#007AFF').children([
+        new Row('다른 기기와 동기화', 'ic_sync', () => this.callUi2('showDeviceSync')).tint('#007AFF'),
         new Row('모든 문서 백업', 'ic_backup', () => this.callUi2('startLibraryBackup')).tint('#007AFF'),
         new Row('모든 문서 복원', 'ic_import', () => this.callUi2('startLibraryRestore')).tint('#007AFF')]));
     }
@@ -1954,6 +1956,96 @@ const methods = {
       g.addEventListener('pointermove', move); g.addEventListener('pointerup', up); g.addEventListener('pointercancel', up);
     });
     return g;
+  },
+  // ---- moving the tool strip (Samsung Notes): press its ⠿ handle (or drag it at once), the strip follows the pointer and docks at the edge it is dropped at
+  /** The ⠿ handle at the top (or left end) of the tool strip: a click opens the place menu; a long press or a drag lifts the strip. */
+  installBarDrag(handle) {
+    let st = null, swallow = false;
+    handle.addEventListener('click', e => { if (swallow) { swallow = false; e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+    handle.style.touchAction = 'none';
+    handle.addEventListener('pointerdown', e => {
+      if (e.button != null && e.button !== 0) return;
+      const r = this.root.getBoundingClientRect();
+      st = { id: e.pointerId, x: e.clientX - r.left, y: e.clientY - r.top, lifted: false, timer: 0 };
+      try { handle.setPointerCapture(e.pointerId); } catch (err) { /* pointer already gone */ }
+      st.timer = setTimeout(() => { if (st && !st.lifted) this.beginBarDrag(st); }, 500);
+    });
+    handle.addEventListener('pointermove', e => {
+      if (!st || e.pointerId !== st.id) return;
+      const r = this.root.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+      if (!st.lifted && Math.hypot(x - st.x, y - st.y) > 6) { clearTimeout(st.timer); this.beginBarDrag(st); }
+      if (st.lifted) this.dragBarTo(x, y);
+    });
+    const end = (e, drop) => {
+      if (!st || e.pointerId !== st.id) return;
+      clearTimeout(st.timer);
+      const r = this.root.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, was = st; st = null;
+      try { handle.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      if (was.lifted) { swallow = true; setTimeout(() => { swallow = false; }, 60); if (drop) this.dropBarAt(x, y); else this.endBarDrag(); }
+    };
+    handle.addEventListener('pointerup', e => end(e, true));
+    handle.addEventListener('pointercancel', e => end(e, false));
+  },
+  beginBarDrag(st) {
+    this.endBarDrag(); st.lifted = true;
+    const b = this.bottomBar, rr = this.root.getBoundingClientRect(), br = b.getBoundingClientRect();
+    const ghost = this._barGhost = h('div', { class: 'm-barghost', dataset: { tag: 'bar_drag_ghost' }, style: { width: br.width + 'px', height: br.height + 'px' } });
+    const zone = this._barZone = h('div', { class: 'm-barzone', dataset: { tag: 'bar_drop_zone' }, style: { display: 'none' } });
+    this.root.append(zone, ghost);
+    this._barGrab = [Math.max(0, Math.min(br.width, st.x - (br.left - rr.left))), Math.max(0, Math.min(br.height, st.y - (br.top - rr.top)))];
+    b.style.opacity = '.35'; this.dragBarTo(st.x, st.y);
+  },
+  /** Close to the left / right edge a rail, close to the bottom 'bottom', anywhere else the strip floats there (a narrow window has no room for a rail: a side edge gives a vertical floating strip). */
+  barDropPlace(x, y) {
+    const w = this.root.clientWidth, hh = this.root.clientHeight, near = 88, rails = window.innerWidth >= 600;
+    if (y > hh - near) return 'bottom';
+    if (x < near) return rails ? 'left' : 'float-left';
+    if (x > w - near) return rails ? 'right' : 'float-right';
+    return 'float';
+  },
+  barFloatSize(vertical) { const w = this.root.clientWidth, hh = this.root.clientHeight; return vertical ? [56, Math.min(560, hh - 140)] : [Math.min(480, w - 24), 54]; },
+  /** Where the docked strip will sit (left, top, width, height in the root), or null for a free float. */
+  barDropRect(place) {
+    const w = this.root.clientWidth, hh = this.root.clientHeight, rr = this.root.getBoundingClientRect();
+    const rows = this.studySplit.getBoundingClientRect(), top = rows.height > 0 ? rows.top - rr.top : 0, height = rows.height > 0 ? rows.height : hh;
+    switch (place) {
+      case 'left': return [0, top, 56, height];
+      case 'right': return [w - 56, top, 56, height];
+      case 'bottom': return [0, hh - 52, w, 52];
+      case 'float-left': { const s = this.barFloatSize(true); return [12, Math.max(0, (hh - s[1]) / 2), s[0], s[1]]; }
+      case 'float-right': { const s = this.barFloatSize(true); return [w - s[0] - 12, Math.max(0, (hh - s[1]) / 2), s[0], s[1]]; }
+      default: return null;
+    }
+  },
+  dragBarTo(x, y) {
+    const g = this._barGhost; if (!g) return;
+    g.style.translate = (x - this._barGrab[0]) + 'px ' + (y - this._barGrab[1]) + 'px';
+    const r = this.barDropRect(this.barDropPlace(x, y)), z = this._barZone;
+    if (!r) { z.style.display = 'none'; return; }
+    z.style.cssText = `left:${r[0]}px;top:${r[1]}px;width:${r[2]}px;height:${r[3]}px;display:block`;
+  },
+  endBarDrag() {
+    if (this._barGhost) { this._barGhost.remove(); this._barGhost = null; }
+    if (this._barZone) { this._barZone.remove(); this._barZone = null; }
+    if (this.bottomBar) this.bottomBar.style.opacity = '';
+  },
+  /** Docks the strip at the edge, or leaves it floating where the picture was let go (the place and position are remembered). */
+  dropBarAt(x, y) {
+    const place = this.barDropPlace(x, y), grab = this._barGrab || [0, 0];
+    let left = x - grab[0], top = y - grab[1], vertical = this.barVertical(), key;
+    this.endBarDrag();
+    if (place.startsWith('float')) {
+      if (place !== 'float') { const r = this.barDropRect(place); vertical = true; left = r[0]; top = r[1]; }
+      key = vertical ? 'barv' : 'bar';
+      this.recentPrefs.putString('bar_place', 'float'); this.recentPrefs.putBoolean('bar_vertical', vertical); this.recentPrefs.putString(key + '_pos', '[0,0]');
+      this.applyBarMode();
+      requestAnimationFrame(() => requestAnimationFrame(() => {   // measured where the stylesheet puts an unmoved floating strip, then moved from there
+        const b = this.bottomBar, rr = this.root.getBoundingClientRect(), r0 = b.getBoundingClientRect();
+        const pos = this.moveFloating(b, left + rr.left - r0.left, top + rr.top - r0.top);
+        this.recentPrefs.putString(key + '_pos', JSON.stringify(pos)); this.reclampFloaters();
+      }));
+    } else this.setBarPlace(place);
+    toast(place === 'left' ? '도구 모음을 왼쪽에 붙였습니다' : place === 'right' ? '도구 모음을 오른쪽에 붙였습니다' : place === 'bottom' ? '도구 모음을 아래에 붙였습니다' : '도구 모음을 화면 위에 띄웠습니다 · ⋮⋮를 끌어 옮기세요');
   },
   toggleFullscreen() {
     this.fullscreen = !this.fullscreen;

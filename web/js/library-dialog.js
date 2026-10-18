@@ -900,6 +900,7 @@ export class LibraryDialog {
     if (this.mode === FOLDER) rows.push(new R('폴더 색상', null, () => this.chooseFolderColor(this.folder)));
     if (this.mode === FOLDER) rows.push(...this._backupRows(this.folder));
     else if (this.actions.restoreBackup) rows.push(new R('백업 불러오기', null, () => this.actions.restoreBackup()));
+    if (this.actions.deviceSync) rows.push(new R('다른 기기와 동기화', 'ic_sync', () => this.actions.deviceSync()));
     rows.push(new R('휴지통', null, () => this.showTrash()));
     rows.push(new R('설정', null, () => this.openSettings()));
     this._menu(anchor, rows);
