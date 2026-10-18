@@ -51,25 +51,27 @@ await page.evaluate(() => app.toggleFullscreen()); await page.waitForTimeout(500
 await page.evaluate(() => app.toggleFullscreen()); await page.waitForTimeout(300);
 await page.evaluate(() => app.toggleBookmark()); await shot('05-bookmark');
 // ---- v1.27: reading bar, pen types / colour chips, unified selection menu
-const bars = await page.evaluate(() => ({ readHasText: !!app.readBar.querySelector('[aria-label="타이핑"]'), writeHasText: !!app.writeBar.querySelector('[aria-label="타이핑"]'),
+// Everynote: the typing button is the strip's 키보드 tool, right before the pen / highlighter / eraser
+const bars = await page.evaluate(() => ({ readHasText: !!app.readBar.querySelector('[aria-label="키보드 · 타이핑"]'), writeHasText: !!app.writeBar.querySelector('[aria-label="키보드 · 타이핑"]'),
   order: [...app.readBar.querySelectorAll('.m-tb')].map(b => b.getAttribute('aria-label')).join('|') }));
-check('typing button moved to reading bar next to pen', bars.readHasText && !bars.writeHasText && /필기 모드\|지우개\|타이핑/.test(bars.order), bars.order);
+check('typing button moved to reading bar next to pen', bars.readHasText && !bars.writeHasText && /키보드 · 타이핑\|펜\|형광펜\|지우개/.test(bars.order), bars.order);
 await page.evaluate(() => { app.setWriteMode(true); app.showPenMenu(app.penButton); }); await page.waitForTimeout(300);
 const pen = await page.evaluate(() => ({ chips: [...document.querySelectorAll('.amenu .m-iseg[data-tag^="pen_"]:not(.m-opts)')].map(r => [...r.children].map(c => c.getAttribute('aria-label')).join(',')),
   texts: [...document.querySelectorAll('.amenu .m-iseg .m-ibtn')].map(b => b.textContent.trim()).join(''), titles: [...document.querySelectorAll('.amenu .m-iseg .m-ibtn')].every(b => b.title && (b.querySelector('svg') || b.querySelector('canvas.m-pensample'))),
   samples: document.querySelectorAll('.amenu .m-pensample').length,
-  opts: [...document.querySelectorAll('.amenu .m-opts .m-ibtn')].map(b => b.getAttribute('aria-label')).join('|'), rows: document.querySelectorAll('.amenu .amenu-row').length,
+  opts: [...document.querySelectorAll('.amenu [data-tag="pen_options"] [role="switch"]')].map(b => b.getAttribute('aria-label')).join('|'), rows: document.querySelectorAll('.amenu .amenu-row').length,
   dots: document.querySelectorAll('.amenu .m-sw .dot').length, more: document.querySelectorAll('.amenu [data-tag="color_more"]').length, op: !!document.querySelector('.amenu [data-tag="pen_opacity"]') }));
 check('pen panel (v3.21): pen types row with sample strokes (no text, tooltips)', pen.chips.length === 1 && pen.chips[0] === '볼펜,연필,만년필,붓,사인펜' && pen.texts === '' && pen.titles && pen.samples === 5, JSON.stringify(pen));
-check('pen menu: 직선 + 손가락 필기 are icon toggles; no text rows left', /^직선.*\|손가락 필기$/.test(pen.opts) && pen.rows === 0, pen.opts + ' rows=' + pen.rows);
-check('pen panel: width + opacity sliders, 2 swatch rows (8+8+rainbow chip), preview; the strip has no options row any more', pen.dots === 17 && pen.more === 1 && await page.evaluate(() => !!document.querySelector('.amenu [data-tag="pen_opacity"]') && !!document.querySelector('.amenu [data-tag="pen_width"]') && !!document.querySelector('.amenu [data-tag="pen_preview"]') && app.inkOptions.style.display === 'none'), JSON.stringify(pen));
+check('pen menu: 직선 + 손가락 필기 are switch rows (Samsung style); no menu rows', /^직선.*\|손가락 필기$/.test(pen.opts) && pen.rows === 0, pen.opts + ' rows=' + pen.rows);
+check('pen panel: width + opacity sliders, 3 swatch rows (8+8+7 + rainbow chip), preview; the strip has no options row any more', pen.dots === 24 && pen.more === 1 && await page.evaluate(() => !!document.querySelector('.amenu [data-tag="pen_opacity"]') && !!document.querySelector('.amenu [data-tag="pen_width"]') && !!document.querySelector('.amenu [data-tag="pen_preview"]') && app.inkOptions.style.display === 'none'), JSON.stringify(pen));
 await shot('07-pen-menu');
 await page.locator('.amenu [data-tag="pen_types"] .m-ibtn').nth(3).click();
 check('pen type 붓 -> inkPen 3 + pref + pageView', await page.evaluate(() => app.inkPen === 3 && app.pageView.inkPen === 3 && app.recentPrefs.getInt('ink_pen', 0) === 3));
 await page.evaluate(() => { const b = document.querySelector('.amenu [data-tag="pen_opacity"]'); b.value = 40; b.dispatchEvent(new Event('input', { bubbles: true })); });
 check('opacity 40% -> alpha 102 and colour kept', await page.evaluate(() => (app.inkColor >>> 24) === 102 && (app.inkColor & 0xFFFFFF) === 0x1C1C1E), await page.evaluate(() => (app.inkColor >>> 0).toString(16)));
 check('width slider -> inkWidth (1..100 maps to 0.0015..0.012)', await (async () => { await page.evaluate(() => { const b = document.querySelector('.amenu [data-tag="pen_width"]'); b.value = 100; b.dispatchEvent(new Event('input', { bubbles: true })); }); return page.evaluate(() => Math.abs(app.inkWidth - 0.012) < 1e-9 && app.pageView.inkWidth === app.inkWidth); })());
-check('pen button shows the chosen pen icon', await page.evaluate(() => app.penButton.querySelector('.ico').dataset.icon === 'ic_pen_brush'));
+// Everynote: the strip keeps one pen glyph (Samsung style); the chosen pen type is marked in the panel
+check('chosen pen type is marked in the pen panel, the strip pen keeps its glyph', await page.evaluate(() => document.querySelectorAll('.amenu [data-tag="pen_types"] .m-ibtn')[3].getAttribute('aria-pressed') === 'true' && !!app.penButton.querySelector('.ico svg')));
 await page.locator('.amenu [data-tag="pen_line"]').click();
 check('straight line toggle -> inkMode 3 (menu stays open) and back', await page.evaluate(() => app.inkMode === 3) && (await page.locator('.amenu').count()) === 1 && (await page.locator('.amenu [data-tag="pen_line"]').getAttribute('aria-pressed')) === 'true');
 await page.locator('.amenu [data-tag="pen_line"]').click();
@@ -85,7 +87,7 @@ await page.keyboard.press('Escape'); await page.mouse.click(5, 400); await page.
 await page.evaluate(() => { app.inkColor = 0xFF1C1C1E | 0; app.pageView.setInkTool(app.inkMode, app.inkColor, app.inkWidth); app.setInkMode(0); app.setWriteMode(false); });
 await page.evaluate(() => { app.inkPen = 2; app.pageView.setInkPen(2); app.setWriteMode(true); app.highlightTap(app.hlButton); }); await page.waitForTimeout(150);
 check('형광펜 tap -> ink highlighter: pen type 5 in free mode, pen stashed', await page.evaluate(() => app.highlighterMode && app.inkMode === 1 && app.inkPen === 5 && app.pageView.inkPen === 5 && app.penStash.pen === 2 && !app.highlightMode));
-check('pen button still shows the pen (not tinted as active) while the highlighter is on', await page.evaluate(() => app.penButton.querySelector('.ico').dataset.icon === 'ic_pen_fountain' && app.penButton.style.background === ''));
+check('pen button still shows the pen (not tinted as active) while the highlighter is on', await page.evaluate(() => !app.penButton.classList.contains('on') && app.penButton.style.background === '' && app.hlButton.classList.contains('on')));
 await page.evaluate(() => app.highlightTap(app.hlButton)); await page.waitForTimeout(250);
 check('highlight panel: 5 colours + rainbow chip, width + opacity sliders, strip has no options row', await page.evaluate(() => document.querySelectorAll('.amenu [data-tag="pen_colors"] .dot').length === 6 && !!document.querySelector('.amenu [data-tag="pen_width"]') && !!document.querySelector('.amenu [data-tag="pen_opacity"]') && app.inkOptions.style.display === 'none'));
 check('highlight menu: shape toggle 직선 / 자유형 (자유형 selected)', await page.evaluate(() => { const c = [...document.querySelectorAll('.amenu .m-seg .chip')]; return c.map(x => x.textContent).join() === '직선,자유형' && c[1].classList.contains('on'); }));
@@ -176,7 +178,7 @@ const hasCoreZoom = await page.evaluate(() => typeof app.firstPageView.setZoom =
 console.log('CORE zoom API present:', hasCoreZoom);
 const zoomBox = await page.evaluate(() => { const r = e => e.getBoundingClientRect(), z = r(app.zoomPill), v = r(app.viewportLayer), a = r(app.previousOverlay), f = r(app.addPageButton);
   return { visible: getComputedStyle(app.zoomPill).display !== 'none', leftEdge: z.left - v.left < 24, vertical: z.height > z.width * 2, labels: [...app.zoomPill.querySelectorAll('button')].map(b => b.getAttribute('aria-label')).join('|'), text: app.zoomLabel.textContent,
-    noOverlapArrow: z.bottom <= a.top + 1, fabRight: v.right - f.right < 24 && v.bottom - f.bottom < 24, fabText: app.addPageButton.textContent.trim() }; });
+    noOverlapArrow: z.bottom <= a.top + 1 || z.top >= a.bottom - 1, fabRight: v.right - f.right < 24 && v.bottom - f.bottom < 24, fabText: app.addPageButton.textContent.trim() }; });
 check('zoom pill: left edge, vertical, + / 100% / - , clear of the prev arrow', zoomBox.visible && zoomBox.leftEdge && zoomBox.vertical && zoomBox.labels === '확대|100%로 되돌리기|축소' && zoomBox.text === '100%' && zoomBox.noOverlapArrow, JSON.stringify(zoomBox));
 check('floating 페이지 추가 button at the bottom right', zoomBox.fabRight && zoomBox.fabText === '페이지 추가', JSON.stringify(zoomBox));
 await shot('10-zoom-pill');

@@ -1,7 +1,7 @@
 // Port of AnchoredMenu.java: floating card anchored above/below a button.
 import { h, icon } from '../util.js';
 
-export const INK = '#1C1C1E', ACCENT = '#007AFF', GRAY = '#8E8E93', LINE = '#E5E5EA', RED = '#FF3B30';
+export const INK = '#010102', ACCENT = '#DB332A', GRAY = '#848487', LINE = '#E4E4E7', RED = '#DB332A', ICON = '#252525';
 
 export class Row {
   constructor(label, iconName, action) { this.label = label; this.icon = iconName || null; this.action = action || null; this.selectedV = false; this.dangerV = false; this.submenuV = false; this.dividerV = false; this.customEl = null; this.tintV = null; this.childrenV = null; }
@@ -59,8 +59,8 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
     if (row.customEl) { list.append(row.customEl); wide = true; continue; }
     if (row.dividerV) { list.append(h('div', { class: 'amenu-div' })); continue; }
     const line = h('div', { class: 'amenu-row', role: 'button', 'aria-label': row.label });
-    if (row.icon) line.append(icon(row.icon, 20, row.dangerV ? RED : (row.tintV || ACCENT), 'margin-right:12px'));
-    line.append(h('span', { class: 'amenu-label', style: { color: row.dangerV ? RED : row.selectedV ? ACCENT : INK, fontWeight: row.selectedV ? '700' : '400' } }, row.label));
+    if (row.icon) line.append(icon(row.icon, 20, row.dangerV ? RED : ICON, 'margin-right:12px'));   // Samsung style: one-colour line icons (tint() kept for callers)
+    line.append(h('span', { class: 'amenu-label', style: { color: row.dangerV ? RED : INK, fontWeight: row.selectedV ? '600' : '400' } }, row.label));
     if (row.selectedV || row.submenuV) line.append(icon(row.submenuV ? 'ic_chevron_right' : 'ic_check_bold', row.submenuV ? 18 : 20, row.submenuV ? GRAY : ACCENT, 'margin-left:8px'));
     line.addEventListener('click', () => {
       if (row.childrenV) {
@@ -77,7 +77,7 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
   }
   const scroll = h('div', { class: 'amenu-scroll' }, list);
   const more = h('div', { class: 'amenu-more', dataset: { tag: 'menu_more' }, role: 'button', 'aria-label': '아래에 더 있음', title: '아래에 더 있음' });
-  more.innerHTML = '<svg width="22" height="18" viewBox="0 0 22 18" aria-hidden="true"><path d="M6 3.5l5 4.5 5-4.5M6 9.5l5 4.5 5-4.5" fill="none" stroke="#007AFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  more.innerHTML = '<svg width="22" height="18" viewBox="0 0 22 18" aria-hidden="true"><path d="M6 3.5l5 4.5 5-4.5M6 9.5l5 4.5 5-4.5" fill="none" stroke="#848487" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   more.style.display = 'none';
   const updateMore = () => { more.style.display = scroll.scrollTop + scroll.clientHeight < scroll.scrollHeight - 2 ? '' : 'none'; };
   scroll.addEventListener('scroll', updateMore);
@@ -87,13 +87,17 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
     card.append(h('div', { class: 'amenu-sdiv' }));
     const icons = h('div', { class: 'amenu-shortcuts' });
     for (const s of shortcuts) {
-      const b = h('div', { class: 'amenu-sc', role: 'button', 'aria-label': s.description }, icon(s.icon, 24, s.active ? '#F5A623' : '#5856D6'));
+      const b = h('div', { class: 'amenu-sc', role: 'button', 'aria-label': s.description, title: s.description }, icon(s.icon, 22, s.active ? '#F5A623' : ICON));
       b.addEventListener('click', () => { close(); s.action(); });
       icons.append(b);
     }
     card.append(icons);
   }
-  let w = Math.min(screenW - 24, rows.some(r => r.customEl && r.customEl.classList.contains('m-penpanel')) ? 312 : wide ? 268 : 240);
+  const toolPanel = rows.some(r => r.customEl && (r.customEl.classList.contains('m-penpanel') || r.customEl.classList.contains('m-eraserbox')));
+  // Samsung Notes: a tool's settings open as a panel docked beside the side tool strip, from the top bar down to the bottom
+  const docked = toolPanel && rail && (rail.classList.contains('rail-right') || rail.classList.contains('rail-left')) && !isChild;
+  let w = Math.min(screenW - 24, toolPanel ? (docked ? 272 : 300) : wide ? 268 : 240);
+  if (docked) { card.classList.add('m-docked'); if (!railOnRight) card.classList.add('left'); card.dataset.tag = 'tool_panel'; }
   let sideRight = true;
   if (beside && avoid) {   // a submenu opens right next to its parent, on whichever side has room; narrowed (rows ellipsize) when the window is tight
     const roomRight = screenW - avoid.right - 14, roomLeft = avoid.left - 14;
@@ -132,6 +136,11 @@ export function show(anchor, above, rows, shortcuts, onDismiss, avoid, mode = 0,
     y = Math.max(margin, Math.min(screenH - hgt - margin, r.top + r.height / 2 - hgt / 2));
   }
   if (mode === 2) { x = (screenW - w) / 2; y = Math.max(margin, (screenH - hgt) / 3); }
+  if (docked) {
+    x = railOnRight ? railRect.left - w : railRect.right; y = railRect.top;
+    card.style.height = railRect.height + 'px'; scroll.style.maxHeight = (railRect.height - 10) + 'px';
+    card.style.transformOrigin = railOnRight ? 'right center' : 'left center';
+  }
   card.style.left = x + 'px'; card.style.top = y + 'px'; card.style.visibility = 'visible';
   card.classList.add('in');
   if (!isChild) current = { card, close };

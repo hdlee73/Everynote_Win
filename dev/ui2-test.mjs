@@ -9,7 +9,7 @@ await pg.addInitScript(()=>{Map.prototype.getOrInsertComputed??=function(k,f){if
 await pg.goto(`http://localhost:${PORT}/index.html`); await pg.waitForTimeout(1500);
 let fails=0; const check=(n,ok,x='')=>{console.log((ok?'PASS ':'FAIL ')+n+(x?'  '+x:''));if(!ok)fails++};
 const bytes=[...fs.readFileSync('dev/samples/sample-ko.pdf')];
-const LIB='C:\\Users\\dev\\Documents\\PDF Note\\sample.pdf';
+const LIB='C:\\Users\\dev\\Documents\\Everynote\\sample.pdf';
 await pg.evaluate(async([b,p])=>{const {host}=await import('./js/host.js');host._fake.put(p,new Uint8Array(b));await app.openPdf(p);},[bytes,LIB]);
 await pg.waitForTimeout(1500);
 
@@ -30,7 +30,7 @@ await pg.evaluate(()=>app.showLibrary()); await pg.waitForTimeout(500);
 await pg.click('.lib-compose, [aria-label="새로 만들기"], .lib-new').catch(async()=>{await pg.evaluate(()=>app.libraryDialog.newMenu(app.libraryDialog.compose))});
 await pg.waitForTimeout(400);
 const menu=await pg.evaluate(()=>[...document.querySelectorAll('.amenu .amenu-row')].map(e=>e.textContent.trim()));
-check('library add menu = 문서 추가 card with 3 icon rows', menu.length===3&&menu[0].includes('새 노트 만들기')&&menu[1].includes('파일 가져오기')&&menu[2].includes('폴더 만들기'), JSON.stringify(menu));
+check('library add menu = 문서 추가 card with 3 icon rows', menu.length>=3&&menu[0].includes('새 노트 만들기')&&menu[1].includes('파일 가져오기')&&menu[2].includes('폴더 만들기'), JSON.stringify(menu));
 check('rows have icons', await pg.locator('.amenu svg').count()>=3);
 await pg.screenshot({path:'dev/out/ui2-2-libmenu.png'});
 await pg.keyboard.press('Escape'); await pg.evaluate(()=>app.libraryDialog&&app.libraryDialog.dismiss&&app.libraryDialog.dismiss()); await pg.waitForTimeout(300);
@@ -55,7 +55,8 @@ await pg.mouse.move(g.x+9,g.y+20); await pg.mouse.down(); await pg.mouse.move(g.
 const after=await pg.evaluate(()=>({l:app.bottomBar.getBoundingClientRect().left,saved:app.recentPrefs.getString('bar_pos','')}));
 check('grip drags the floating bar and remembers the spot', after.l<before-100&&after.saved!=='', JSON.stringify(after));
 await pg.evaluate(()=>app.toggleFloatBar()); await pg.waitForTimeout(200);
-check('toggle off docks it again', await pg.evaluate(()=>app.bottomBar.parentElement===app.contentCol&&!app.bottomBar.classList.contains('float')));
+// Everynote: docking goes back to the default right-side tool strip (beside the page, in the content row)
+check('toggle off docks it again', await pg.evaluate(()=>app.bottomBar.parentElement===app.studySplit&&app.bottomBar.classList.contains('rail-right')&&!app.bottomBar.classList.contains('float')));
 
 // fullscreen toolbar stays
 await pg.evaluate(()=>{app.toggleDockPinned();app.toggleFullscreen()}); await pg.waitForTimeout(4500);

@@ -94,6 +94,7 @@ const fake = {
         return true;
       }
       case 'fs.delete': for (const k of [...this.files.keys()]) if (k === P || k.startsWith(P + '\\')) this.files.delete(k); return true;
+      case 'dialog.folder': return null;
       case 'dialog.open': return await new Promise(res => {
         const inp = document.createElement('input'); inp.type = 'file'; inp.multiple = !!a.multi;
         if (a.filters) inp.accept = a.filters.flatMap(f => f.exts.map(e => '.' + e)).join(',');
@@ -169,6 +170,7 @@ export const host = {
   },
   async writeBlob(path, blob) { return host.writeBytes(path, new Uint8Array(await blob.arrayBuffer())); },
   openDialog: (title, filters, multi = false) => host.call('dialog.open', { title, filters, multi }),
+  pickFolder: title => host.call('dialog.folder', { title }),
   saveDialog: (title, name, filters) => host.call('dialog.save', { title, name, filters }),
   shellOpen: pathOrUrl => host.call('shell.open', /^(https?|ms-settings):/i.test(pathOrUrl) ? { url: pathOrUrl } : { path: pathOrUrl }),
   netHttp: o => host.call('net.http', o),

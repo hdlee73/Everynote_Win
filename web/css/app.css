@@ -74,3 +74,35 @@ button{font-family:inherit}
 
 .amenu-scrollbox{position:relative}
 .amenu-more{position:absolute;left:0;right:0;bottom:0;height:30px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:3px;box-sizing:border-box;cursor:pointer;background:linear-gradient(to bottom,rgba(255,255,255,0),rgba(255,255,255,.96) 60%);border-radius:0 0 12px 12px}.amenu-more svg{display:block;animation:amenu-bob 1.6s ease-in-out infinite}@keyframes amenu-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(2px)}}
+
+/* ===== Everynote: Samsung Notes style dialogs, menus, toasts (later rules override the ones above) ===== */
+html,body{background:#F2F2F4;color:#010102;font-family:"Segoe UI Variable Text","Segoe UI","Malgun Gothic","Roboto","Noto Sans KR","Noto Sans CJK KR",sans-serif}
+.toast{background:rgba(48,48,50,.94);border-radius:20px;font-size:13.5px;padding:10px 18px}
+.ad-root.in .ad-dim{background:rgba(0,0,0,.32)}
+.ad-card{width:min(calc(100vw - 48px),360px);background:#FCFCFF;border-radius:20px;box-shadow:0 10px 36px rgba(0,0,0,.2)}
+.ad-body{padding:22px 24px 12px}
+.ad-title{font-size:17px;font-weight:700;text-align:left;color:#010102}
+.ad-msg-inner{font-size:14px;line-height:1.45;color:#252525;text-align:left}
+.ad-card>.hair{display:none}
+.ad-bar{padding:0 12px 10px}
+.ad-bar.row .vhair{width:1px;height:18px;align-self:center;background:#C7C7CC}
+.ad-bar .hair{background:transparent;height:2px}
+.ad-btn{min-height:44px;font-size:15px;font-weight:600;color:#010102;border-radius:10px}
+.ad-btn.bold{font-weight:600}
+.ad-btn:hover{background:rgba(0,0,0,.04)}
+.ad-btn:focus-visible{outline:2px solid rgba(56,122,255,.5)}
+.ad-list{background:#FCFCFF;border-radius:16px;border:0;box-shadow:0 8px 30px rgba(0,0,0,.18)}
+.ad-sheet-title{font-size:15px;font-weight:700;color:#010102;padding:12px 12px 8px}
+.ad-sheet-msg{color:#848487}
+.ad-cell{height:42px;font-size:14px;border-radius:8px;gap:12px}
+.ad-radio{width:20px;height:20px;border-radius:10px;border:1.5px solid #848487;flex:none;position:relative}
+.ad-radio.on{border-color:#DB332A}.ad-radio.on::after{content:"";position:absolute;inset:3.5px;border-radius:50%;background:#DB332A}
+.ad-sheet-line{background:#E4E4E7}
+.ad-btn.sheet-btn{height:42px;font-size:14px}
+.amenu{background:#FCFCFF;border-radius:14px;border:0;padding:6px;box-shadow:0 6px 24px rgba(0,0,0,.16),0 0 0 .5px rgba(0,0,0,.06)}
+.amenu-row{min-height:40px;border-radius:8px;padding:2px 12px}
+.amenu-row:hover{background:rgba(0,0,0,.04)}
+.amenu-label{font-size:14px;color:#010102}
+.amenu-div,.amenu-sdiv{background:#E4E4E7}
+.field{background:#F3F3F5;border:1.5px solid #F3F3F5;border-radius:10px;font-size:15px}
+.field:focus{background:#fff;border-color:#3A3A3D}

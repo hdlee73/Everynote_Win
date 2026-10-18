@@ -9,7 +9,7 @@ await pg.addInitScript(()=>{Map.prototype.getOrInsertComputed??=function(k,f){if
 await pg.goto(`http://localhost:${PORT}/index.html`); await pg.waitForTimeout(1500);
 let fails=0; const check=(n,ok,x='')=>{console.log((ok?'PASS ':'FAIL ')+n+(x?'  '+x:''));if(!ok)fails++};
 const bytes=[...fs.readFileSync('dev/samples/sample-ko.pdf')];
-await pg.evaluate(async([b,p])=>{const {host}=await import('./js/host.js');host._fake.put(p,new Uint8Array(b));await app.openPdf(p);},[bytes,'C:\\Users\\dev\\Documents\\PDF Note\\sample.pdf']);
+await pg.evaluate(async([b,p])=>{const {host}=await import('./js/host.js');host._fake.put(p,new Uint8Array(b));await app.openPdf(p);},[bytes,'C:\\Users\\dev\\Documents\\Everynote\\sample.pdf']);
 await pg.waitForTimeout(1500);
 const pages=await pg.evaluate(()=>app.renderer.pageCount); check('sample has pages',pages>=3,String(pages));
 for(const style of [0,1,2]) for(const z of [0.6,2]){

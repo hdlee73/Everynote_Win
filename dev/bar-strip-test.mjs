@@ -1,4 +1,4 @@
-// v3.17: bottom bar (9 items), writing tool strip, split active frame + arrows, eraser default partial. usage: node dev/bar-strip-test.mjs
+// v3.17 (Everynote: right tool strip): tool strip items, writing tool strip, split active frame + arrows, eraser default partial. usage: node dev/bar-strip-test.mjs
 import { chromium } from '/tmp/npmtest/node_modules/playwright/index.mjs';
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url)), web = path.resolve(here, '../web'), out = path.join(here, 'out');
@@ -27,20 +27,28 @@ check('eraser default is partial', await ev(() => app.eraserMode() === 1));
 // bottom bar
 const labels = await ev(() => [...document.querySelectorAll('[data-tag="read_bar"] > *')].map(e => e.getAttribute('aria-label') || e.title));
 console.log(labels.join(' | '));
-check('bar has 10 items after the page label (eraser next to 필기 모드), no outline', labels.length === 11 && labels[4] === '지우개' && !labels.some(l => /개요/.test(l)) && labels[0] === '페이지 이동', labels.join('|'));
+// Everynote: Samsung Notes style tool strip (fold chevron, keyboard, pen, highlighter, eraser, lasso | undo, redo | tape, mark, memo, shapes,
+// text select, bookmark, split); the page label moved onto the page as a pill, there is no 필기 모드 button any more.
+const wantBar = ['도구 모음 접기', '키보드 · 타이핑', '펜', '형광펜', '지우개', '올가미 선택', '', '실행 취소', '다시 실행', '', '테이프 · 글자를 가리는 마스킹 테이프', '하이라이트 · 문장을 따라 직선으로', '메모', '도형', '텍스트 선택', '즐겨찾기 추가', '화면 나누기 · 문서 두 개를 나란히'];
+check('tool strip has the Samsung-style tools in order (eraser after the pens), no outline', JSON.stringify(labels) === JSON.stringify(wantBar) && !labels.some(l => /개요/.test(l)), labels.join('|'));
 check('bar has layout button as 9th', await ev(() => !!document.querySelector('[data-tag="reading_toolbar"] > .m-barlayout')));
 await ev(() => document.querySelector('[data-tag="page_indicator"]').click()); await page.waitForTimeout(300);
 check('page button opens submenu with outline', await ev(() => /문서 개요/.test(document.body.innerText) && /마지막 페이지/.test(document.body.innerText)));
 await page.keyboard.press('Escape'); await page.mouse.click(5, 5); await page.waitForTimeout(200);
 // strip
+// floating toolbar (Samsung "플로팅 툴바"): off by default, toggled from the pen panel's pill, remembered
 const stripVis = () => ev(() => { const w = app.writeBar.parentElement; return getComputedStyle(w).display !== 'none' && w.getBoundingClientRect().height > 0; });
-check('strip hidden in read mode', !(await stripVis()));
-await ev(() => document.querySelector('[aria-label="필기 모드"]').click()); await page.waitForTimeout(200);
-check('strip shown in write mode', await stripVis() && await ev(() => app.writeMode));
-await ev(() => document.querySelector('[aria-label="필기 모드"]').click()); await page.waitForTimeout(200);
-check('second tap hides strip, stays in write mode, remembered', !(await stripVis()) && await ev(() => app.writeMode && app.recentPrefs.getBoolean('write_strip', true) === false));
-await ev(() => document.querySelector('[aria-label="필기 모드"]').click()); await page.waitForTimeout(200);
+check('floating toolbar hidden in read mode', !(await stripVis()));
+await ev(() => app.setWriteMode(true)); await page.waitForTimeout(200);
+check('floating toolbar stays hidden in write mode by default', !(await stripVis()) && await ev(() => app.writeMode));
+const pill = async () => { await ev(() => app.penTap(app.penButton)); await page.waitForTimeout(300); await ev(() => document.querySelector('.amenu [data-tag="floating_toolbar"]').click()); await page.waitForTimeout(300); };
+await pill();
+check('pen panel pill shows the floating toolbar', await stripVis() && await ev(() => app.writeMode && app.recentPrefs.getBoolean('write_strip', false) === true));
+await pill();
+check('second tap hides it, stays in write mode, remembered', !(await stripVis()) && await ev(() => app.writeMode && app.recentPrefs.getBoolean('write_strip', true) === false));
+await pill();
 check('third tap shows again', await stripVis());
+await page.keyboard.press('Escape');
 await ev(() => app.showInsertMenu(document.querySelector('[aria-label^="삽입"]'))); await page.waitForTimeout(250);
 check('insert menu has 메모', await ev(() => [...document.querySelectorAll('.amenu .amenu-row')].some(r => r.textContent.trim() === '메모')));
 await page.mouse.click(5, 5); await page.waitForTimeout(200);

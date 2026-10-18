@@ -334,7 +334,7 @@ test('sidecar path = <data>\\annotations\\<sha1(lowercase key)>.json', async () 
   const p = await AnnotationStore.sidecarPath('C:\\Users\\Dev\\Docs\\A.pdf');
   const { createHash } = await import('node:crypto');
   const h = createHash('sha1').update('c:\\users\\dev\\docs\\a.pdf').digest('hex');
-  assert.equal(p, `C:\\Users\\dev\\AppData\\Local\\PDFNote\\annotations\\${h}.json`);
+  assert.equal(p, `C:\\Users\\dev\\AppData\\Local\\Everynote\\annotations\\${h}.json`);
   assert.equal(await AnnotationStore.sidecarPath('c:/users/dev/docs/a.pdf'), p);
 });
 test('save() is debounced and coalesces rapid calls; flush() writes immediately', async () => {
@@ -371,7 +371,7 @@ test('moveSidecar flushes a pending save of the open store first', async () => {
   await AnnotationStore.moveSidecar(a, b); assert.deepEqual([...(await AnnotationStore.load(b)).bookmarks], [9]);
 });
 test('corrupt sidecar opens empty; cloneAnnotations copies (page range checked)', async () => {
-  const a = U(), b = U(); await host.mkdir('C:\\Users\\dev\\AppData\\Local\\PDFNote\\annotations');
+  const a = U(), b = U(); await host.mkdir('C:\\Users\\dev\\AppData\\Local\\Everynote\\annotations');
   await host.writeText(await AnnotationStore.sidecarPath(a), '{not json'); assert.equal((await AnnotationStore.load(a)).marks.length, 0);
   const s = await new AnnotationStore().open(a); const m = new Mark(); m.page = 3; s.marks.push(m); s.elements.push(el({ page: 1, text: 'x' })); await s.save();
   const clone = await AnnotationStore.cloneAnnotations(a, b, 10); assert.equal(clone.marks.length, 1);
@@ -383,7 +383,7 @@ test('assets: names, save/read/delete, referencedAssets', async () => {
   assert.ok(!AnnotationStore.validAssetName('../x.png')); await assert.rejects(AnnotationStore.assetPath('../x.png'));
   await AnnotationStore.saveAsset(n, new Uint8Array([1, 2, 3]));
   assert.ok(await AnnotationStore.hasAsset(n)); assert.deepEqual([...await AnnotationStore.readAsset(n)], [1, 2, 3]);
-  assert.equal(await AnnotationStore.assetPath(n), 'C:\\Users\\dev\\AppData\\Local\\PDFNote\\assets\\' + n);
+  assert.equal(await AnnotationStore.assetPath(n), 'C:\\Users\\dev\\AppData\\Local\\Everynote\\assets\\' + n);
   await AnnotationStore.deleteAsset(n); assert.ok(!(await AnnotationStore.hasAsset(n)));
   const s = new AnnotationStore(); const mp4 = AnnotationStore.newAssetName('mp4'), th = AnnotationStore.newAssetName('png');
   s.elements.push(el({ kind: 'video', text: mp4, asset: th }), el({ kind: 'youtube', text: 'dQw4w9WgXcQ' }));

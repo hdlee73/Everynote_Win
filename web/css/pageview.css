@@ -2,9 +2,9 @@
    Requirement 4: the area around the page ("backdrop") is a darker neutral than the paper, and the sheet gets a soft shadow and a
    hairline border (both drawn by pageview.js from the custom properties below). Override the --pv-* variables to re-theme. */
 .pdf-page-view {
-  --pv-backdrop: #D9DADF;
-  --pv-paper-border: rgba(0, 0, 0, 0.20);
-  --pv-paper-shadow: rgba(20, 22, 30, 0.30);
+  --pv-backdrop: #E9E9EC;
+  --pv-paper-border: rgba(0, 0, 0, 0.10);
+  --pv-paper-shadow: rgba(20, 22, 30, 0.18);
   flex: 1 1 0;
   position: relative;
   overflow: hidden;

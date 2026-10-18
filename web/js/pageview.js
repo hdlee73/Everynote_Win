@@ -210,7 +210,7 @@ export class PdfPageView {
     this.textRegions = []; this.selectedTextRegions = [];
     this.noteHitBoxes = new Map(); this.memoHitBoxes = new Map();
     this.lassoMode = false; this.lassoDrawing = false; this.suppressSelection = false;
-    this.lassoPoints = []; this.lassoShape = LASSO_FREE; this.lassoAnchor = null;
+    this.lassoPoints = []; this.lassoShape = LASSO_FREE; this.lassoAnchor = null; this.lassoPartial = true;
     this.searchPage = -1; this.searchBoxes = []; this.searchCurrent = null;
     this.textSelectMode = false; this.showTextBounds = false;
     this.page = 0;
@@ -481,7 +481,7 @@ export class PdfPageView {
     this.highlightMode = other.highlightMode; this.memoMode = other.memoMode; this.outlineMode = other.outlineMode; this.highlightColor = other.highlightColor;
     this.highlightFree = other.highlightFree; this.highlightThick = other.highlightThick;
     this.inkMode = other.inkMode; this.inkColor = other.inkColor; this.inkWidth = other.inkWidth; this.inkPen = other.inkPen; this.fingerInk = other.fingerInk;
-    this.pageSwipeEnabled = other.pageSwipeEnabled; this.verticalPageSwipe = other.verticalPageSwipe; this.lassoShape = other.lassoShape;
+    this.pageSwipeEnabled = other.pageSwipeEnabled; this.verticalPageSwipe = other.verticalPageSwipe; this.lassoShape = other.lassoShape; this.lassoPartial = other.lassoPartial;
     if (this.lassoMode !== other.lassoMode) { this.lassoMode = other.lassoMode; this.clearLassoSelection(); }
     this.invalidate();
   }
@@ -492,6 +492,8 @@ export class PdfPageView {
   setPageDrag(drag) { this.pageDrag = drag; }
   isLassoMode() { return this.lassoMode; }
   getLassoShape() { return this.lassoShape; }
+  /** 부분 선택된 개체 포함: words only partly inside the lasso are selected too. */
+  setLassoPartial(on) { this.lassoPartial = !!on; }
   setLassoMode(enabled) {
     this.lassoMode = enabled; this.clearLassoSelection(); this.clearTextSelectionOverlay();
     if (enabled) { this.finishInkStroke(); this.inkMode = 0; this.highlightMode = this.memoMode = this.outlineMode = false; }
@@ -834,6 +836,7 @@ export class PdfPageView {
         const a = s.points[k], b = s.points[Math.min(k + 1, s.points.length - 1)];
         hit = near(x, y, dest.left + a.x * dest.width(), dest.top + a.y * dest.height(), dest.left + b.x * dest.width(), dest.top + b.y * dest.height()) <= half;
       }
+      if (!hit && this.lassoPartial) { const b = word.wordBounds; hit = pts.some(q => q.x >= b.left && q.x <= b.right && q.y >= b.top && q.y <= b.bottom); }
       if (hit) {
         const set = AnnotationPainter.revealedTapes;
         if (set.has(s)) set.delete(s); else set.add(s);
@@ -945,7 +948,7 @@ export class PdfPageView {
   }
   _drawStickyBody(ctx, box, anchorX, anchorY, text, accent, paper, fontSp) {
     const d = DP;
-    fillRoundRect(ctx, box.left, box.top, box.right, box.bottom, 10 * d, paper);
+    fillRoundRect(ctx, box.left, box.top, box.right, box.bottom, 3 * d, paper);
     fillCircle(ctx, anchorX, anchorY, 6 * d, accent);
     ctx.save(); ctx.beginPath(); ctx.rect(box.left, box.top, box.width(), box.height()); ctx.clip();   // text never spills out of a small memo
     try { this._drawStickyText(ctx, box, text, fontSp); } finally { ctx.restore(); }
@@ -965,7 +968,7 @@ export class PdfPageView {
       if (line !== '') { ctx.fillText(line, x, y); y += 18 * d; if (y > box.bottom - 12 * d) return; }
     }
   }
-  _drawMemo(ctx, dest, m) { this.memoHitBoxes.set(m, this._drawSticky(ctx, dest, m.right, m.top, m.note, m.minimized, 0xFFFFB300 | 0, m.paper, m.fontSp, m.boxSize, m.boxW, m.boxH, m.rot)); }
+  _drawMemo(ctx, dest, m) { this.memoHitBoxes.set(m, this._drawSticky(ctx, dest, m.right, m.top, m.note, m.minimized, 0xFFEBA597 | 0, m.paper, m.fontSp, m.boxSize, m.boxW, m.boxH, m.rot)); }
   // ---- selected post-it (a memo Mark or a TranslationNote), Android v1.29.0: dashed frame, 4 corner handles (size), ↻ knob (rotation),
   // red × (delete) and body drag (move). Anchor = (right, top) of the mark / note.
   get selectedMemo() { return this.selSticky; }
@@ -1128,7 +1131,12 @@ export class PdfPageView {
     let text = '', prevLine = null;
     for (const word of this.textRegions) {
       const cx = Math.trunc(word.wordBounds.centerX() * 10000), cy = Math.trunc(word.wordBounds.centerY() * 10000);
-      if (cx >= 0 && cx < 10000 && cy >= 0 && cy < 10000 && inside(cx + 0.5, cy + 0.5)) {
+      let hit = cx >= 0 && cx < 10000 && cy >= 0 && cy < 10000 && inside(cx + 0.5, cy + 0.5);
+      if (!hit && this.lassoPartial) {
+        const b = word.wordBounds, xs = [b.left, b.right], ys = [b.top, b.bottom];
+        hit = xs.some(x => ys.some(y => { const px = Math.trunc(x * 10000), py = Math.trunc(y * 10000); return px >= 0 && px < 10000 && py >= 0 && py < 10000 && inside(px + 0.5, py + 0.5); }));
+      }
+      if (hit) {
         if (text.length > 0) text += (prevLine != null && !prevLine.equals(word.lineBounds)) ? '\n' : ' ';
         text += word.word; prevLine = word.lineBounds;
       }

@@ -18,7 +18,7 @@ const closeAll=async()=>{await pg.keyboard.press('Escape');await pg.waitForTimeo
 for (const [name,fn] of [['youtube','askYoutube'],['table','showTableDialog'],['newnote','newNotebook']]) {
   await pg.evaluate(f=>app[f](),fn); await pg.waitForTimeout(400);
   const c=await centered(); check(name+' buttons centered', c.length>=2&&c.every(x=>Math.abs(x.dx)<=1&&Math.abs(x.dy)<=1), JSON.stringify(c));
-  if(name==='table'){const d=await pg.evaluate(()=>[...document.querySelectorAll('.m2-cdot')].map(e=>{const r=e.getBoundingClientRect();return [Math.round(r.width),Math.round(r.height)]}));check('table swatches are circles',d.length>0&&d.every(([w,h])=>w===h),JSON.stringify(d.slice(0,3)));}
+  if(name==='table'){const d=await pg.evaluate(()=>[...document.querySelectorAll('.m2-cdot')].map(e=>{const r=e.getBoundingClientRect();return [Math.round(r.width),Math.round(r.height)]}));check('table swatches are circles',d.every(([w,h])=>w===h),JSON.stringify(d.slice(0,3)));}
   await pg.locator('.ad-card').last().screenshot({path:`${OUT}/dlg-${name}.png`}); await closeAll();
 }
 await pg.evaluate(async()=>{const {AlertDialog}=await import('./js/ui/alert.js');new AlertDialog.Builder().setTitle('휴지통').setMessage('휴지통이 비어 있습니다').setPositiveButton('닫기').show();}); await pg.waitForTimeout(300);
@@ -36,7 +36,8 @@ await closeAll(); await pg.evaluate(()=>document.querySelectorAll('.amenu,.amenu
 // vertical rail: menus open beside the bar, page label centered
 for (const side of ['right','left']) {
   await pg.evaluate(sd=>app.setBarPlace(sd),side); await pg.waitForTimeout(400);
-  await pg.locator('[data-tag=read_bar] [aria-label="보기 방법"]').click(); await pg.waitForTimeout(400);
+  // Everynote: 보기 방법 moved to the header (노트 스타일); open the same menu from a strip button to test the placement beside the rail
+  await pg.evaluate(()=>app.showViewMenu(document.querySelector('[data-tag=read_bar] [aria-label="도형"]'))); await pg.waitForTimeout(400);
   const ov=await pg.evaluate(()=>{const bar=document.querySelector('[data-tag=reading_toolbar]').getBoundingClientRect(),m=document.querySelector('.amenu').getBoundingClientRect();return {overlap:Math.max(0,Math.min(bar.right,m.right)-Math.max(bar.left,m.left)),bar:[bar.left,bar.right],m:[m.left,m.right]}});
   check('rail '+side+' menu beside bar', ov.overlap===0, JSON.stringify(ov));
   await pg.locator('.amenu-row[aria-label="페이지 넘김 설정"]').click(); await pg.waitForTimeout(300);
@@ -48,10 +49,10 @@ for (const side of ['right','left']) {
   check('rail '+side+' page label vertically centered', Math.abs(pl)<=1, 'dy='+pl);
 }
 await pg.evaluate(()=>app.setBarPlace('bottom')); await pg.waitForTimeout(300);
-// fullscreen dock icons are tinted like the bottom bar
+// fullscreen dock icons follow the tool strip (Everynote: monochrome ink line icons, like Samsung Notes)
 await pg.evaluate(()=>app.toggleFullscreen()); await pg.waitForTimeout(500);
 const tints=await pg.evaluate(()=>[...document.querySelectorAll('[data-tag=fullscreen_toolbar] svg')].map(s=>getComputedStyle(s).color));
-check('fullscreen dock colored', new Set(tints).size>=5, JSON.stringify(tints));
+check('fullscreen dock icons are one ink colour', tints.length>=5&&new Set(tints).size===1, JSON.stringify(tints));
 await pg.screenshot({path:`${OUT}/fullscreen.png`});
 await pg.evaluate(()=>app.toggleFullscreen()); await pg.waitForTimeout(300);
 // highlighter transparency menu: slider + quick buttons, kept in prefs, applied to the highlight colour

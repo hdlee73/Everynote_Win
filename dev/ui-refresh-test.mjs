@@ -30,7 +30,7 @@ await pg.locator('.lib-card').first().click(); await wait(200);
 await pg.click('[aria-label="선택 문서 더 보기"]'); await wait(300);
 await pg.screenshot({path:`${OUT}/ui-sel-2.png`});
 const more=await pg.$$eval('.amenu-label',e=>e.map(x=>x.textContent));
-check('overflow menu', more.join('|')==='이름 변경|복사본 만들기|즐겨찾기에 추가', more.join('|'));
+check('overflow menu', more.join('|')==='이름 변경|복사본 만들기|페이지 발췌하여 새 파일 만들기|즐겨찾기에 추가', more.join('|'));
 await pg.click('.amenu-row >> text=즐겨찾기에 추가'); await wait(400);
 check('favorite set + selection left', !(await pg.locator('.lib-seltop.on').count()) || !(await pg.locator('.lib-seltop.on').isVisible()));
 check('back leaves selection', true);

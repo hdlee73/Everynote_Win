@@ -85,9 +85,11 @@ textarea.field{overflow-y:auto}
 .m2-st-cell{flex:1 1 0;display:flex;align-items:center;justify-content:center;font-size:27px;cursor:pointer;border-radius:10px;font-family:"Segoe UI Emoji","Noto Color Emoji",sans-serif;-webkit-user-select:none;user-select:none}
 .m2-st-cell:hover{background:rgba(0,0,0,.05)}
 .m2-shapebox{padding:4px 14px}
-.m2-shape-line{display:flex;height:44px}
-.m2-shape-btn{flex:1 1 0;margin:3px;border-radius:10px;font-size:13px;display:flex;align-items:center;justify-content:center;background:#F2F2F7;color:#1C1C1E;cursor:pointer;-webkit-user-select:none;user-select:none}
-.m2-shape-btn.on{background:#E5F0FF;color:#007AFF}
+.m2-shape-line{display:flex;height:70px}
+.m2-shape-btn{flex:1 1 0;margin:4px;border-radius:14px;font-size:11.5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:#F5F5F7;color:#3A3A3D;border:1.5px solid transparent;cursor:pointer;-webkit-user-select:none;user-select:none;transition:background .12s}
+.m2-shape-btn:hover{background:#EDEDF0}
+.m2-shape-btn.on{background:#fff;border-color:#3A3A3D;color:#010102;font-weight:600}
+.m2-shape-pv{width:48px;height:32px;display:block}
 .m2-seek{width:100%;accent-color:#007AFF;margin:8px 0 4px}
 .m2-tbl-size{display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;color:#3A3A3C;padding:2px 0 4px}
 .m2-tbl-size .field{width:72px!important}
@@ -260,3 +262,37 @@ body.m2-resizing[data-m2-axis="y"]{cursor:row-resize!important}
 .m2-vbar .m2-vtime{flex:none;font-size:11px}
 .m2-ybar{justify-content:center}
 .m2-inline-player video,.m2-inline-player iframe{height:calc(100% - 40px)!important}
+/* Everynote 앱 정보 */
+.m2-about{color:#010102}
+.m2-about-logo{display:block;width:56px;height:56px;margin:2px 0 8px}
+.m2-about-link{color:#0B7A6B}
+.m2-about-new{color:#DB332A}
+.m2-about-status{color:#848487}
+.m2-about-check input{accent-color:#DB332A}
+
+/* ---- Samsung Notes style popovers (js/samsung-ui.js): sticky memo colours, table menu, 표 설정 wheel ---- */
+.sx-scrim{position:fixed;inset:0;z-index:2000;background:transparent}
+.sx-pop{position:fixed;box-sizing:border-box;padding:14px 14px 10px;border-radius:26px;background:#F6F6F6;color:#010102;box-shadow:0 8px 28px rgba(0,0,0,.2),0 1px 3px rgba(0,0,0,.08);font-size:15px;user-select:none}
+.sx-title{font-size:14.5px;font-weight:700;padding:2px 6px 8px}
+.sx-swatches{display:flex;gap:10px;padding:0 6px 10px}
+.sx-sw{width:26px;height:26px;border-radius:13px;border:0;padding:0;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.sx-div{height:0;margin:2px 4px 4px;border-top:1.5px dashed #DADADD}
+.sx-row{display:flex;align-items:center;gap:12px;min-height:44px;padding:0 8px;border-radius:12px;cursor:pointer;font-size:15px}
+.sx-row:hover,.sx-row:focus{background:rgba(0,0,0,.045);outline:none}
+.sx-row.danger{color:#DB332A}
+.sx-icons{display:flex;align-items:center;justify-content:space-between;padding:0 4px 6px}
+.sx-ib{width:36px;height:36px;border:0;border-radius:10px;background:transparent;color:#252525;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.sx-ib:hover:not(:disabled){background:rgba(0,0,0,.06)}.sx-ib:disabled{opacity:.35;cursor:default}
+.sx-vsep{width:1px;height:20px;background:#D6D6DA}
+.sx-setup{padding:18px 22px 8px}
+.sx-setup .sx-title{font-size:15px;padding:0 0 14px}
+.sx-heads{display:flex;justify-content:space-around;font-size:13px;color:#3A3A3D}
+.sx-heads span{display:flex;align-items:center;gap:6px}
+.sx-wheels{display:flex;align-items:center;justify-content:center;gap:14px;padding:10px 0 14px}
+.sx-wheel{display:flex;flex-direction:column;width:70px;cursor:ns-resize;touch-action:none;outline:none}
+.sx-wv{height:34px;display:flex;align-items:center;justify-content:center;font-size:22px;color:#010102}
+.sx-wv.far{height:30px;opacity:.1}.sx-wv.near{opacity:.35;font-size:20px}.sx-wv.cur{font-size:26px;font-weight:700;opacity:1}
+.sx-times{font-size:18px;color:#B0B0B4}
+.sx-btns{display:flex;border-top:1px solid #ECECEF;margin:0 -22px}
+.sx-btns button{flex:1;height:50px;border:0;background:transparent;font-size:15px;font-weight:700;color:#010102;cursor:pointer}
+.sx-btns button+button{border-left:1px solid #ECECEF}

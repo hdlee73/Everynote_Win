@@ -85,3 +85,10 @@
 .m-elbtn:focus{outline:none}
 .m-elbtn[data-tag=element_delete]{color:#FF3B30}
 @media (max-width:640px){.m-elbtn .t{display:none}.m-elbtn{padding:0 9px}}
+
+/* Samsung Notes style handles of the text box being typed: small white round buttons with thin line icons (move, widen, delete) */
+.m3-handle{width:30px;height:30px;border-radius:15px;background:#fff;color:#3A3A3D;border:1px solid rgba(0,0,0,.08);box-shadow:0 2px 8px rgba(0,0,0,.16)}
+.m3-handle:hover{background:#F5F5F7}
+.m3-handle-del{color:#DB332A}
+.m3-handle svg{display:block;pointer-events:none}
+.m3-inline-text{border:1.5px solid #3A3A3D;border-radius:10px;background:rgba(255,255,255,.55)}

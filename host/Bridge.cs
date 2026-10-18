@@ -132,6 +132,7 @@ sealed class Bridge
             case "fs.delete": return FsDelete(PathPolicy.WritePath(S(a, "path")));
 
             case "dialog.open": return await win.Dispatcher.InvokeAsync(() => DialogOpen(a));
+            case "dialog.folder": return await win.Dispatcher.InvokeAsync(() => DialogFolder(a));
             case "dialog.save": return await win.Dispatcher.InvokeAsync(() => DialogSave(a));
             case "net.http": return await NetHttp(a);
             case "zip.create": return await Task.Run(() => ZipCreate(a));
@@ -175,7 +176,9 @@ sealed class Bridge
         var v = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(Bridge).Assembly)?.InformationalVersion
                 ?? (ver == null ? "2.0.0" : ver.ToString(3));
         var plus = v.IndexOf('+'); if (plus > 0) v = v.Substring(0, plus);
-        return new { library = AppPaths.Library, data = AppPaths.Data, temp = AppPaths.Temp, documents = AppPaths.Documents, args = list, version = v, platform = "win", installed = IsInstalled(), arch = Arch };
+        var date = typeof(Bridge).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
+            .OfType<System.Reflection.AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == "BuildDate")?.Value ?? "";
+        return new { library = AppPaths.Library, data = AppPaths.Data, temp = AppPaths.Temp, documents = AppPaths.Documents, args = list, version = v, date, platform = "win", installed = IsInstalled(), arch = Arch };
     }
 
     // ------------------------------------------------------------------------------------------------- fs
@@ -475,6 +478,14 @@ sealed class Bridge
         if (d.ShowDialog(win) != true) return new string[0];
         foreach (var f in d.FileNames) PathPolicy.AllowRead(f);
         return d.FileNames;
+    }
+
+    object DialogFolder(JsonElement a)
+    {
+        var d = new OpenFolderDialog { Title = S(a, "title", false) ?? "폴더 선택" };
+        if (d.ShowDialog(win) != true || string.IsNullOrEmpty(d.FolderName)) return null;
+        PathPolicy.AllowReadTree(d.FolderName);
+        return d.FolderName;
     }
 
     object DialogSave(JsonElement a)

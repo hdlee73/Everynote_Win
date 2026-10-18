@@ -9,14 +9,15 @@ await pg.addInitScript(()=>{Map.prototype.getOrInsertComputed??=function(k,f){if
 await pg.goto(`http://localhost:${PORT}/index.html`); await pg.waitForTimeout(1500);
 let fails=0; const check=(n,ok,x='')=>{console.log((ok?'PASS ':'FAIL ')+n+(x?'  '+x:''));if(!ok)fails++};
 const bytes=[...fs.readFileSync('dev/samples/sample-ko.pdf')];
-const LIB='C:\\Users\\dev\\Documents\\PDF Note\\sample.pdf';
+const LIB='C:\\Users\\dev\\Documents\\Everynote\\sample.pdf';
 await pg.evaluate(async([b,p])=>{const {host}=await import('./js/host.js');host._fake.put(p,new Uint8Array(b));await app.openPdf(p);},[bytes,LIB]);
 await pg.waitForTimeout(1500);
 
-// 5: header / bottom-bar icons follow the mobile app (sidebar + eye, not the same four squares)
-const ic=await pg.evaluate(()=>{const d=l=>{const e=document.querySelector(`[aria-label="${l}"] svg path`);return e?e.getAttribute('d').slice(0,12):null};return {head:d('페이지 목록'),view:d('보기 방법')}});
-check('header page-list icon = sidebar', ic.head==='M5.5,4 h13 a', JSON.stringify(ic));
-check('bottom view icon = eye', ic.view==='M2.5,12 C5,7', JSON.stringify(ic));
+// 5 (Everynote): header icons follow the shared Everynote line icons; the page list (sidebar) and the view options live in the 노트 스타일 menu
+const ic=await pg.evaluate(async()=>{const {ICONS}=await import('./js/icons.js');const norm=x=>{const g=document.createElementNS('http://www.w3.org/2000/svg','svg');g.innerHTML=x;return g.innerHTML};const d=t=>{const e=document.querySelector(`[data-tag="${t}"] svg`);return e?e.innerHTML:null};return {style:d('h_style')===norm(ICONS.ic_note_style),read:d('h_read')===norm(ICONS.ic_reading_mode),sidebar:ICONS.ic_sidebar.startsWith("<path d='M6,4.5h12")}});
+check('header 노트 스타일 / 읽기 모드 icons = shared note_style / reading_mode, sidebar glyph from the shared set', ic.style&&ic.read&&ic.sidebar, JSON.stringify(ic));
+await pg.evaluate(()=>app.showViewMenu(document.querySelector('[data-tag="h_style"]'))); await pg.waitForTimeout(250);
+check('노트 스타일 menu holds 페이지 미리보기 (page list) with the sidebar icon', await pg.evaluate(()=>[...document.querySelectorAll('.amenu .amenu-row')].some(r=>/페이지 미리보기/.test(r.textContent)))); await pg.keyboard.press('Escape'); await pg.mouse.click(5,400); await pg.waitForTimeout(200);
 
 // 3: line spacing + fit to ruler
 const ls=await pg.evaluate(async()=>{
@@ -92,7 +93,7 @@ const ab=await pg.evaluate(async()=>{
   [...document.querySelectorAll('.ad-btn')].find(x=>x.textContent.trim()==='업데이트').click(); await new Promise(r=>setTimeout(r,300));
   out.installed=host._fake.installed||[];
   return out;});
-check('about shows version and the maker line', ab.text.includes('버전 3.7.0')&&ab.text.includes('만든이 : 이현덕(with Claude), hdlee73@gmail.com'), ab.text);
+check('about shows Everynote, version + update date and the maker line', ab.text.includes('Everynote')&&ab.text.includes('버전 3.7.0')&&/업데이트 \d{4}-\d\d-\d\d/.test(ab.text)&&ab.text.includes('만든이 이현덕 (hdlee73@gmail.com)'), ab.text);
 check('auto-check on by default, auto-install off', ab.auto===true&&ab.inst===false);
 check('update found -> prompt -> installer download of the Setup', ab.status.includes('3.8.0')&&ab.prompt.includes('업데이트')&&ab.installed.length===1&&ab.installed[0].endsWith('Setup-v3.8.0-x64.exe'), JSON.stringify([ab.status,ab.prompt,ab.installed]));
 const same=await pg.evaluate(async()=>{const {host}=await import('./js/host.js');host._fake.updateHandler=async()=>({version:'3.7.0'});const el=document.createElement('div');await app.checkForUpdate(true,el);return el.textContent});

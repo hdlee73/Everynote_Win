@@ -1,4 +1,4 @@
-// Printing (Everynote v3): dialog (current page / all / range, with or without annotations), renders the pages one after another at ~150 dpi
+// Printing: dialog (current page / all / range, with or without annotations), renders the pages one after another at ~150 dpi
 // (PdfDoc.renderPage + AnnotationPainter), builds a print-only DOM (.m2-print-root, shown by @media print in css/main2.css) and calls
 // window.print() (WebView2 shows the system print dialog, "Microsoft Print to PDF" works as well). Cleans everything up afterwards.
 import { h, RectF } from './util.js';

@@ -455,7 +455,7 @@ await clearLog();
   const px0 = await ev(() => { const v = T.view, c = v.snapshot(false, 1), g = c.getContext('2d'), r = v.pageRect();
     const at = (x, y) => Array.from(g.getImageData(Math.round(x), Math.round(y), 1, 1).data).slice(0, 3).join(',');
     return { corner: at(3, 3), paper: at(r.left + 8, r.top + 8), outside: at(r.left - 1, r.top + 100), outsideFar: at(r.left - 8, r.top + 100), cs: getComputedStyle(v.el).backgroundColor }; });
-  check('light backdrop #D9DADF around the paper', px0.corner === '217,218,223' && px0.cs === 'rgb(217, 218, 223)', JSON.stringify(px0));
+  check('light backdrop #E9E9EC (Everynote, Samsung Notes grey) around the paper', px0.corner === '233,233,236' && px0.cs === 'rgb(233, 233, 236)', JSON.stringify(px0));
   check('paper is lighter than the backdrop', px0.paper === '255,255,255' && px0.outside !== px0.corner, JSON.stringify(px0));
   await shot('12-backdrop-light');
   await ev(() => T.view.setDarkPage(true)); await shot('12-backdrop-dark');

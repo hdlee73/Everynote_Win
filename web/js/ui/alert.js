@@ -4,7 +4,7 @@ import { h, icon } from '../util.js';
 export const BUTTON_POSITIVE = -1, BUTTON_NEGATIVE = -2, BUTTON_NEUTRAL = -3;
 
 function checkLabel(text) {
-  const w = h('span', { class: 'check-label' }, icon('ic_check_bold', 18, '#007AFF'), h('span', null, text));
+  const w = h('span', { class: 'check-label' }, icon('ic_check_bold', 18, '#DB332A'), h('span', null, text));
   return w;
 }
 
@@ -62,7 +62,7 @@ export class AlertDialog {
     const which = [BUTTON_POSITIVE, BUTTON_NEGATIVE, BUTTON_NEUTRAL];
     for (let i = 0; i < 3; i++) {
       const el = h('div', { class: 'ad-btn' + (i === 0 ? ' bold' : ''), role: 'button', 'aria-label': b.labels[i] || '' }, b.labels[i] ? h('span', { class: 'ad-btn-label' }, b.labels[i]) : '');
-      if (b.labels[i] && (i === 1 || b.items != null) && /삭제|비우기/.test(String(b.labels[i]))) el.style.color = '#FF3B30';
+      if (b.labels[i] && (i === 1 || b.items != null) && /삭제|비우기/.test(String(b.labels[i]))) el.style.color = '#DB332A';
       el.addEventListener('click', () => { const l = b.listeners[i]; if (l) l(this, which[i]); this.dismiss(); });
       this.buttons[i] = el;
     }
@@ -132,8 +132,8 @@ export class AlertDialog {
     const cells = []; let current = b.checked;
     const refresh = () => cells.forEach((c, i) => {
       const on = b.choice && i === current; c.textContent = '';
-      c.append(h('span', { class: 'ad-cell-label', style: { color: on ? '#007AFF' : '#1C1C1E', fontWeight: on ? '700' : '400' } }, b.items[i]));
-      if (on) c.append(icon('ic_check_bold', 20, '#007AFF', 'margin-left:8px'));
+      if (b.choice) c.append(h('span', { class: 'ad-radio' + (on ? ' on' : ''), 'aria-hidden': 'true' }));   // Samsung style radio on the left
+      c.append(h('span', { class: 'ad-cell-label', style: { color: '#010102', fontWeight: on ? '600' : '400' } }, b.items[i]));
       c.classList.toggle('on', on);
     });
     b.items.forEach((label, i) => {
@@ -153,10 +153,10 @@ export class AlertDialog {
     for (const slot of slots) {
       const bt = this.buttons[slot], label = String(b.labels[slot]);
       bt.classList.add('sheet-btn');
-      bt.style.color = label.includes('삭제') || label.includes('비우기') ? '#FF3B30' : slot === 1 ? '#8E8E93' : '#007AFF';
+      bt.style.color = label.includes('삭제') || label.includes('비우기') ? '#DB332A' : '#010102';
       bt.style.fontWeight = '400';
       { const danger = label.includes('삭제') || label.includes('비우기'); const ic = danger ? 'ic_delete' : slot === 1 ? 'ic_close' : iconFor(label);
-        if (ic && !bt.querySelector('svg')) bt.prepend(icon(ic, 20, danger ? '#FF3B30' : slot === 1 ? '#8E8E93' : tintFor(label), 'margin-right:12px')); }
+        if (ic && !bt.querySelector('svg')) bt.prepend(icon(ic, 20, danger ? '#DB332A' : '#252525', 'margin-right:12px')); }
       list.append(bt);
     }
     root.append(list);
