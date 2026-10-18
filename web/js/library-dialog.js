@@ -3,16 +3,16 @@
 //
 //   const dlg = new LibraryDialog(activity, library, folderPath, actions);  dlg.show();
 //   actions = { open(file), importFiles(folder), newNote(folder, refresh), changed(src, tgt, moved), selectedFolder(folder), removed(files) }
-import { h, icon, argb, baseName } from './util.js';
-import { ICONS } from './icons.js';
+import { h, icon, setIcon, argb, baseName } from './util.js';
+import { ICONS, folderTint } from './icons.js';
 import { host } from './host.js';
 import { AlertDialog, BUTTON_POSITIVE } from './ui/alert.js';
 import { AnchoredMenu } from './ui/menu.js';
 import { toast } from './ui/toast.js';
 import { LibraryRepository, NotebookFiles, Paper, Sidecars, samePath, pathKey, parentOf, joinP, sha1Hex } from './library.js';
 
-const INK = '#1C1C1E', MUTED = '#8E8E93', ACCENT = '#007AFF';
-const ALL = 0, FAVORITES = 1, RECENT = 2, FOLDER = 3;
+const INK = '#010102', MUTED = '#848487', ACCENT = '#DB332A';
+const ALL = 0, FAVORITES = 1, RECENT = 2, FOLDER = 3, TRASH = 4;
 const LONG_TOAST = 3500;
 
 // ================================================================= drawables (SVG) =================================================================
@@ -119,7 +119,7 @@ function dateText(time) {
     return `${hr < 12 ? '오전' : '오후'} ${hr % 12 === 0 ? 12 : hr % 12}:${mm}`;
   }
   if (now.getFullYear() === then.getFullYear()) return `${then.getMonth() + 1}월 ${then.getDate()}일`;
-  return `${then.getFullYear()}. ${then.getMonth() + 1}. ${then.getDate()}`;
+  return `${then.getFullYear()}년 ${then.getMonth() + 1}월 ${then.getDate()}일`;
 }
 export { dateText };
 
@@ -283,10 +283,14 @@ export class PaperChoiceView {
 }
 
 // ================================================================= FolderTreeView =================================================================
+/** Folder line icon tinted with the folder's colour (navigation pane, pickers). */
+export function folderGlyph(color, size = 20) { return icon('ic_folder_open', size, folderTint(color)); }
 export class FolderTreeView {
-  /** @param listener function(folderPath) called when a folder row is clicked */
-  constructor(activity, repository, selected, listener) {
+  /** @param listener function(folderPath) called when a folder row is clicked
+   *  @param opts { hideRoot: list only the sub-folders of the library (navigation pane), counts: show the number of documents } */
+  constructor(activity, repository, selected, listener, opts = {}) {
     this.repository = repository; this.listener = listener || (() => {}); this.sel = selected; this.menu = null;
+    this.hideRoot = !!opts.hideRoot; this.counts = opts.counts !== false;
     this.expandedSet = new Set(); this._v = 0;
     this.rows = h('div', { class: 'rows' });
     this.el = h('div', { class: 'lib-tree' }, this.rows);
@@ -301,24 +305,27 @@ export class FolderTreeView {
   }
   select(folder) { this.sel = folder; this._expandAncestors(folder); return this.reload(); }
   async reload() {
-    const v = ++this._v, rows = [];
-    await this._add(rows, this.repository.root, 0);
+    const v = ++this._v, rows = [], repo = this.repository;
+    if (this.hideRoot) { for (const f of await repo.list(repo.root)) if (repo.isDirectory(f)) await this._add(rows, f, 0); }
+    else await this._add(rows, repo.root, 0);
     if (v !== this._v) return;
     this.rows.replaceChildren(...rows);
   }
   async _add(out, folder, depth) {
     const repo = this.repository;
-    const children = [];
-    for (const f of await repo.list(folder)) if (repo.isDirectory(f)) children.push(f);
+    const children = []; let docs = 0;
+    for (const f of await repo.list(folder)) { if (repo.isDirectory(f)) children.push(f); else docs++; }
     const isSel = this.sel && samePath(folder, this.sel), isRoot = samePath(folder, repo.root);
     const expanded = this.expandedSet.has(pathKey(folder));
-    const name = isRoot ? '모든 문서' : baseName(folder);
-    const arrow = h('div', { class: 'arrow', 'aria-label': baseName(folder) + ' 하위 폴더 펼치기' }, children.length ? icon(expanded ? 'ic_chevron_down' : 'ic_chevron_right', 18, MUTED) : null);
-    arrow.addEventListener('click', () => { const k = pathKey(folder); if (!this.expandedSet.delete(k)) this.expandedSet.add(k); this.reload(); });
-    const fname = h('div', { class: 'fname', 'aria-label': '폴더 ' + name }, new FolderIconDrawable(repo.folderColor(folder), 26).el(), h('span', { class: 't' }, name));
+    const name = isRoot ? '문서함' : baseName(folder);
+    const arrow = h('div', { class: 'arrow', 'aria-label': baseName(folder) + ' 하위 폴더 펼치기' }, children.length ? icon(expanded ? 'ic_chevron_down' : 'ic_chevron_right', 16, '#848487') : null);
+    arrow.addEventListener('click', e => { e.stopPropagation(); const k = pathKey(folder); if (!this.expandedSet.delete(k)) this.expandedSet.add(k); this.reload(); });
+    const fname = h('div', { class: 'fname', 'aria-label': '폴더 ' + name }, folderGlyph(repo.folderColor(folder), 20), h('span', { class: 't' }, name));
+    const row = h('div', { class: 'lib-trow' + (isSel ? ' sel' : ''), style: { paddingLeft: (Math.min(depth, 12) * 16 + 10) + 'px' }, dataset: { tag: 'folder_row:' + name } }, arrow, fname);
+    if (this.counts && docs) row.append(h('div', { class: 'ct' }, String(docs)));
     fname.addEventListener('click', () => { this.sel = folder; this.reload(); this.listener(folder); });
     onLongPress(fname, el => { if (this.menu) this.menu(folder, el); });
-    out.push(h('div', { class: 'lib-trow' + (isSel ? ' sel' : ''), style: { paddingLeft: Math.min(depth, 12) * 12 + 'px' } }, arrow, fname));
+    out.push(row);
     if (expanded) for (const c of children) await this._add(out, c, depth + 1);
   }
 }
@@ -399,19 +406,19 @@ async function loadCover(path, key) {
 
 // ================================================================= LibraryDialog =================================================================
 export class LibraryDialog {
-  constructor(activity, repository, folder, actions) {
+  /** opts.mode: ALL (0) / FAVORITES (1) / RECENT (2) / FOLDER (3, default) / TRASH (4) */
+  constructor(activity, repository, folder, actions, opts = {}) {
     this.activity = activity; this.repository = repository; this.actions = actions || {};
-    this.folder = folder || repository.root; this.mode = FOLDER;
+    this.folder = folder || repository.root; this.mode = opts.mode == null ? FOLDER : opts.mode;
     this.selected = new Set(); this.selectionMode = false;
     this.generation = 0; this.loadVersion = 0; this.busy = false; this.showing = false; this.dismissL = null;
-    this.drawerP = 0; this.drawerWidth = 320; this._items = []; this._meta = new Map(); this._anim = 0;
+    this.drawerP = 0; this.drawerWidth = 300; this._items = []; this._meta = new Map(); this._anim = 0; this._trash = new Map();
     this.docked = false;
     this._build();
     this.applyDocking();
   }
   setOnDismissListener(fn) { this.dismissL = fn; return this; }
   isShowing() { return this.showing; }
-
   // ---------------------------------------------------------------- show / dismiss
   show() {
     if (this.showing) return;
@@ -434,7 +441,8 @@ export class LibraryDialog {
   onBackPressed() {
     if (!this.docked && this.drawer.classList.contains('on')) { this.closeDrawer(); return; }
     if (this.selectionMode) { this.selectionMode = false; this.selected.clear(); this.refreshGrid(); return; }
-    if (this.searchRow.classList.contains('on')) { this.toggleSearch(); return; }
+    if (this.page.classList.contains('searching')) { this.toggleSearch(); return; }
+    if (this.search.value) { this.search.value = ''; this.refreshGrid(); return; }
     if (this.mode === FOLDER && !samePath(this.folder, this.repository.root)) { this.selectFolder(parentOf(this.folder)); return; }
     this.dismiss();
   }
@@ -443,65 +451,114 @@ export class LibraryDialog {
 
   // ---------------------------------------------------------------- layout
   _ib(name, label, click, extra = '') {
-    const b = h('button', { class: 'lib-ib ' + extra, 'aria-label': label, title: label, type: 'button' }, icon(name, 24, INK));
+    const b = h('button', { class: 'lib-ib ' + extra, 'aria-label': label, title: label, type: 'button' }, icon(name, 22, INK));
     b.addEventListener('click', e => { e.stopPropagation(); click(b); });
     return b;
   }
+  /** Header text button with a small leading icon (노트 작성, PDF 가져오기, 편집, 보기 방식, 비우기 ...). */
+  _tb(name, label, click, tag, extra = '') {
+    const b = h('button', { class: 'lib-tb ' + extra, type: 'button', 'aria-label': label, title: label, dataset: { tag } }, name ? icon(name, 18, INK) : null, h('span', { class: 't' }, label));
+    b.addEventListener('click', e => { e.stopPropagation(); click(b); });
+    return b;
+  }
+  _target() { return this.mode === FOLDER ? this.folder : this.repository.root; }
   _build() {
     const repo = this.repository;
-    // rail
+    // collapsed navigation pane: an icon rail (wide window, pane closed with ☰)
     const rail = h('div', { class: 'lib-rail' });
     rail.append(this._ib('ic_menu', '폴더 트리 보기', () => this.openDrawer(), 'sq'), h('div', { class: 'gap' }));
-    const icons = ['ic_document_tab', 'ic_star_outline', 'ic_clock', 'ic_delete'], names = ['전체 문서', '즐겨찾기 문서', '최근 문서', '휴지통'];
+    const icons = ['ic_notes_all', 'ic_star_outline', 'ic_clock', 'ic_delete'], names = ['전체 문서', '즐겨찾기 문서', '최근 문서', '휴지통'];
     this.railButtons = icons.map((n, i) => {
       const b = this._ib(n, names[i], () => { if (i === 3) this.showTrash(); else this.showMode(i); }, 'sq rb'); rail.append(b); return b;
     });
-    rail.append(h('div', { class: 'lib-dots' }), this._ib('ic_folder_open', '폴더 열기', () => this.openDrawer(), 'sq fo'));
+    rail.append(h('div', { class: 'lib-dots' }), this._ib('ic_folder_check', '폴더 열기', () => this.openDrawer(), 'sq fo'));
     rail.append(h('div', { class: 'lib-railfill' }), this._ib('ic_settings', '설정', () => this.openSettings(), 'sq st'));
     this.rail = rail;
-    // top bar
-    const top = h('div', { class: 'lib-top' },
-      (this.menuButton = this._ib('ic_menu', '폴더 트리 보기', () => this.openDrawer(), 'lib-menu-btn')),
-      h('div', { class: 'sp' }),
-      this._ib('ic_search', '문서 이름 검색', () => this.toggleSearch()),
-      this._ib('ic_more_vert', '문서함 메뉴', b => this.libraryMenu(b)));
-    // search row
-    this.search = h('input', { class: 'lib-search', type: 'text', placeholder: '문서 이름 검색', 'aria-label': '문서 이름 입력', spellcheck: 'false' });
-    this.search.addEventListener('input', () => this.refreshGrid());
-    this.searchRow = h('div', { class: 'lib-searchrow' }, this.search);
-    // heading
-    this.upButton = h('div', { class: 'lib-up', role: 'button', 'aria-label': '상위 폴더로', dataset: { tag: 'folder_up' } });
-    this.upButton.addEventListener('click', () => { if (!samePath(this.folder, repo.root)) this.selectFolder(parentOf(this.folder)); });
+
+    // header: big title on the left, labelled actions + search box on the right (Samsung Notes for Windows layout). No back arrow.
+    this.menuButton = this._ib('ic_menu', '폴더 트리 보기', () => this.openDrawer(), 'lib-menu-btn');
     this.heading = h('span', null);
+    this.titleEl = h('div', { class: 'lib-title', dataset: { tag: 'library_heading' } }, this.heading);
+    this.search = h('input', { class: 'lib-search', type: 'text', placeholder: '검색', 'aria-label': '문서 이름 입력', spellcheck: 'false' });
+    this.search.addEventListener('input', () => this.refreshGrid());
+    this.search.addEventListener('keydown', e => { if (e.key === 'Escape' && this.search.value) { e.preventDefault(); e.stopPropagation(); this.search.value = ''; this.refreshGrid(); } });
+    const searchGo = this._ib('ic_search', '문서 이름 검색', () => { if (window.innerWidth < 600) this.toggleSearch(); else this.search.focus(); }, 'lib-sgo');
+    this.searchRow = h('div', { class: 'lib-searchrow' });
+    this.searchBox = h('div', { class: 'lib-sbox', dataset: { tag: 'library_search' } }, this.search, searchGo);
+    this.actionsRow = h('div', { class: 'lib-actions', dataset: { tag: 'library_actions' } });
+    this.moreButton = this._ib('ic_more_vert', '문서함 메뉴', b => this.libraryMenu(b), 'lib-more');
+    const top = h('div', { class: 'lib-top' }, this.menuButton, this.titleEl, h('div', { class: 'sp' }), this.actionsRow, this.searchBox, this.moreButton);
+    // second row: subtitle (trash notice / counts) on the left, sort control on the right
     this.subtitle = h('div', { class: 'lib-sub' });
-    const head = h('div', { class: 'lib-heading' }, this.upButton, h('div', { class: 'lib-title', dataset: { tag: 'library_heading' } }, this.heading), this.subtitle);
+    this.sortButton = h('button', { class: 'lib-tb lib-sortbtn', type: 'button', 'aria-label': '정렬 기준', title: '정렬 기준', dataset: { tag: 'library_sort' } }, icon('ic_sort', 18, INK), h('span', { class: 't' }, ''));
+    this.sortButton.addEventListener('click', e => { e.stopPropagation(); this.sortMenu(this.sortButton); });
+    this.sortDir = this._ib('ic_arrow_down', '정렬 방향 바꾸기', () => { repo.sortReverse(!repo.sortReverse()); this.refreshGrid(); }, 'lib-sortdir');
+    this.sortBox = h('div', { class: 'lib-sortbox' }, this.sortButton, this.sortDir);
+    const head = h('div', { class: 'lib-heading' }, this.subtitle, h('div', { class: 'sp' }), this.sortBox);
     // shelf
     this.grid = h('div', { class: 'lib-grid' });
     this.shelf = h('div', { class: 'lib-shelf' }, this.grid);
-    // selection bar: replaces the top bar while documents are selected (Samsung Notes style: back, "N개 선택됨", icon + label commands, overflow menu)
+    // selection bar: replaces the header while documents are selected ("전체" check, "N개 선택됨", icon + label commands, 취소). No back arrow.
+    this.selectAll = checkboxEl(false, '전체 선택', () => this.runSelectionCommand('전체'), 'all');
     this.selectionCount = h('div', { class: 'lib-selcount' }, '0개 선택됨');
     this.selectionCommands = h('div', { class: 'lib-selcmds' });
-    this.selectionBar = h('div', { class: 'lib-top lib-seltop' },
-      this._ib('ic_chevron_left', '선택 해제', () => this.onBackPressed()), this.selectionCount, h('div', { class: 'sp' }), this.selectionCommands);
+    const cancel = this._tb(null, '취소', () => this.onBackPressed(), 'selection_cancel', 'lib-selcancel');
+    cancel.setAttribute('aria-label', '선택 해제');
+    this.selectionBar = h('div', { class: 'lib-top lib-seltop' }, h('label', { class: 'lib-selall' }, this.selectAll, h('span', null, '전체')), this.selectionCount, h('div', { class: 'sp' }), this.selectionCommands, cancel);
     this.page = h('div', { class: 'lib-page' }, top, this.selectionBar, this.searchRow, head, this.shelf);
-    // FAB
-    this.compose = h('div', { class: 'lib-fab', role: 'button', 'aria-label': '새로 만들기', dataset: { tag: 'compose_button' } }, icon('ic_compose', 26, '#E5484D'));
+    // FAB (narrow window only): 노트 작성 / 가져오기 / 폴더
+    this.compose = h('div', { class: 'lib-fab', role: 'button', 'aria-label': '새로 만들기', title: '노트 작성', dataset: { tag: 'compose_button' } }, icon('ic_compose', 24, INK));
     this.compose.addEventListener('click', () => this.newMenu(this.compose));
     this._buildDrawer();
     this.el = h('div', { class: 'lib-root', dataset: { tag: 'library_root' } }, rail, this.page, this.compose, this.drawer);
     this._edgeDrag();
   }
+  /** Header buttons for the current view. */
+  rebuildActions() {
+    const a = this.actionsRow; a.textContent = '';
+    if (this.mode === TRASH) {
+      a.append(this._tb(null, '편집', () => this.startSelection(), 'library_edit'),
+        this._tb(null, '비우기', () => this.confirmEmptyTrash(this._items.length), 'library_empty_trash'));
+      return;
+    }
+    a.append(
+      this._tb('ic_compose', '노트 작성', () => { if (this.actions.newNote) this.actions.newNote(this._target(), () => this.refresh()); }, 'library_new_note'),
+      this._tb('ic_pdf_import', 'PDF 가져오기', () => { this.dismiss(); if (this.actions.importFiles) this.actions.importFiles(this._target()); }, 'library_import'),
+      this._tb('ic_check_circle', '편집', () => this.startSelection(), 'library_edit'),
+      this._tb('ic_grid', '보기 방식', b => this.viewMenu(b), 'library_view'));
+  }
+  startSelection() { this.selectionMode = true; this.selected.clear(); this._render(++this.generation); }
+  sortLabel() { const m = this.repository.sortMode(); return m === 2 ? '수정 날짜 순' : m === 3 ? '열어본 날짜 순' : '이름 순'; }
+  sortMenu(anchor) {
+    const R = AnchoredMenu.Row, repo = this.repository, m = repo.sortMode();
+    const pick = (mode, rev) => { repo.sortMode(mode); repo.sortReverse(rev); this.refreshGrid(); };
+    this._menu(anchor, [
+      new R('수정 날짜 순', null, () => pick(2, false)).selected(m === 2),
+      new R('열어본 날짜 순', null, () => pick(3, false)).selected(m === 3),
+      new R('이름 순', null, () => pick(0, false)).selected(m === 0 || m === 1)]);
+  }
+  viewMenu(anchor) {
+    const R = AnchoredMenu.Row, repo = this.repository, v = repo.viewMode();
+    this._menu(anchor, [
+      new R('큰 표지', 'ic_grid', () => { repo.viewMode(0); this._render(++this.generation); }).selected(v === 0),
+      new R('작은 표지', 'ic_thumbnails', () => { repo.viewMode(1); this._render(++this.generation); }).selected(v === 1),
+      new R('목록', 'ic_list_view', () => { repo.viewMode(2); this._render(++this.generation); }).selected(v === 2),
+      R.divider(),
+      new R('즐겨찾기 맨 위 고정', 'ic_star_outline', () => { repo.pinFavorites(!repo.pinFavorites()); this.refreshGrid(); }).selected(repo.pinFavorites())]);
+  }
 
   rebuildSelectionCommands() {
     this.selectionCommands.textContent = '';
     const all = this._allSelected();
-    const commands = [['이동', 'ic_move'], ['공유', 'ic_share'], ['삭제', 'ic_delete'], [all ? '모두 해제' : '전체 선택', 'ic_check_circle']];
+    this.selectAll.classList.toggle('on', all); this.selectAll.setAttribute('aria-checked', String(all));
+    const commands = this.mode === TRASH ? [['복원', 'ic_restore'], ['삭제', 'ic_delete']] : [['이동', 'ic_move'], ['공유', 'ic_share'], ['삭제', 'ic_delete'], [all ? '모두 해제' : '전체 선택', 'ic_check_circle']];
     for (const [label, name] of commands) {
-      const c = h('div', { class: 'lib-cmd' + (label === '삭제' ? ' red' : ''), role: 'button', title: label, 'aria-label': '선택 문서 ' + label }, icon(name, 22, label === '삭제' ? '#FF3B30' : INK), h('span', { class: 't' }, label));
+      const c = h('div', { class: 'lib-cmd' + (label === '삭제' ? ' red' : ''), role: 'button', title: label, 'aria-label': '선택 문서 ' + label }, icon(name, 20, label === '삭제' ? ACCENT : INK), h('span', { class: 't' }, label));
       c.addEventListener('click', () => this.runSelectionCommand(label === '전체 선택' || label === '모두 해제' ? '전체' : label));
       this.selectionCommands.append(c);
     }
-    const more = h('div', { class: 'lib-cmd more', role: 'button', title: '더 보기', 'aria-label': '선택 문서 더 보기' }, icon('ic_more_vert', 22, INK));
+    if (this.mode === TRASH) return;
+    const more = h('div', { class: 'lib-cmd more', role: 'button', title: '더 보기', 'aria-label': '선택 문서 더 보기' }, icon('ic_more_vert', 20, INK));
     more.addEventListener('click', e => { e.stopPropagation(); this.selectionMenu(more); });
     this.selectionCommands.append(more);
   }
@@ -514,19 +571,24 @@ export class LibraryDialog {
     const R = AnchoredMenu.Row, repo = this.repository, files = [...this.selected];
     const allFavorite = files.length > 0 && files.every(f => repo.favorite(f));
     const rows = [];
-    if (files.length === 1) rows.push(new R('이름 변경', 'ic_rename', () => this.runSelectionCommand('이름 변경')).tint('#8E8E93'));
-    rows.push(new R('복사본 만들기', 'ic_copy', () => this.runSelectionCommand('복사')).tint('#8E8E93'));
-    rows.push(new R(allFavorite ? '즐겨찾기 해제' : '즐겨찾기에 추가', allFavorite ? 'ic_star' : 'ic_star_outline', () => this.runSelectionCommand('즐겨찾기')).tint('#F5A623'));
+    if (files.length === 1) rows.push(new R('이름 변경', 'ic_rename', () => this.runSelectionCommand('이름 변경')));
+    rows.push(new R('복사본 만들기', 'ic_copy', () => this.runSelectionCommand('복사')));
+    rows.push(new R(allFavorite ? '즐겨찾기 해제' : '즐겨찾기에 추가', allFavorite ? 'ic_star' : 'ic_star_outline', () => this.runSelectionCommand('즐겨찾기')));
     this._menu(anchor, rows);
   }
   async runSelectionCommand(action) {
     const files = [...this.selected], repo = this.repository;
     if (action === '전체') {
       if (this._allSelected()) this.selected.clear();
-      else for (const f of await this.items()) if (!repo.isDirectory(f)) this.selected.add(f);
+      else for (const f of this._items) if (!repo.isDirectory(f)) this.selected.add(f);
       this._render(++this.generation); return;
     }
     if (!files.length) { toast('문서를 선택하세요'); return; }
+    if (this.mode === TRASH) {
+      const items = files.map(f => this._trash.get(pathKey(f))).filter(Boolean);
+      if (action === '복원') this.restoreItems(items); else this.confirmPurge(items);
+      return;
+    }
     if (action === '즐겨찾기') {
       const allFavorite = files.every(f => repo.favorite(f));
       for (const f of files) repo.favorite(f, !allFavorite);
@@ -546,7 +608,7 @@ export class LibraryDialog {
     const panel = h('div', { class: 'lib-panel' });
     this.drawerPanel = panel;
     panel.append(h('div', { class: 'lib-ptop' }, this._ib('ic_menu', '폴더 트리 닫기', () => this.closeDrawer())));
-    const icons = ['ic_document_tab', 'ic_star_outline', 'ic_clock', 'ic_delete'], names = ['전체 문서', '즐겨찾기', '최근 문서', '휴지통'];
+    const icons = ['ic_notes_all', 'ic_star_outline', 'ic_clock', 'ic_delete'], names = ['모든 노트', '즐겨찾기', '최근 문서', '휴지통'];
     this.drawerRows = [];
     this.drawerCounts = [];
     icons.forEach((n, i) => {
@@ -554,27 +616,26 @@ export class LibraryDialog {
       panel.append(row.el); this.drawerRows.push(row.el); this.drawerCounts.push(row.count);
     });
     panel.append(h('div', { class: 'lib-dots' }));
-    const fr = this._drawerRow('ic_folder_open', '폴더', null); panel.append(fr.el); this.drawerCounts.push(fr.count);
-    this.tree = new FolderTreeView(this.activity, repo, this.folder, f => this.selectFolder(f));
+    const fr = this._drawerRow('ic_folder_check', '폴더', () => this.selectFolder(repo.root));
+    this.folderRow = fr.el; panel.append(fr.el); this.drawerCounts.push(fr.count);
+    this.tree = new FolderTreeView(this.activity, repo, this.folder, f => this.selectFolder(f), { hideRoot: true });
     this.tree.setFolderMenu((f, el) => this.folderMenu(f, el));
     this.tree.el.classList.add('transparent', 'tree');
     panel.append(this.tree.el);
-    const manage = h('div', { class: 'lib-manage', role: 'button', 'aria-label': '폴더 관리' }, '폴더 관리');
-    manage.addEventListener('click', () => this.folderManageMenu(manage));
-    panel.append(manage);
     panel.append(h('div', { class: 'lib-dots' }), this._drawerRow('ic_settings', '설정', () => { this._drawerPicked(); this.openSettings(); }).el);
-    this.drawerWidth = Math.min(320, Math.round(window.innerWidth * .86));
+    this.drawerWidth = Math.min(300, Math.round(window.innerWidth * .86));
     this.drawer = h('div', { class: 'lib-drawer', dataset: { tag: 'library_drawer' } }, this.drawerScrim, panel);
   }
   _drawerRow(iconName, title, click) {
     const count = h('div', { class: 'ct' });
-    const el = h('div', { class: 'lib-drow' + (click ? ' click' : ''), 'aria-label': title, dataset: { tag: 'drawer_row:' + title } }, icon(iconName, 28, INK), h('div', { class: 'nm' }, title), count);
+    const el = h('div', { class: 'lib-drow' + (click ? ' click' : ''), 'aria-label': title, role: click ? 'button' : null, dataset: { tag: 'drawer_row:' + title } }, icon(iconName, 20, INK), h('div', { class: 'nm' }, title), count);
     if (click) el.addEventListener('click', click);
     return { el, count };
   }
   async updateDrawerCounts() {
     const repo = this.repository;
-    for (let i = 0; i < 4; i++) this.drawerRows[i].classList.toggle('on', i < 3 && this.mode === i);
+    for (let i = 0; i < 4; i++) this.drawerRows[i].classList.toggle('on', i === 3 ? this.mode === TRASH : this.mode === i);
+    this.folderRow.classList.toggle('on', this.mode === FOLDER && samePath(this.folder, repo.root));
     const [all, fav, trash, folders] = await Promise.all([repo.allDocuments(''), repo.favorites(''), repo.trashItems(), repo.folderCount()]);
     const counts = [all.length, fav.length, '', trash.length, folders];
     counts.forEach((c, i) => { this.drawerCounts[i].textContent = String(c); });
@@ -648,14 +709,15 @@ export class LibraryDialog {
     };
     el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
   }
+  /** Narrow window: the search box opens over the header (wide windows always show it). */
   toggleSearch() {
-    const show = !this.searchRow.classList.contains('on');
-    this.searchRow.classList.toggle('on', show);
+    const show = !this.page.classList.contains('searching');
+    this.page.classList.toggle('searching', show); this.searchRow.classList.toggle('on', show);
     if (show) this.search.focus(); else { this.search.value = ''; this.search.blur(); this.refreshGrid(); }
   }
 
   // ---------------------------------------------------------------- modes and content
-  showMode(m) { this.mode = m; this.selected.clear(); this.selectionMode = false; this.refresh(); }
+  showMode(m) { this.mode = m; this.selected.clear(); this.selectionMode = false; if (m !== FOLDER && this.tree) { this.tree.sel = null; this.tree.reload(); } this.refresh(); }
   selectFolder(f) {
     this.selected.clear(); this.selectionMode = false; this.mode = FOLDER; this.folder = f;
     if (this.actions.selectedFolder) this.actions.selectedFolder(f);
@@ -667,25 +729,32 @@ export class LibraryDialog {
       case ALL: return repo.allDocuments(q);
       case FAVORITES: return repo.favorites(q);
       case RECENT: return repo.recent(q, 40);
+      case TRASH: {
+        const query = q.trim().toLowerCase(), list = (await repo.trashItems()).filter(i => i.name.toLowerCase().includes(query));
+        list.sort((a, b) => (b.deleted || 0) - (a.deleted || 0));
+        this._trash = new Map(list.map(i => [pathKey(i.file), i]));
+        return list.map(i => i.file);
+      }
       default: return repo.sorted(this.folder, q);
     }
   }
-  refresh() { this.styleRail(); if (this.docked) { this.tree.select(this.folder); this.updateDrawerCounts().catch(() => {}); } return this.refreshGrid(); }
-  styleRail() { this.railButtons.forEach((b, i) => b.classList.toggle('on', i < 3 && this.mode === i)); }
+  refresh() {
+    this.styleRail(); this.rebuildActions();
+    if (this.docked) { if (this.mode === FOLDER && !samePath(this.folder, this.repository.root)) this.tree.select(this.folder); else { this.tree.sel = null; this.tree.reload(); } this.updateDrawerCounts().catch(() => {}); }
+    return this.refreshGrid();
+  }
+  styleRail() { this.railButtons.forEach((b, i) => b.classList.toggle('on', i === 3 ? this.mode === TRASH : this.mode === i)); }
   _updateHeading(items) {
     const repo = this.repository, root = repo.root;
-    const title = this.mode === ALL ? '전체 문서' : this.mode === FAVORITES ? '즐겨찾기' : this.mode === RECENT ? '최근 문서' : samePath(this.folder, root) ? '문서함' : baseName(this.folder);
+    const title = this.mode === ALL ? '모든 노트' : this.mode === FAVORITES ? '즐겨찾기' : this.mode === RECENT ? '최근 문서' : this.mode === TRASH ? '휴지통' : samePath(this.folder, root) ? '문서함' : baseName(this.folder);
     this.heading.textContent = title;
-    let folders = 0, docs = 0;
-    for (const f of items) { if (repo.isDirectory(f)) folders++; else docs++; }
-    this.subtitle.textContent = (folders > 0 ? `폴더 ${folders}개 · ` : '') + `문서 ${docs}개`;
-    const nested = this.mode === FOLDER && !samePath(this.folder, root);
-    this.upButton.classList.toggle('on', nested);
-    if (nested) {
-      const parent = parentOf(this.folder);
-      this.upButton.textContent = '';
-      this.upButton.append(icon('ic_chevron_left', 18, ACCENT), h('span', { style: 'white-space:pre' }, '  '), h('span', { class: 'nm' }, samePath(parent, root) ? '문서함' : baseName(parent)));
-    }
+    if (this.mode === TRASH) this.subtitle.textContent = '휴지통의 문서는 복원하거나 완전히 삭제할 수 있습니다. 각 항목에 삭제한 날짜가 표시됩니다.';
+    else this.subtitle.textContent = '';   // Samsung Notes shows no count line under the title (the counts live in the navigation pane)
+    this.sortBox.style.display = this.mode === TRASH || this.mode === RECENT ? 'none' : '';
+    const rev = repo.sortReverse();
+    this.sortButton.querySelector('.t').textContent = this.sortLabel();
+    const dir = this.sortDir.querySelector('.ico'); if (dir) setIcon(dir, (repo.sortMode() === 1) !== rev ? 'ic_arrow_up' : 'ic_arrow_down');
+    this.page.classList.toggle('trash', this.mode === TRASH);
   }
   /** Loads the current list + per-item data, then renders. */
   async refreshGrid() {
@@ -713,16 +782,15 @@ export class LibraryDialog {
     this._updateHeading(items);
     this.selectionBar.classList.toggle('on', this.selectionMode);
     this.page.classList.toggle('selecting', this.selectionMode);
-    this.compose.style.display = this.selectionMode ? 'none' : '';
+    this.compose.style.display = this.selectionMode || this.mode === TRASH ? 'none' : '';
     if (this.selectionMode) { this.selectionCount.textContent = `${this.selected.size}개 선택됨`; this.rebuildSelectionCommands(); }
     const viewMode = repo.viewMode();
-    const usable = Math.max(this.shelf.clientWidth, 240) - 28;
-    const columns = viewMode === 2 ? 1 : Math.max(1, Math.min(6, Math.floor(usable / (viewMode === 1 ? 118 : 164))));
-    const cell = viewMode === 2 ? 0 : Math.floor(usable / columns) - 14;
-    this.grid.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+    const cell = viewMode === 1 ? 92 : 120;
+    this.grid.classList.toggle('list', viewMode === 2);
+    this.grid.style.gridTemplateColumns = viewMode === 2 ? 'minmax(0, 1fr)' : `repeat(auto-fill, ${cell + 16}px)`;
     this.grid.textContent = '';
     if (!items.length) {
-      this.grid.append(h('div', { class: 'lib-empty' }, this.search.value.length > 0 ? '검색 결과가 없습니다' : this.mode === FAVORITES ? '즐겨찾기한 문서가 없습니다' : '아직 문서가 없습니다'));
+      this.grid.append(h('div', { class: 'lib-empty' }, this.search.value.length > 0 ? '검색 결과가 없습니다' : this.mode === FAVORITES ? '즐겨찾기한 문서가 없습니다' : this.mode === TRASH ? '휴지통이 비어 있습니다' : '아직 문서가 없습니다'));
       return;
     }
     for (const f of items) this.grid.append(h('div', { class: 'lib-cell' }, viewMode === 2 ? this.listItem(f, version) : this.card(f, version, cell)));
@@ -751,40 +819,40 @@ export class LibraryDialog {
     return box;
   }
   card(file, version, cell) {
-    const repo = this.repository, isDir = repo.isDirectory(file), name = baseName(file), m = this._meta.get(pathKey(file)) || {};
-    const frame = h('div', { class: 'lib-frame', style: { height: cell + 'px' } });
+    const repo = this.repository, isDir = repo.isDirectory(file), m = this._meta.get(pathKey(file)) || {};
+    const trashItem = this.mode === TRASH ? this._trash.get(pathKey(file)) : null, name = trashItem ? trashItem.name : baseName(file);
+    const frame = h('div', { class: 'lib-frame' + (isDir ? ' dir' : ''), style: { width: cell + 'px', height: cell + 'px' } });
     if (isDir) {
-      const fh = Math.round(cell * .84);
-      const shape = h('span', { class: 'lib-fshape', style: { height: fh + 'px' }, 'aria-label': name + ' 폴더' });
-      shape.innerHTML = new FolderShapeDrawable(repo.folderColor(file)).svg(cell, fh);
-      frame.append(shape, h('div', { class: 'lib-fcount', style: { top: (Math.round(cell * .16 + cell * .84 * .3) + 6) + 'px' } }, String(m.count ?? 0)));
+      frame.append(folderGlyph(repo.folderColor(file), Math.round(cell * .46)), h('div', { class: 'lib-fcount' }, String(m.count ?? 0)));
     } else {
       frame.append(this._cover(file, version, false));
-      if (repo.favorite(file)) frame.append(h('div', { class: 'lib-fav' }, icon('ic_star', 18, '#FFB020')));
+      if (!trashItem && repo.favorite(file)) frame.append(h('div', { class: 'lib-fav' }, icon('ic_star', 14, '#FFB020')));
       if (this.selectionMode) frame.append(checkboxEl(this.selected.has(file), '선택 ' + name, () => this.toggleSelected(file)));
     }
-    const card = h('div', { class: 'lib-card', 'aria-label': name, dataset: { tag: 'document:' + name } }, frame, h('div', { class: 'lib-name' }, stripPdf(isDir ? name : name)));
-    if (!isDir) card.append(h('div', { class: 'lib-date' }, dateText(m.modified || 0)));
-    card.addEventListener('click', () => this.openOrSelect(file));
+    const card = h('div', { class: 'lib-card', 'aria-label': name, dataset: { tag: 'document:' + name } }, frame, h('div', { class: 'lib-name' }, stripPdf(name)));
+    if (!isDir) card.append(h('div', { class: 'lib-date' }, trashItem ? '삭제 ' + dateText(trashItem.deleted || m.modified || 0) : dateText(m.modified || 0)));
+    card.addEventListener('click', () => this.openOrSelect(file, card));
     onLongPress(card, el => this.longPressed(file, el));
     return card;
   }
   listItem(file, version) {
-    const repo = this.repository, isDir = repo.isDirectory(file), name = baseName(file), m = this._meta.get(pathKey(file)) || {};
+    const repo = this.repository, isDir = repo.isDirectory(file), m = this._meta.get(pathKey(file)) || {};
+    const trashItem = this.mode === TRASH ? this._trash.get(pathKey(file)) : null, name = trashItem ? trashItem.name : baseName(file);
     const img = h('div', { class: 'img' });
-    if (isDir) img.innerHTML = new FolderShapeDrawable(repo.folderColor(file)).svg(56, 56, 'fs');
+    if (isDir) img.append(folderGlyph(repo.folderColor(file), 30));
     else img.append(this._cover(file, version, true));
     let meta;
     if (isDir) meta = `${m.count ?? 0}개 항목`;
+    else if (trashItem) meta = '삭제 ' + dateText(trashItem.deleted || 0);
     else {
       meta = dateText(m.modified || 0);
       if (this.mode === ALL || this.mode === FAVORITES || this.mode === RECENT) { const p = parentOf(file); meta += ' · ' + (samePath(p, repo.root) ? '문서함' : baseName(p)); }
     }
     const row = h('div', { class: 'lib-row', 'aria-label': name, dataset: { tag: 'document:' + name } }, img,
       h('div', { class: 'txt' }, h('div', { class: 'nm' }, stripPdf(name)), h('div', { class: 'meta' }, meta)));
-    if (!isDir && repo.favorite(file)) row.append(icon('ic_star', 22, '#FFB020'));
+    if (!isDir && !trashItem && repo.favorite(file)) row.append(icon('ic_star', 18, '#FFB020'));
     if (this.selectionMode && !isDir) row.append(checkboxEl(this.selected.has(file), '선택 ' + name, () => this.toggleSelected(file), 'row'));
-    row.addEventListener('click', () => this.openOrSelect(file));
+    row.addEventListener('click', () => this.openOrSelect(file, row));
     onLongPress(row, el => this.longPressed(file, el));
     return row;
   }
@@ -792,9 +860,10 @@ export class LibraryDialog {
     if (this.repository.isDirectory(file)) this.folderMenu(file, anchor);
     else { this.selectionMode = true; this.selected.add(file); this._render(++this.generation); }
   }
-  openOrSelect(file) {
+  openOrSelect(file, anchor) {
     if (this.repository.isDirectory(file)) this.selectFolder(file);
     else if (this.selectionMode) this.toggleSelected(file);
+    else if (this.mode === TRASH) { const item = this._trash.get(pathKey(file)); if (item) this.trashItemMenu(item, anchor); }
     else { this.dismiss(); if (this.actions.open) this.actions.open(file); }
   }
   toggleSelected(file) { if (!this.selected.delete(file)) this.selected.add(file); this._render(++this.generation); }
@@ -811,12 +880,16 @@ export class LibraryDialog {
   }
   libraryMenu(anchor) {
     const R = AnchoredMenu.Row, repo = this.repository;
-    const rows = [
+    const rows = [];
+    if (window.innerWidth < 760 && this.mode !== TRASH) rows.push(
+      new R('PDF 가져오기', 'ic_pdf_import', () => { this.dismiss(); if (this.actions.importFiles) this.actions.importFiles(this._target()); }),
+      R.divider());
+    rows.push(new R('폴더 만들기', 'ic_folder_add', () => this.createFolder(this._target(), () => { this.tree.reload(); this.refresh(); })));
+    rows.push(
       new R('선택', null, () => { this.selectionMode = !this.selectionMode; this.selected.clear(); this._render(++this.generation); }),
       new R('보기 방법', null, () => new AlertDialog.Builder().setTitle('보기 방법').setSingleChoiceItems(LibraryRepository.VIEW_NAMES, repo.viewMode(), (d, i) => { repo.viewMode(i); d.dismiss(); this._render(++this.generation); }).show()),
       new R('정렬', null, () => new AlertDialog.Builder().setTitle('정렬').setSingleChoiceItems(LibraryRepository.SORT_NAMES, repo.sortMode(), (d, i) => { repo.sortMode(i); d.dismiss(); this.refreshGrid(); }).show()),
-      new R('즐겨찾기 맨 위 고정', null, () => { repo.pinFavorites(!repo.pinFavorites()); this.refreshGrid(); }).selected(repo.pinFavorites()),
-    ];
+      new R('즐겨찾기 맨 위 고정', null, () => { repo.pinFavorites(!repo.pinFavorites()); this.refreshGrid(); }).selected(repo.pinFavorites()));
     if (this.mode === FOLDER) rows.push(new R('폴더 색상', null, () => this.chooseFolderColor(this.folder)));
     if (this.mode === FOLDER) rows.push(...this._backupRows(this.folder));
     else if (this.actions.restoreBackup) rows.push(new R('백업 불러오기', null, () => this.actions.restoreBackup()));
@@ -921,20 +994,38 @@ export class LibraryDialog {
         if (error) toast(error, LONG_TOAST);
       }).setNegativeButton('취소').show();
   }
-  async showTrash() {
-    const repo = this.repository, items = await repo.trashItems();
-    if (!items.length) { new AlertDialog.Builder().setTitle('휴지통').setMessage('휴지통이 비어 있습니다').setPositiveButton('닫기').show(); return; }
-    new AlertDialog.Builder().setTitle('휴지통 · 눌러서 복원').setItems(items.map(i => i.name), async (d, index) => {
-      try {
-        const restored = await repo.restore(items[index]);
-        if (this.actions.changed) this.actions.changed(items[index].file, restored, true);
-        this.refresh(); toast('복원했습니다');
-      } catch (e) { toast(e.message, LONG_TOAST); }
-    }).setNeutralButton('휴지통 비우기', () => this.confirmEmptyTrash(items.length)).setNegativeButton('닫기').show();
+  /** 휴지통 is a view of the library (Samsung Notes style): a card per deleted document, 편집 / 비우기 in the header. */
+  showTrash() { this.showMode(TRASH); }
+  trashItemMenu(item, anchor) {
+    const R = AnchoredMenu.Row;
+    this._menu(anchor, [
+      new R('복원', 'ic_restore', () => this.restoreItems([item])),
+      new R('완전히 삭제', 'ic_delete', () => this.confirmPurge([item])).danger()]);
+  }
+  async restoreItems(items) {
+    const repo = this.repository; let n = 0, error = '';
+    for (const item of items) {
+      try { const restored = await repo.restore(item); n++; if (this.actions.changed) this.actions.changed(item.file, restored, true); }
+      catch (e) { error = e.message || '복원하지 못했습니다'; }
+    }
+    this.selectionMode = false; this.selected.clear(); this.refresh();
+    toast(error || (n === 1 ? '복원했습니다' : `${n}개 문서를 복원했습니다`), error ? LONG_TOAST : undefined);
+  }
+  /** Samsung style confirm card: one sentence, 삭제 (accent) | 취소. */
+  confirmPurge(items) {
+    new AlertDialog.Builder().setMessage(`항목 ${items.length}개가 완전히 삭제됩니다. 되돌릴 수 없습니다.`)
+      .setPositiveButton('삭제', async () => {
+        if (this.busy) return; this.busy = true;
+        let error = '';
+        for (const item of items) { try { await this.repository.purge(item); } catch (e) { error = e.message || '삭제에 실패했습니다'; } }
+        this.busy = false; this.selectionMode = false; this.selected.clear(); this.refresh();
+        if (error) toast(error, LONG_TOAST);
+      }).setNegativeButton('취소').show();
   }
   confirmEmptyTrash(count) {
-    new AlertDialog.Builder().setTitle('휴지통 비우기').setMessage(`휴지통의 문서 ${count}개를 영구 삭제할까요? 되돌릴 수 없습니다.`)
-      .setPositiveButton('영구 삭제', async () => {
+    if (!count) { toast('휴지통이 비어 있습니다'); return; }
+    new AlertDialog.Builder().setMessage(`휴지통의 항목 ${count}개가 완전히 삭제됩니다. 되돌릴 수 없습니다.`)
+      .setPositiveButton('삭제', async () => {
         if (this.busy) return; this.busy = true;
         try { const n = await this.repository.emptyTrash(); this.busy = false; this.refresh(); toast(`${n}개 문서를 영구 삭제했습니다`); }
         catch (e) { this.busy = false; toast(e.message || '삭제에 실패했습니다', LONG_TOAST); }

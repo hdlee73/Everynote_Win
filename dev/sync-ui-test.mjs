@@ -42,7 +42,7 @@ check('pull disables the PC-only row', await pg.locator('.sync-row.off').count()
 await pg.locator('.sync-row:has-text("폰문서.pdf") input').check();
 await pg.screenshot({path:'dev/out/sync-3-pull.png'});
 await pg.click('.ad-btn:has-text("덮어쓰기")'); await pg.waitForTimeout(1500);
-const got=await pg.evaluate(async()=>{const {host}=await import('./js/host.js');return host._fake.files.has('C:\\Users\\dev\\Documents\\PDF Note\\폰문서.pdf')});
+const got=await pg.evaluate(async()=>{const {host}=await import('./js/host.js');return host._fake.files.has('C:\\Users\\dev\\Documents\\Everynote\\폰문서.pdf')});
 check('PDF written into the library', got);
 check('toast / no failure card', await pg.locator('.ad-root:has-text("실패")').count()===0);
 await pg.evaluate(()=>app.showDeviceSync()); await pg.waitForTimeout(300);

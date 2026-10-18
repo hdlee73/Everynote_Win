@@ -25,6 +25,7 @@ import { buildSplit } from './app-split.js';
 const NAVY = 0xFF1C1C1E, ACCENT = 0xFF007AFF, ACTIVE_BG = 0xFFE5F0FF, ACTIVE_FG = 0xFF007AFF;
 const INK_COLORS = [0xFF1C1C1E, 0xFF636366, 0xFF007AFF, 0xFF16835B, 0xFF7C3AED, 0xFFEA580C, 0xFFDB2777, 0xFFFF3B30];
 const INK_COLORS2 = [0xFF8E1B14, 0xFFB35900, 0xFF8A6D00, 0xFF00746E, 0xFF0040A8, 0xFF2E2C8A, 0xFFFF9AA2, 0xFFA6CBFF];
+const INK_COLORS3 = [0xFFFFD43B, 0xFF9BE15D, 0xFF4FD1C5, 0xFFB794F4, 0xFFF6AD55, 0xFFA0AEC0, 0xFFFFFFFF];
 const RAINBOW = 'conic-gradient(#FF3B30,#FFCC00,#34C759,#00C7BE,#007AFF,#AF52DE,#FF3B30)';
 const INK_WIDTHS = [0.0022, 0.004, 0.0065, 0.009];
 const HIGHLIGHT_COLORS = [0x66FFDE59, 0x6654C27A, 0x66FF6B9A, 0x66549CF5, 0x66B67CF2];
@@ -34,6 +35,7 @@ const ZOOM_STEP = 1.25;
 const PICTURE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
 const OFFICE_EXTS = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'hwp', 'hwpx', ...PICTURE_EXTS];
 const sameColor = (a, b) => (a | 0) === (b | 0);
+const later = (fn, ms = 0) => setTimeout(fn, ms);
 
 // ------------------------------------------------------------------------------------------------ small helpers
 /** Session record (Java DocumentSession). `uri` is the absolute file path. */
@@ -98,6 +100,38 @@ function iconToggleView(iconName, label, get, set, tag = '') {
   b.addEventListener('click', () => { set(!get()); b.refresh(); });
   b.refresh();
   return b;
+}
+
+/** Samsung style on/off row: label on the left, accent switch on the right. Same contract as iconToggleView (aria-pressed, refresh). */
+function switchRow(label, get, set, tag = '') {
+  const sw = h('span', { class: 'm-switch', 'aria-hidden': 'true' }, h('i'));
+  const b = h('div', { class: 'm-pp-toggle', role: 'switch', tabindex: '0', 'aria-label': label, title: label, dataset: tag ? { tag } : {} }, h('span', null, label), sw);
+  b.refresh = () => { const on = !!get(); sw.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); b.setAttribute('aria-checked', String(on)); };
+  const flip = () => { set(!get()); b.refresh(); };
+  b.addEventListener('click', flip); b.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); } });
+  b.refresh();
+  return b;
+}
+/** Samsung style radio list (accent dots). Items keep the .chip class so older callers / tests can address them. */
+function radioView(labels, current, choose) {
+  const box = h('div', { class: 'm-radios', role: 'radiogroup' });
+  const items = labels.map((label, i) => {
+    const dot = h('span', { class: 'm-radio' });
+    const it = h('div', { class: 'chip m-pp-radio', role: 'radio', 'aria-label': label }, dot, h('span', null, label));
+    it.addEventListener('click', () => { choose(i); refresh(); });
+    box.append(it); return { it, dot };
+  });
+  const refresh = () => items.forEach(({ it, dot }, i) => { const on = i === current(); dot.classList.toggle('on', on); it.classList.toggle('on', on); it.setAttribute('aria-checked', String(on)); });
+  refresh();
+  return box;
+}
+/** − slider value + (Samsung pen panel size / opacity rows). */
+function stepRow(label, bar, num, step = 1) {
+  const nudge = d => { bar.value = Math.max(+bar.min, Math.min(+bar.max, +bar.value + d)); bar.dispatchEvent(new Event('input', { bubbles: true })); };
+  const minus = h('button', { class: 'm-pp-step', type: 'button', 'aria-label': label + ' 줄이기', title: label + ' 줄이기' }, mkIcon('ic_minus', 18, 'currentColor'));
+  const plus = h('button', { class: 'm-pp-step', type: 'button', 'aria-label': label + ' 늘리기', title: label + ' 늘리기' }, mkIcon('ic_plus', 18, 'currentColor'));
+  minus.addEventListener('click', () => nudge(-step)); plus.addEventListener('click', () => nudge(step));
+  return h('div', { class: 'm-pp-row' }, h('div', { class: 'm-pp-lbl' }, label), minus, bar, plus, num);
 }
 
 /**
@@ -321,7 +355,7 @@ const methods = {
     window.addEventListener('keydown', e => this.onKeyDown(e));
     window.addEventListener('focus', () => this.onResume());
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') this.onResume(); });
-    window.addEventListener('resize', () => { try { this.layoutStudyPanel(); } catch (err) { /* part 2 */ } try { this.reclampFloaters(); } catch (err) { /* not built yet */ } });
+    window.addEventListener('resize', () => { try { if (this.bottomBar && this._barPlaced && this.effectiveBarPlace() !== this._barPlaced) this.applyBarMode(); } catch (err) { /* not built yet */ } try { this.layoutStudyPanel(); } catch (err) { /* part 2 */ } try { this.reclampFloaters(); } catch (err) { /* not built yet */ } });
     document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && this.fullscreen && !host.native) this.toggleFullscreen(); });
     const hasFiles = e => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
     window.addEventListener('dragover', e => { if (hasFiles(e) && !e.defaultPrevented && this._droppableDocs(e.dataTransfer)) e.preventDefault(); });
@@ -440,19 +474,28 @@ const methods = {
     const content = h('div', { class: 'm-content' });
     root.append(content);
 
-    // ---- header (52)
+    // ---- top bar (48), Samsung Notes for Windows layout: "<" back to the library + title, then labelled actions and ⋮
     this.header = h('div', { class: 'm-header', dataset: { tag: 'header' } });
-    const libraryButton = h('button', { class: 'm-libbtn', type: 'button', 'aria-label': '문서함', title: '문서함' });
-    libraryButton.append(new FolderIconDrawable(LibraryRepository.FOLDER_COLORS[1], 30).el());
+    const libraryButton = h('button', { class: 'm-libbtn', type: 'button', 'aria-label': '문서함', title: '문서함으로 돌아가기', dataset: { tag: 'back_to_library' } }, mkIcon('ic_back', 22, 'currentColor'));
     libraryButton.addEventListener('click', () => this.showLibrary());
-    this.titleView = h('div', { class: 'm-title', dataset: { tag: 'document_title' }, role: 'button' });
+    this.titleView = h('div', { class: 'm-title', dataset: { tag: 'document_title' }, role: 'button', title: '이름 변경' });
     this.titleView.addEventListener('click', () => { if (this.activeSession != null) this.beginTitleEdit(); else this.showLibrary(); });
-    this.header.append(libraryButton, this.titleView, h('div', { class: 'm-spacer' }),
-      this.icon('ic_sidebar', '페이지 목록', 0xFF007AFF, () => this.toggleSidebar()),
-      this.icon('ic_search', '문서·필기 검색', 0xFF30B0C7, () => this.searchDocument()),
-      this.splitButton = this.icon('ic_dual', '화면 나누기 · 문서 두 개를 나란히', 0xFF5856D6, () => this.toggleSplit()),
-      this.icon('ic_fullscreen', '전체 화면', 0xFFAF52DE, () => this.toggleFullscreen()),
-      this.icon('ic_more_vert', '도구', NAVY, v => this.showMainMenu(v, false)));
+    const hb = (name, label, click, tag, extra = '') => {
+      const b = h('button', { class: 'm-hbtn ' + extra, type: 'button', 'aria-label': label, title: label, dataset: { tag } }, mkIcon(name, 18, 'currentColor'), h('span', { class: 'm-hlabel' }, label));
+      b.addEventListener('click', () => click(b)); return b;
+    };
+    this.headerActions = h('div', { class: 'm-hactions', dataset: { tag: 'header_actions' } },
+      this.fullscreenButton = hb('ic_fullscreen', '전체 화면', () => this.toggleFullscreen(), 'h_fullscreen'),
+      this.readButton = hb('ic_reading_mode', '읽기 모드', () => this.toggleReadMode(), 'h_read'),
+      hb('ic_page_manage', '페이지 관리', v => this.showPageManageMenu(v), 'h_pages'),
+      hb('ic_note_style', '노트 스타일', v => this.showViewMenu(v), 'h_style'),
+      this.insertButton = hb('ic_insert', '삽입', v => this.showInsertMenu(v), 'h_insert'),
+      hb('ic_share', '공유', v => this.showShareMenu(v), 'h_share', 'opt'),
+      hb('ic_save_file', '파일로 저장', v => this.showSaveMenu(v), 'h_save', 'opt'),
+      hb('ic_print', '인쇄', () => { if (this.renderer) this.callUi2('printDocument'); else toast('문서를 먼저 여세요'); }, 'h_print', 'opt'),
+      hb('ic_search', '검색', () => this.searchDocument(), 'h_search'));
+    this.header.append(libraryButton, this.titleView, h('div', { class: 'm-spacer' }), this.headerActions,
+      this.icon('ic_more_vert', '더 보기', NAVY, v => this.showMainMenu(v, false), 'm-ib m-hmore'));
     content.append(this.header);
 
     // ---- tab strip (40)
@@ -505,43 +548,54 @@ const methods = {
     content.append(this.studySplit);
     this.layoutStudyPanel();
 
-    // ---- bottom bar (54)
-    this.bottomBar = h('div', { class: 'm-bottom', dataset: { tag: 'reading_toolbar' } });
+    // ---- tool strip: Samsung Notes keeps the writing tools in a vertical strip on the right edge (its place can still be changed:
+    //      right / left / floating / bottom, see showBarLayoutMenu). Grip ⋮⋮ = place menu, chevron = fold the strip.
+    this.bottomBar = h('div', { class: 'm-bottom m-toolstrip', dataset: { tag: 'reading_toolbar' } });
     const readBar = this.readBar = h('div', { class: 'm-bar', dataset: { tag: 'read_bar' } });
     const writeBar = this.writeBar = h('div', { class: 'm-strip', dataset: { tag: 'writing_toolbar' } });
-    this.pageLabel = h('div', { class: 'm-pagelabel', role: 'button', 'aria-label': '페이지 번호 · 눌러 이동', title: '페이지 번호 · 눌러 이동', dataset: { tag: 'page_indicator' } });
+    this.pageLabel = h('div', { class: 'm-pagelabel', role: 'button', 'aria-label': '페이지 이동', title: '페이지 이동', dataset: { tag: 'page_indicator' } });
     this.pageLabel.addEventListener('click', () => { if (this.renderer == null) this.showAddDocumentMenu(); else this.showPageJumpMenu(this.pageLabel); });
-    this.pageLabel.title = '페이지 이동'; this.pageLabel.setAttribute('aria-label', '페이지 이동');
-    readBar.append(this.pageLabel);
-    this.barIcon(readBar, 'ic_eye', '보기 방법', 0xFF30B0C7, v => this.showViewMenu(v));
-    this.readButton = this.barIcon(readBar, 'ic_book', '읽기 모드', 0xFF007AFF, () => this.setWriteMode(false));
-    this.inkButton = this.barIcon(readBar, 'ic_ink', '필기 모드', 0xFF5856D6, () => this.inkModeTap());
-    this.eraserBarButton = this.barIcon(readBar, 'ic_eraser', '지우개', 0xFFFF6B8A, v => this.eraserBarTap(v));
-    this.textButton = this.barIcon(readBar, 'ic_text', '타이핑', 0xFF34C759, () => this.toggleTyping());
-    this.bookmarkButton = this.barIcon(readBar, 'ic_star_outline', '즐겨찾기', 0xFFF5A623, () => this.toggleBookmark());
-    this.lassoButton = this.barIcon(readBar, 'ic_lasso', '올가미 선택', 0xFFAF52DE, () => this.toggleLasso());
-    this.insertButton = this.barIcon(readBar, 'ic_insert', '삽입 · 메모 하이라이트 사진 스티커 도형 표', 0xFFFF2D55, v => this.showInsertMenu(v));
-    this.undoButton = this.barIcon(readBar, 'ic_undo', '실행 취소', 0xFF8E8E93, () => this.undoInk());
-    this.redoButton = this.barIcon(readBar, 'ic_redo', '다시 실행', 0xFF8E8E93, () => this.redoInk());
-    // pen tools float on the page as their own strip (can be kept visible or hidden while writing)
-    this.penButton = this.barIcon(writeBar, 'ic_ink', '펜', 0xFF1C1C1E, v => this.penTap(v));
-    this.hlButton = this.barIcon(writeBar, 'ic_highlight', '형광펜', 0xFFF5C400, v => this.highlightTap(v));
-    this.tapeButton = this.barIcon(writeBar, 'ic_tape', '테이프 · 글자를 가리는 마스킹 테이프', 0xFF8E8E93, v => this.tapeTap(v));
-    this.eraserButton = this.barIcon(writeBar, 'ic_eraser', '지우개 · 한 번 더 누르면 지울 범위', 0xFFFF6B8A, v => this.eraserTap(v));
+    const sep = () => readBar.append(h('div', { class: 'm-tbsep', 'aria-hidden': 'true' }));
+    this.stripFold = this.barIcon(readBar, 'ic_collapse', '도구 모음 접기', NAVY, () => this.toggleStripFolded());
+    this.stripFold.classList.add('m-stripfold');
+    this.textButton = this.barIcon(readBar, 'ic_keyboard', '키보드 · 타이핑', NAVY, () => this.toggleTyping());
+    this.penButton = this.barIcon(readBar, 'tool_pen', '펜', 0xFFE8405A, v => this.penTap(v));
+    this.hlButton = this.barIcon(readBar, 'tool_highlighter', '형광펜', 0xFFF5D85C, v => this.highlightTap(v));
+    this.eraserButton = this.barIcon(readBar, 'tool_eraser', '지우개', 0xFF9A9A9F, v => this.eraserBarTap(v));
+    this.lassoButton = this.barIcon(readBar, 'ic_lasso', '올가미 선택', NAVY, () => this.toggleLasso());
+    sep();
+    this.undoButton = this.barIcon(readBar, 'ic_undo', '실행 취소', NAVY, () => this.undoInk());
+    this.redoButton = this.barIcon(readBar, 'ic_redo', '다시 실행', NAVY, () => this.redoInk());
+    sep();
+    this.tapeButton = this.barIcon(readBar, 'tool_tape', '테이프 · 글자를 가리는 마스킹 테이프', 0xFFFFC94D, v => this.tapeTap(v));
+    this.markButton = this.barIcon(readBar, 'ic_text_mark', '하이라이트 · 문장을 따라 직선으로', NAVY, v => { if (this.highlightMode) this.showMarkHighlightMenu(v); else this.toggleHighlight(); });
+    this.memoButton = this.barIcon(readBar, 'ic_memo', '메모', NAVY, () => this.toggleMemoMode());
+    this.barIcon(readBar, 'ic_shapes', '도형', NAVY, () => { if (this.renderer) this.showShapeDialog(null); else toast('문서를 먼저 여세요'); });
+    this.barIcon(readBar, 'ic_select_text', '텍스트 선택', NAVY, () => { if (this.renderer) this.startTextSelection(); else toast('문서를 먼저 여세요'); });
+    this.bookmarkButton = this.barIcon(readBar, 'ic_star_outline', '즐겨찾기', NAVY, () => this.toggleBookmark());
+    this.splitButton = this.barIcon(readBar, 'ic_dual', '화면 나누기 · 문서 두 개를 나란히', NAVY, () => this.toggleSplit());
+    this.inkButton = null; this.eraserBarButton = null;
+    // Samsung's "플로팅 툴바": the same pen tools in a small bar that floats on the page (shown from the pen panel)
+    this.fPen = this.barIcon(writeBar, 'tool_pen', '펜', 0xFFE8405A, v => this.penTap(v));
+    this.fHl = this.barIcon(writeBar, 'tool_highlighter', '형광펜', 0xFFF5D85C, v => this.highlightTap(v));
+    this.fTape = this.barIcon(writeBar, 'tool_tape', '테이프', 0xFFFFC94D, v => this.tapeTap(v));
+    this.fEraser = this.barIcon(writeBar, 'tool_eraser', '지우개', 0xFF9A9A9F, v => this.eraserTap(v));
     writeBar.append(h('div', { class: 'm-tbsep', 'aria-hidden': 'true' }));
-    this.barIcon(writeBar, 'ic_undo', '실행 취소', 0xFF8E8E93, () => this.undoInk());
-    this.barIcon(writeBar, 'ic_redo', '다시 실행', 0xFF8E8E93, () => this.redoInk());
-    // the strip floats: its dotted grip drags it anywhere; the width / colour rows (shared by pen and highlighter) hang under it
+    this.barIcon(writeBar, 'ic_undo', '실행 취소', NAVY, () => this.undoInk());
+    this.barIcon(writeBar, 'ic_redo', '다시 실행', NAVY, () => this.redoInk());
+    this.barIcon(writeBar, 'ic_close', '플로팅 툴바 숨기기', 0xFF848487, () => this.setWriteStripShown(false));
+    // the floating bar: its dotted grip drags it anywhere
     this.stripBox = h('div', { class: 'm-stripbox', dataset: { tag: 'write_strip_box' } });
     this.stripGrip = this.makeGrip(this.stripBox, 'strip'); this.stripGrip.style.display = ''; writeBar.prepend(this.stripGrip);
     this.inkOptions = h('div', { class: 'm-inkopts', dataset: { tag: 'ink_options' }, style: { display: 'none' } });
     this.stripBox.append(writeBar, this.inkOptions);
-    viewport.append(h('div', { class: 'm-stripwrap', style: { display: 'none' } }, this.stripBox));
+    viewport.append(h('div', { class: 'm-stripwrap', style: { display: 'none' } }, this.stripBox), this.pageLabel);
     this.barGrip = this.makeGrip(this.bottomBar, 'bar');
-    this.bottomBar.append(this.barGrip, readBar);
-    this.barIcon(this.bottomBar, 'ic_float', '하단 메뉴 위치·방향', 0xFF8E8E93, v => this.showBarLayoutMenu(v)).classList.add('m-barlayout');
-    content.append(this.bottomBar); this.contentCol = content;
-    if (this.floatBar()) this.applyBarMode();
+    const place = this.icon('ic_grip_h', '도구 모음 위치·방향', 0xFF848487, v => this.showBarLayoutMenu(v), 'm-tb m-barlayout');
+    this.bottomBar.append(place, this.barGrip, readBar);
+    this.contentCol = content;
+    this.applyBarMode();
+    this.applyStripFolded();
 
     // ---- fullscreen dock + handle (overlays of root)
     const dock = this.fullscreenDock = h('div', { class: 'm-dock', dataset: { tag: 'fullscreen_toolbar' } });
@@ -612,7 +666,7 @@ const methods = {
     const open = h('button', { class: 'm-welcome-btn', type: 'button', 'aria-label': '문서 열기' }, mkIcon('ic_folder_open', 22, 'currentColor'), h('span', null, '문서 열기'));
     open.addEventListener('click', () => this.showAddDocumentMenu());
     this.welcomeCard = h('div', { class: 'm-welcome', dataset: { tag: 'welcome' } },
-      h('div', { class: 'm-welcome-card' }, h('div', { class: 'm-welcome-name' }, 'Everynote'),
+      h('div', { class: 'm-welcome-card' }, h('img', { class: 'm-welcome-logo', src: 'assets/everynote-icon.svg', alt: '' }), h('div', { class: 'm-welcome-name' }, 'Everynote'),
         h('div', { class: 'm-welcome-sub' }, 'PDF·Office·한글 문서를 열어 필기하고, 새 노트를 만들어 보세요.'), open));
     viewport.append(this.zoomPill, this.addPageButton, this.welcomeCard);
   },
@@ -677,11 +731,11 @@ const methods = {
     if (on) { if (this.inkMode === 0 && !this.highlightMode && !this.memoMode && !this.outlineMode && !this.pageView.isLassoMode()) this.setInkMode(1); else this.updateToolStates(); }
     else if (this.renderer != null) this.setInkMode(0); else this.updateToolStates();
   },
-  writeStripShown() { return this.recentPrefs.getBoolean('write_strip', true); },
+  writeStripShown() { return this.recentPrefs.getBoolean('write_strip', false); },
   /** The pen / highlighter / eraser strip floats over the page while writing; keeping it or hiding it is remembered. */
   setWriteStripShown(on) {
     this.recentPrefs.putBoolean('write_strip', on); this.updateWriteStrip();
-    toast(on ? '필기 도구 줄을 계속 보여줍니다' : '필기 도구 줄을 숨겼습니다. 필기 모드 단추를 눌러 다시 볼 수 있습니다');
+    toast(on ? '플로팅 툴바를 표시합니다 · ⋮⋮를 끌어 옮기세요' : '플로팅 툴바를 숨겼습니다. 펜 설정의 ‘플로팅 툴바 표시’로 다시 볼 수 있습니다');
   },
   updateWriteStrip() {
     const show = !!this.writeMode && this.writeStripShown();
@@ -692,7 +746,7 @@ const methods = {
   },
   /** Writing-mode button: starts writing; pressed again while writing it shows / hides the tool strip. */
   inkModeTap() {
-    if (!this.writeMode) { this.setWriteMode(true); if (!this.writeStripShown()) toast('필기 도구 줄이 숨겨져 있습니다. 필기 모드 단추를 한 번 더 누르면 나타납니다'); return; }
+    if (!this.writeMode) { this.setWriteMode(true); return; }
     this.setWriteStripShown(!this.writeStripShown());
   },
   /** Page button: go to a page, previous / next / first / last page, document outline. */
@@ -751,14 +805,21 @@ const methods = {
     };
     bar.addEventListener('input', () => set(+bar.value));
     refresh();
-    const modes = segmentedView(['획 지우기', '부분 지우기'], () => this.eraserMode(), i => {
+    const modes = radioView(['획 지우기', '부분 지우기'], () => this.eraserMode(), i => {
       this.recentPrefs.putInt('eraser_mode', i); this.applyEraserRadius(); toast(i === 1 ? '부분 지우기 · 지우개가 닿은 부분만 지웁니다' : '획 지우기 · 닿은 획을 통째로 지웁니다');
     });
     modes.dataset.tag = 'eraser_mode';
-    const clear = h('button', { class: 'm-eraser-clear', type: 'button', dataset: { tag: 'eraser_clear_page' } }, '이 페이지 모두 지우기');
+    const clear = h('button', { class: 'm-pp-pill', type: 'button', dataset: { tag: 'eraser_clear_page' } }, '이 페이지 손글씨 모두 지우기');
     clear.addEventListener('click', () => { AnchoredMenu.dismiss(); this.confirmClearPage(); });
-    box.append(h('div', { class: 'm-eraser-title' }, label), modes, row, h('div', { class: 'm-opacity' }, bar), clear);
+    box.classList.add('m-penpanel');
+    box.append(h('div', { class: 'm-pp-title' }, '지우개'), modes, h('div', { class: 'm-pp-sec' }, label), row, h('div', { class: 'm-opacity' }, bar), clear);
     AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
+  },
+  /** Footer pill of the tool panels: shows / hides the floating toolbar (Samsung "플로팅 툴바 표시"). */
+  floatingToolbarPill() {
+    const pill = h('button', { class: 'm-pp-pill', type: 'button', dataset: { tag: 'floating_toolbar' } }, this.writeStripShown() ? '플로팅 툴바 숨기기' : '플로팅 툴바 표시');
+    pill.addEventListener('click', () => { AnchoredMenu.dismiss(); if (!this.writeMode) this.setWriteMode(true); this.setWriteStripShown(!this.writeStripShown()); });
+    return pill;
   },
   /** Eraser menu: wipes all ink and erasable highlights of the current page of the active pane after a confirmation (undoable until the next ink edit). */
   confirmClearPage() {
@@ -845,12 +906,12 @@ const methods = {
     const wBar = h('input', { type: 'range', min: 1, max: 100, step: 1, class: 'm-opbar', 'aria-label': '크기', title: '크기', dataset: { tag: 'tape_width' } });
     wBar.value = valueOf(this.inkWidth); wNum.textContent = wBar.value;
     wBar.addEventListener('input', () => { this.inkWidth = fracOf(+wBar.value); wNum.textContent = wBar.value; apply(); });
-    box.append(h('div', { class: 'm-pp-row' }, h('div', { class: 'm-pp-lbl' }, '크기'), wBar, wNum));
+    box.append(stepRow('크기', wBar, wNum));
     box.append(h('div', { class: 'm-pp-sec' }, '색상'));
     const row = swatchesView(TAPE_COLORS, () => this.inkColor | 0, c => { this.inkColor = (c | 0xFF000000) | 0; apply(); }, 28, 1, TAPE_COLORS);
     row.dataset.tag = 'tape_colors'; box.append(row);
     box.append(h('div', { class: 'm-pp-sec' }, '모양 · 직선 / 자유형'), segmentedView(['직선', '자유형'], () => this.inkMode === 3 ? 0 : 1, i => { this.tapeStraight = i === 0; this.recentPrefs.putBoolean('tape_straight', this.tapeStraight); this.setInkMode(i === 0 ? 3 : 1, 'tape'); preview.draw(); }),
-      h('div', { class: 'm-pp-sec' }, '그린 테이프를 탭하면 투명해져 아래 글자가 보이고, 다시 탭하면 가려집니다.'));
+      h('div', { class: 'm-pp-hint' }, '그린 테이프를 탭하면 투명해져 아래 글자가 보이고, 다시 탭하면 가려집니다.'), this.floatingToolbarPill());
     preview.draw();
     AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
   },
@@ -906,7 +967,7 @@ const methods = {
     const wBar = h('input', { type: 'range', min: 1, max: 100, step: 1, class: 'm-opbar', 'aria-label': '굵기', title: '굵기', dataset: { tag: 'pen_width' } });
     const syncW = () => { const v = valueOf(this.inkWidth); wBar.value = v; wNum.textContent = v; };
     wBar.addEventListener('input', () => { this.inkWidth = fracOf(+wBar.value); wNum.textContent = wBar.value; applyPen(); });
-    box.append(h('div', { class: 'm-pp-row' }, h('div', { class: 'm-pp-lbl' }, '굵기'), wBar, wNum));
+    box.append(stepRow('굵기', wBar, wNum));
 
     // opacity slider (10-100 %)
     const oNum = h('span', { class: 'm-pp-val' });
@@ -917,16 +978,17 @@ const methods = {
       const a = Math.max(hl ? 26 : 1, Math.round(+oBar.value * 255 / 100)); oNum.textContent = oBar.value + '%';
       this.inkColor = ((a << 24) | (this.inkColor & 0xFFFFFF)) | 0; applyPen();
     });
-    box.append(h('div', { class: 'm-pp-row' }, h('div', { class: 'm-pp-lbl' }, '투명도'), oBar, oNum));
+    box.append(stepRow('투명도', oBar, oNum, 5));
 
     // colours
     box.append(h('div', { class: 'm-pp-sec' }, '색상'));
     if (!hl) {
-      const known = INK_COLORS.concat(INK_COLORS2);
-      const pick = c => { this.inkColor = ((this.inkColor & 0xFF000000) | (c & 0xFFFFFF)) | 0; applyPen(); r1.refresh(); r2.refresh(); };
+      const known = INK_COLORS.concat(INK_COLORS2, INK_COLORS3);
+      const pick = c => { this.inkColor = ((this.inkColor & 0xFF000000) | (c & 0xFFFFFF)) | 0; applyPen(); r1.refresh(); r2.refresh(); r3.refresh(); };
       const r1 = swatchesView(INK_COLORS, () => this.inkColor | 0xFF000000, pick, 24, 0, known);
-      const r2 = swatchesView(INK_COLORS2, () => this.inkColor | 0xFF000000, pick, 24, 1, known);
-      r1.dataset.tag = 'pen_colors'; box.append(r1, r2);
+      const r2 = swatchesView(INK_COLORS2, () => this.inkColor | 0xFF000000, pick, 24, 0, known);
+      const r3 = swatchesView(INK_COLORS3, () => this.inkColor | 0xFF000000, pick, 24, 1, known);
+      r1.dataset.tag = 'pen_colors'; box.append(r1, r2, r3);
     } else {
       const known = HIGHLIGHT_COLORS;
       const pick = c => {
@@ -939,14 +1001,15 @@ const methods = {
 
     // options
     if (!hl) {
-      const opts = h('div', { class: 'm-iseg m-opts', dataset: { tag: 'pen_options' } });
+      const opts = h('div', { class: 'm-opts-list', dataset: { tag: 'pen_options' } });
       opts.append(
-        iconToggleView('ic_line', '직선 · 시작점에서 끝점까지', () => this.inkMode === 3, on => { this.setInkMode(on ? 3 : 1); }, 'pen_line'),
-        iconToggleView('ic_touch', '손가락 필기', () => this.fingerInk, () => { this.toggleFingerInk(); }, 'pen_finger'));
-      box.append(h('div', { class: 'm-pp-sec' }, '옵션 · 직선 / 손가락 필기'), opts);
+        switchRow('직선으로 그리기', () => this.inkMode === 3, on => { this.setInkMode(on ? 3 : 1); preview.draw(); }, 'pen_line'),
+        switchRow('손가락 필기', () => this.fingerInk, () => { this.toggleFingerInk(); }, 'pen_finger'));
+      box.append(h('div', { class: 'm-pp-sec' }, '옵션'), opts);
     } else {
       box.append(h('div', { class: 'm-pp-sec' }, '모양 · 직선 / 자유형'), segmentedView(['직선', '자유형'], () => this.inkMode === 3 ? 0 : 1, i => { this.setInkMode(i === 0 ? 3 : 1, true); preview.draw(); }));
     }
+    box.append(this.floatingToolbarPill());
     syncW(); syncO(); preview.draw();
     AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
   },
@@ -990,12 +1053,48 @@ const methods = {
       }).tint('#34C759').selected(this.cropMargins()),
       new Row('검은 문서 배경', 'ic_circle', () => this.toggleDarkPage()).tint('#3A3A3C').selected(this.darkPage()),
       new Row('페이지 넘김 설정', 'ic_swipe', null).tint('#8E8E93').children(this.choiceRows(this.SWIPE_CHOICES, this.swipeMode(), w => this.setSwipeMode(w))),
-      new Row('넘김 효과', 'ic_magic', null).tint('#8E8E93').children(this.choiceRows(this.ANIM_CHOICES, this.pageAnimStyle(), w => this.setPageAnim(w))),
+      new Row('넘김 효과', 'ic_magic', null).tint('#8E8E93').children(this.choiceRows(this.ANIM_CHOICES, this.pageAnimStyle(), w => this.setPageAnim(w)))], null);
+  },
+  /** 읽기 모드 (top bar): reading = pages turn with a drag, nothing is written; pressed again it goes back to the pen. */
+  toggleReadMode() {
+    if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
+    this.setWriteMode(!this.writeMode);
+  },
+  /** 페이지 관리 (top bar): page previews, go to, add / delete pages, outline. */
+  showPageManageMenu(anchor) {
+    if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
+    AnchoredMenu.show(anchor, false, [
+      new Row('페이지 미리보기', 'ic_thumbnails', () => this.toggleSidebar()).selected(this.sidebarVisible && this.panelTab === 1),
+      new Row('페이지로 이동', 'ic_page', () => this.goToPage()),
+      new Row('문서 개요', 'ic_outline', () => this.showOutlineList()),
       Row.divider(),
-      new Row('페이지 추가', 'ic_page_add', () => this.choosePageToInsert(this.currentPage)).tint('#34C759'),
-      new Row('다른 형식으로 페이지 추가', 'ic_page_add', () => this.chooseOtherPageFormat(this.currentPage)).tint('#34C759'),
+      new Row('페이지 추가', 'ic_page_add', () => this.choosePageToInsert(this.currentPage)),
+      new Row('다른 형식으로 페이지 추가', 'ic_page_add', () => this.chooseOtherPageFormat(this.currentPage)),
       new Row('페이지 삭제', 'ic_delete', () => this.confirmDeletePage(this.currentPage)).danger()], null);
   },
+  shareRows() {
+    const run = name => () => this.callUi2(name);
+    return [
+      new Row('PDF로 공유 (주석 포함)', 'ic_pdf', run('exportPdf')),
+      new Row('노트·발췌 내보내기', 'ic_export', run('exportStudy')),
+      new Row('다른 기기와 동기화', 'ic_sync', run('showDeviceSync')),
+      new Row('파일 탐색기에서 보기', 'ic_folder_open', () => { if (this.documentUri) host.reveal(this.documentUri).catch(() => toast('파일 탐색기를 열 수 없습니다')); })];
+  },
+  saveRows() {
+    const run = name => () => this.callUi2(name);
+    return [
+      new Row('PDF 파일', 'ic_pdf', run('exportPdf')),
+      new Row('원본 파일', 'ic_original', run('exportOriginal')),
+      new Row('이 문서 필기 백업 저장', 'ic_backup', run('exportAnnotations')),
+      new Row('이 문서 필기 백업 불러오기', 'ic_import', run('importSidecar')),
+      Row.divider(),
+      new Row('모든 문서 백업', 'ic_backup', run('startLibraryBackup')),
+      new Row('모든 문서 복원', 'ic_import', run('startLibraryRestore'))];
+  },
+  showShareMenu(anchor) { if (this.renderer == null) { toast('문서를 먼저 여세요'); return; } AnchoredMenu.show(anchor, false, this.shareRows(), null); },
+  showSaveMenu(anchor) { if (this.renderer == null) { toast('문서를 먼저 여세요'); return; } AnchoredMenu.show(anchor, false, this.saveRows(), null); },
+  /** Top-bar buttons hidden by a narrow window move into ⋮. */
+  headerHidden(tag) { const b = this.headerActions && this.headerActions.querySelector(`[data-tag="${tag}"]`); return !b || b.offsetParent === null; },
   SWIPE_CHOICES: ['화살표만 · 드래그 넘김 끄기', '수평 · 좌우로 넘기기', '수직 · 위아래로 넘기기'],
   ANIM_CHOICES: ['책장 넘김 (종이처럼 접히며 넘어감)', '슬라이드 (밀리며 나타남)', '효과 없음 (바로 전환)'],
   choiceRows(labels, checked, pick) { return labels.map((l, i) => new Row(l, null, () => pick(i)).selected(i === checked)); },
@@ -1025,6 +1124,9 @@ const methods = {
     if (this.activeSession != null) rows.push(new Row('이름 변경', 'ic_rename', () => this.renameDocument(this.activeSession)).tint('#8E8E93'));
     if (doc) {
       rows.push(Row.divider());
+      if (this.headerHidden('h_share')) rows.push(new Row('공유', 'ic_share', null).children(this.shareRows()));
+      if (this.headerHidden('h_save')) rows.push(new Row('파일로 저장', 'ic_save_file', null).children(this.saveRows()));
+      if (this.headerHidden('h_pages')) rows.push(new Row('페이지 관리', 'ic_page_manage', () => later(() => this.showPageManageMenu(anchor))));
       rows.push(new Row('메모·하이라이트', 'ic_highlight', () => this.showMarkList()).tint('#FF9500'));
       rows.push(new Row('책갈피 목록', 'ic_star', () => this.showBookmarks()).tint('#F5A623'));
       rows.push(new Row('번역 포스트잇', 'ic_translate', () => this.showTranslations()).tint('#AF52DE'));
@@ -1043,6 +1145,7 @@ const methods = {
       toast(!awake ? '읽는 동안 화면이 꺼지지 않습니다' : '화면 자동 꺼짐을 따릅니다');
     }).tint('#8E8E93').selected(awake));
     rows.push(new Row('전체 화면 메뉴 계속 표시', 'ic_float', () => this.toggleDockPinned()).tint('#8E8E93').selected(this.dockPinned()));
+    rows.push(new Row('도구 모음 위치·방향', 'ic_float', () => later(() => this.showBarLayoutMenu(anchor))).tint('#8E8E93'));
     if (doc) rows.push(new Row('인쇄', 'ic_print', () => this.callUi2('printDocument')).tint('#007AFF'));
     rows.push(Row.divider());
     rows.push(new Row('설정', 'ic_settings', () => this.callUi2('showSettings')).tint('#8E8E93'));
@@ -1243,7 +1346,12 @@ const methods = {
   async openPdf(uri, textOnly = false, requestedPage = -1, activate = true) {
     // keep the empty-state welcome card hidden while a document is loading (it used to flash between the shelf closing and the page appearing)
     this.openingCount = (this.openingCount | 0) + 1; this.updateFloaters();
-    try { return await this.openPdfNow(uri, textOnly, requestedPage, activate); }
+    try {
+      const r = await this.openPdfNow(uri, textOnly, requestedPage, activate);
+      // a document opened from outside the library (open with, drag & drop, a link) comes to the front: the library page closes
+      if (activate && this.libraryDialog && this.libraryDialog.isShowing() && this.activeSession && samePath(this.activeSession.uri, uri)) this.libraryDialog.dismiss();
+      return r;
+    }
     finally { this.openingCount--; this.updateFloaters(); }
   },
   async openPdfNow(uri, textOnly, requestedPage, activate) {
@@ -1373,6 +1481,7 @@ const methods = {
     const add = h('div', { class: 'm-tabadd', role: 'button', 'aria-label': '문서 추가', title: '문서 추가' }, mkIcon('ic_plus', 16, argb(ACCENT)));
     add.addEventListener('click', () => this.showAddDocumentMenu());
     this.tabRow.append(add);
+    this.tabStrip.classList.toggle('single', this.sessions.length <= 1 && !(this.panes && this.isSplit()));   // Samsung Notes has no tabs: the strip appears only with two or more documents
     if (activeTab) requestAnimationFrame(() => this.tabStrip.scrollTo({ left: Math.max(0, activeTab.offsetLeft - 8), behavior: 'smooth' }));
   },
 
@@ -1537,16 +1646,20 @@ const methods = {
     toast(this.outlineMode ? '개요로 저장할 정확한 위치를 탭하세요' : '개요 지점 선택을 종료했습니다');
   },
   /** paintTool(button, on, background, foreground): active tool = tinted pill. */
+  /** Samsung style: the active tool sits on a round grey disc; coloured tools keep their colour, header buttons get the .on look. */
   paintTool(button, on, background, foreground) {
     if (!button) return;
+    if (button.classList.contains('m-hbtn')) { button.classList.toggle('on', !!on); button.setAttribute('aria-pressed', String(!!on)); return; }
     const base = this.baseTint.has(button) ? this.baseTint.get(button) : NAVY;
-    button.style.color = argb(on ? foreground : base);
-    button.style.background = on ? argb(background) : '';
+    button.style.color = argb(base);
+    button.style.background = '';
+    button.classList.toggle('on', !!on); button.setAttribute('aria-pressed', String(!!on));
   },
   updateToolStates() {
     this.commitInlineText(); this.syncOtherTools(); this.updateInkButton();
     const typing = this.typingActive(), memo = this.memoMode && !typing;
-    this.paintTool(this.insertButton, memo || this.highlightMode, ACTIVE_BG, ACTIVE_FG);
+    this.paintTool(this.memoButton, memo, ACTIVE_BG, ACTIVE_FG);
+    this.paintTool(this.markButton, this.highlightMode, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.readButton, !this.writeMode, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.inkButton, !!this.writeMode, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.textButton, typing, ACTIVE_BG, ACTIVE_FG);
@@ -1583,16 +1696,14 @@ const methods = {
     this.paintTool(this.tapeButton, tape, this.soft(tapeColor), tapeColor);
     this.paintTool(this.eraserButton, eraser, 0xFFFFE3E8, 0xFFFF3B30);
     this.paintTool(this.eraserBarButton, eraser && !!this.writeMode, 0xFFFFE3E8, 0xFFFF3B30);
-    this.updateInkOptions();
-    if (this.penButton) {
-      const g = this.penButton.querySelector('.ico'), name = PEN_ICONS[this.penView().pen] || 'ic_ink';
-      if (g && g.dataset.icon !== name) { setIcon(g, name); g.dataset.icon = name; }
-      this.penButton.setAttribute('aria-label', '펜'); this.penButton.title = '펜 · ' + (AnnotationPainter.PEN_NAMES[this.penView().pen] || '');
+    for (const [b, src] of [[this.fPen, this.penButton], [this.fHl, this.hlButton], [this.fTape, this.tapeButton], [this.fEraser, this.eraserButton]]) {
+      if (!b || !src) continue; this.baseTint.set(b, this.baseTint.get(src)); this.paintTool(b, src.classList.contains('on'));
     }
+    this.updateInkOptions();
+    if (this.penButton) { this.penButton.setAttribute('aria-label', '펜'); this.penButton.title = '펜 · ' + (AnnotationPainter.PEN_NAMES[this.penView().pen] || ''); }
     if (this.hlButton) this.hlButton.title = '형광펜';
     if (this.tapeButton) this.tapeButton.title = '테이프';
     if (this.eraserButton) this.eraserButton.title = '지우개';
-    if (this.inkButton) this.inkButton.setAttribute('aria-label', '필기 모드');
   },
   toggleFingerInk() {
     this.fingerInk = !this.fingerInk; this.recentPrefs.putBoolean('finger_ink', this.fingerInk);
@@ -1700,18 +1811,20 @@ const methods = {
   },
   // ---- floating menus: the bottom bar as a draggable pill, the fullscreen toolbar that stays open
   /** 'bottom' | 'float' | 'left' | 'right' (migrates the old float_bar flag). */
-  barPlace() { const p = this.recentPrefs.getString('bar_place', null); return p || (this.recentPrefs.getBoolean('float_bar', false) ? 'float' : 'bottom'); },
-  barVertical() { const p = this.barPlace(); return p === 'left' || p === 'right' || (p === 'float' && this.recentPrefs.getBoolean('bar_vertical', false)); },
-  floatBar() { return this.barPlace() !== 'bottom'; },
+  barPlace() { const p = this.recentPrefs.getString('bar_place', null); return p || (this.recentPrefs.getBoolean('float_bar', false) ? 'float' : 'right'); },
+  /** The place actually used: a side rail needs room, so a narrow window (phone-like) gets the bar at the bottom. */
+  effectiveBarPlace() { const p = this.barPlace(); return (p === 'left' || p === 'right') && window.innerWidth < 600 ? 'bottom' : p; },
+  barVertical() { const p = this.effectiveBarPlace(); return p === 'left' || p === 'right' || (p === 'float' && this.recentPrefs.getBoolean('bar_vertical', false)); },
+  floatBar() { return this.barPlace() === 'float'; },
   setBarPlace(place) { this.recentPrefs.putString('bar_place', place); this.applyBarMode(); },
   setBarOrientation(vertical) { this.recentPrefs.putBoolean('bar_vertical', vertical); this.applyBarMode(); },
   showBarLayoutMenu(anchor) {
     const p = this.barPlace();
     const rows = [
-      new Row('아래에 고정', 'ic_float', () => { this.setBarPlace('bottom'); toast('하단 메뉴를 아래에 고정했습니다'); }).tint('#007AFF').selected(p === 'bottom'),
-      new Row('화면 위에 띄우기 (끌어서 이동)', 'ic_float', () => { this.setBarPlace('float'); toast('하단 메뉴가 화면 위에 떠 있습니다 (⋮⋮를 끌어 옮기기)'); }).tint('#007AFF').selected(p === 'float'),
+      new Row('오른쪽 옆에 고정 (세로)', 'ic_float', () => this.setBarPlace('right')).tint('#007AFF').selected(p === 'right'),
       new Row('왼쪽 옆에 고정 (세로)', 'ic_float', () => this.setBarPlace('left')).tint('#007AFF').selected(p === 'left'),
-      new Row('오른쪽 옆에 고정 (세로)', 'ic_float', () => this.setBarPlace('right')).tint('#007AFF').selected(p === 'right')];
+      new Row('아래에 고정', 'ic_float', () => { this.setBarPlace('bottom'); toast('도구 모음을 아래에 고정했습니다'); }).tint('#007AFF').selected(p === 'bottom'),
+      new Row('화면 위에 띄우기 (끌어서 이동)', 'ic_float', () => { this.setBarPlace('float'); toast('도구 모음이 화면 위에 떠 있습니다 (⋮⋮를 끌어 옮기기)'); }).tint('#007AFF').selected(p === 'float')];
     if (p === 'float') {
       const v = this.barVertical();
       rows.push(Row.divider());
@@ -1719,11 +1832,12 @@ const methods = {
       rows.push(new Row('세로 방향', 'ic_float', () => this.setBarOrientation(true)).tint('#8E8E93').selected(v));
     }
     rows.push(Row.divider());
-    rows.push(new Row('필기 도구 줄 항상 보이기', 'ic_ink', () => this.setWriteStripShown(!this.writeStripShown())).tint('#5856D6').selected(this.writeStripShown()));
+    rows.push(new Row('플로팅 툴바 표시', 'ic_ink', () => this.setWriteStripShown(!this.writeStripShown())).tint('#5856D6').selected(this.writeStripShown()));
     AnchoredMenu.show(anchor, true, rows, null);
   },
   dockPinned() { return this.recentPrefs.getBoolean('dock_pinned', false); },
-  toggleFloatBar() { this.setBarPlace(this.floatBar() ? 'bottom' : 'float'); },
+  /** Floating toolbar on / off; off docks it back at the right edge (the default place). */
+  toggleFloatBar() { this.setBarPlace(this.floatBar() ? 'right' : 'float'); },
   toggleDockPinned() {
     const on = !this.dockPinned(); this.recentPrefs.putBoolean('dock_pinned', on);
     if (this.fullscreen) {
@@ -1733,18 +1847,30 @@ const methods = {
     toast(on ? '전체 화면에서도 도구 모음이 계속 떠 있습니다 (왼쪽 ⋮⋮를 끌어 옮기기)' : '전체 화면 도구 모음이 자동으로 숨습니다');
   },
   applyBarMode() {
-    const place = this.barPlace(), f = place !== 'bottom', vert = this.barVertical(), b = this.bottomBar;
+    const place = this.effectiveBarPlace(), vert = this.barVertical(), b = this.bottomBar;
     b.style.translate = '';
     b.classList.toggle('float', place === 'float');
     b.classList.toggle('vert', vert);
     b.classList.toggle('rail-left', place === 'left'); b.classList.toggle('rail-right', place === 'right');
     this.barGrip.style.display = place === 'float' ? '' : 'none';
-    if (f) { this.root.append(b); if (place === 'float') this.applyFloatPos(b, vert ? 'barv' : 'bar'); } else this.contentCol.append(b);
+    this._barPlaced = place;
+    // side rails sit in the row under the top bar, beside the page (and the study panel); 'float' hangs over everything; 'bottom' closes the column
+    if (place === 'right') this.studySplit.append(b);
+    else if (place === 'left') this.studySplit.prepend(b);
+    else if (place === 'float') { this.root.append(b); this.applyFloatPos(b, vert ? 'barv' : 'bar'); }
+    else this.contentCol.append(b);
     this.railMargin(); this.enforceChrome(); this.reclampFloaters();
   },
-  railMargin() {
-    const p = this.barPlace(), on = !this.fullscreen;
-    this.root.classList.toggle('m-pad-l', on && p === 'left'); this.root.classList.toggle('m-pad-r', on && p === 'right');
+  /** Rails live inside the content column now, so no padding is needed; kept for callers. */
+  railMargin() { this.root.classList.remove('m-pad-l', 'm-pad-r'); },
+  stripFolded() { return this.recentPrefs.getBoolean('strip_folded', false); },
+  toggleStripFolded() { this.recentPrefs.putBoolean('strip_folded', !this.stripFolded()); this.applyStripFolded(); },
+  /** Samsung's chevron at the top of the strip: folds the tools away, leaving the grip and the chevron. */
+  applyStripFolded() {
+    const folded = this.stripFolded();
+    this.bottomBar.classList.toggle('folded', folded);
+    const g = this.stripFold.querySelector('.ico'); if (g) setIcon(g, folded ? 'ic_expand' : 'ic_collapse');
+    const label = folded ? '도구 모음 펼치기' : '도구 모음 접기'; this.stripFold.title = label; this.stripFold.setAttribute('aria-label', label);
   },
   floatPos(key) { try { const v = JSON.parse(this.recentPrefs.getString(key + '_pos', '[0,0]')); return [+v[0] || 0, +v[1] || 0]; } catch (e) { return [0, 0]; } },
   moveFloating(el, dx, dy) {

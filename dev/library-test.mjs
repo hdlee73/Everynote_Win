@@ -29,7 +29,9 @@ let pg = await open();
 await shot(pg, '01-large');
 ok(JSON.stringify(await names(pg)) === JSON.stringify(['Archive', 'English', '수학', 'Annual Report 2025 with a really long name that must wrap onto two lines and then ellipsize', 'Lecture Notes 10', 'Lecture Notes 2', 'Sample', '모눈 노트', '새 노트', '한국어 샘플']) || true, 'names (see below)');
 console.log(await names(pg));
-ok((await pg.textContent('.lib-sub')) === '폴더 3개 · 문서 7개', 'subtitle ' + await pg.textContent('.lib-sub'));
+// Everynote (Samsung Notes style): no count line under the title; the counts sit in the nav pane rows
+ok((await pg.textContent('.lib-sub')) === '', 'no subtitle in the folder view ' + await pg.textContent('.lib-sub'));
+ok((await pg.textContent('[data-tag="drawer_row:모든 노트"] .ct')) !== '' && +(await pg.textContent('[data-tag="drawer_row:폴더"] .ct')) >= 3, 'nav pane counts ' + await pg.textContent('[data-tag="drawer_row:폴더"] .ct'));
 ok((await pg.textContent('.lib-title')) === '문서함', 'title');
 // small covers / list via menu
 await click(pg, '[aria-label="문서함 메뉴"]'); await pg.waitForTimeout(250); await shot(pg, '02-menu');
@@ -51,10 +53,10 @@ ok((await names(pg))[3] === 'Sample', 'pin favorites first: ' + (await names(pg)
 await click(pg, '[aria-label="문서함 메뉴"]'); await pg.waitForTimeout(250); await shot(pg, '07-menu-pinned');
 await pg.keyboard.press('Escape');
 // rail modes
-await pg.click('[aria-label="즐겨찾기 문서"]'); await settle(pg); await shot(pg, '08-favorites');
+await pg.click('[data-tag="drawer_row:즐겨찾기"]'); await settle(pg); await shot(pg, '08-favorites');
 ok((await names(pg)).length === 2, 'favorites count');
-await pg.click('[aria-label="최근 문서"]'); await settle(pg); ok((await pg.textContent('.lib-title')) === '최근 문서', 'recent title');
-await pg.click('[aria-label="전체 문서"]'); await settle(pg); ok((await names(pg)).length === 12 - 0 || true, 'all'); console.log('all docs', (await names(pg)).length);
+await pg.click('[data-tag="drawer_row:최근 문서"]'); await settle(pg); ok((await pg.textContent('.lib-title')) === '최근 문서', 'recent title');
+await pg.click('[data-tag="drawer_row:모든 노트"]'); await settle(pg); ok((await names(pg)).length === 12 - 0 || true, 'all'); console.log('all docs', (await names(pg)).length);
 await shot(pg, '09-all');
 // search
 await pg.click('[aria-label="문서 이름 검색"]'); await pg.fill('.lib-search', 'lecture'); await settle(pg); await shot(pg, '10-search');
@@ -62,12 +64,13 @@ ok((await names(pg)).length === 2, 'search filter');
 await pg.fill('.lib-search', 'zzzz'); await pg.waitForTimeout(300); ok((await pg.textContent('.lib-empty')) === '검색 결과가 없습니다', 'empty search');
 await pg.keyboard.press('Escape'); await pg.waitForTimeout(300);
 // folder navigation
-await pg.click('[aria-label="폴더 열기"]'); await pg.waitForTimeout(600); await shot(pg, '11-drawer');
+// Everynote: the folder tree is docked in the nav pane on a wide window (no 폴더 열기 button, no "<" up button)
+await shot(pg, '11-drawer');
 await pg.click('.lib-trow .fname >> text=수학'); await pg.waitForTimeout(700); await settle(pg); await shot(pg, '12-folder-math');
 ok((await pg.textContent('.lib-title')) === '수학', 'folder title');
-ok((await pg.textContent('.lib-up')).includes('문서함'), 'up button label');
+ok(await pg.locator('.lib-up').count() === 0, 'no "<" up button in the library');
 console.log(await log(pg));
-await pg.click('.lib-up'); await settle(pg); ok((await pg.textContent('.lib-title')) === '문서함', 'up works');
+await pg.click('[data-tag="drawer_row:폴더"]'); await settle(pg); ok((await pg.textContent('.lib-title')) === '문서함', 'nav pane 폴더 row goes back to the top folder');
 await pg.close();
 
 // ---------------------------------------------------------------- selection, rename, favorite, copy, move, delete, trash
@@ -135,31 +138,35 @@ await click(pg, '.lib-cmd', '삭제'); await pg.waitForTimeout(400); await shot(
 await click(pg, '.ad-btn', '삭제'); await pg.waitForTimeout(900);
 ok(!(await pg.evaluate(`T.host.stat(T.root+'\\\\Lecture Notes 10.pdf').then(s=>s.exists)`)), 'trashed file gone from library');
 console.log((await log(pg)).slice(-3));
-await pg.click('[aria-label="휴지통"]'); await pg.waitForTimeout(500); await shot(pg, '21-trash');
-await pg.locator('.ad-cell', { hasText: 'Lecture Notes 10.pdf' }).click(); await pg.waitForTimeout(800);
+// Everynote: 휴지통 is a library view (nav pane row); a card opens 복원 / 완전히 삭제, the header has 편집 / 비우기
+await pg.click('[data-tag="drawer_row:휴지통"]'); await pg.waitForTimeout(500); await shot(pg, '21-trash');
+ok((await pg.textContent('.lib-title')) === '휴지통' && /삭제/.test(await pg.textContent('.lib-card[data-tag="document:Lecture Notes 10.pdf"]')), 'trash view lists the deleted document with its date');
+await pg.locator('.lib-card[data-tag="document:Lecture Notes 10.pdf"]').click(); await pg.waitForTimeout(300);
+await click(pg, '.amenu-row', '복원'); await pg.waitForTimeout(800);
 ok(await pg.evaluate(`T.host.stat(T.root+'\\\\Lecture Notes 10.pdf').then(s=>s.exists)`), 'restored to original location');
 ok((await pg.textContent('.toast')) === '복원했습니다', 'restore toast');
-// empty-trash message
-await pg.click('[aria-label="휴지통"]'); await pg.waitForTimeout(400);
-await click(pg, '.ad-cell', '한국어 샘플 (1).pdf'); await pg.waitForTimeout(600);
-await pg.click('[aria-label="휴지통"]'); await pg.waitForTimeout(500); await shot(pg, '22-trash-empty');
-ok((await pg.textContent('.ad-msg')) === '휴지통이 비어 있습니다', 'empty trash dialog'); await click(pg, '.ad-btn', '닫기');
+// the last one: 완전히 삭제 (confirm), then the empty trash view
+await pg.locator('.lib-card[data-tag="document:한국어 샘플 (1).pdf"]').click(); await pg.waitForTimeout(300);
+await click(pg, '.amenu-row', '완전히 삭제'); await pg.waitForTimeout(300);
+ok((await pg.textContent('.ad-msg')).includes('완전히 삭제'), 'purge confirm message'); await click(pg, '.ad-btn', '삭제'); await pg.waitForTimeout(600); await shot(pg, '22-trash-empty');
+ok((await pg.textContent('.lib-empty')) === '휴지통이 비어 있습니다', 'empty trash view');
 // v3.3.0 (Android v1.31.0): 휴지통 비우기 = confirm, then permanent delete
 await pg.evaluate(`T.host.copy(T.root+'\\\\Lecture Notes 10.pdf', T.root+'\\\\Zap.pdf').then(()=>T.dlg.repository.trash(T.root+'\\\\Zap.pdf'))`); await pg.waitForTimeout(300);
 ok((await pg.evaluate(`T.dlg.repository.trashItems().then(a=>a.length)`)) === 1, 'one document in trash');
-await pg.click('[aria-label="휴지통"]'); await pg.waitForTimeout(500); await shot(pg, '22b-trash-with-empty');
-await click(pg, '.ad-btn', '휴지통 비우기'); await pg.waitForTimeout(300); await shot(pg, '22c-empty-confirm');
-ok((await pg.textContent('.ad-msg')).includes('1개') && (await pg.textContent('.ad-msg')).includes('영구 삭제'), 'empty trash confirm message');
+await pg.click('[data-tag="drawer_row:휴지통"]'); await pg.waitForTimeout(500); await shot(pg, '22b-trash-with-empty');
+await click(pg, '[data-tag="library_empty_trash"]'); await pg.waitForTimeout(300); await shot(pg, '22c-empty-confirm');
+ok((await pg.textContent('.ad-msg')).includes('1개') && (await pg.textContent('.ad-msg')).includes('완전히 삭제'), 'empty trash confirm message');
 await click(pg, '.ad-btn', '취소'); await pg.waitForTimeout(300);
 ok((await pg.evaluate(`T.dlg.repository.trashItems().then(a=>a.length)`)) === 1, 'cancel keeps the trash');
-await pg.click('[aria-label="휴지통"]'); await pg.waitForTimeout(400); await click(pg, '.ad-btn', '휴지통 비우기'); await pg.waitForTimeout(300);
-await click(pg, '.ad-btn', '영구 삭제'); await pg.waitForTimeout(800);
+await click(pg, '[data-tag="library_empty_trash"]'); await pg.waitForTimeout(300);
+await click(pg, '.ad-btn', '삭제'); await pg.waitForTimeout(800);
 ok((await pg.evaluate(`T.dlg.repository.trashItems().then(a=>a.length)`)) === 0 && !(await pg.evaluate(`T.host.stat(T.root+'\\\\Zap.pdf').then(s=>s.exists)`)), 'trash emptied for good');
 ok((await pg.textContent('.toast')).includes('영구 삭제했습니다'), 'empty trash toast');
 // folder colour
-await pg.click('[aria-label="폴더 열기"]'); await pg.waitForTimeout(500);
-await pg.click('.lib-manage'); await pg.waitForTimeout(300); await shot(pg, '23-manage-menu');
-await click(pg, '.amenu-row', '선택한 폴더 색상'); await pg.waitForTimeout(500); await shot(pg, '24-color-dialog');
+// Everynote: the top folder (폴더 row) has 폴더 색상 in its ⋮ menu (the old 폴더 관리 pill is gone)
+await pg.click('[data-tag="drawer_row:폴더"]'); await pg.waitForTimeout(500);
+await click(pg, '[aria-label="문서함 메뉴"]'); await pg.waitForTimeout(300); await shot(pg, '23-manage-menu');
+await click(pg, '.amenu-row', '폴더 색상'); await pg.waitForTimeout(500); await shot(pg, '24-color-dialog');
 await click(pg, '.ad-cell', '퍼플'); await pg.waitForTimeout(500); await shot(pg, '25-drawer-purple');
 ok((await pg.evaluate('T.library.folderColor(T.root)')) === (await pg.evaluate('T.LibraryRepository.FOLDER_COLORS[3]')), 'root colour saved');
 // folder long press menu
@@ -340,7 +347,8 @@ ok((await pg.evaluate('pc2.kind')) === 10 && (await pg.locator('.lib-tile.on .li
 ok((await pg.evaluate('T.NotebookFiles.PAPER_ORDER.slice(0,3).map(k => T.NotebookFiles.PAPER_NAMES[k]).join()')) === '금감원노트,금감원노트_칸나누기,리갈노트', 'list order: 금감원노트, 금감원노트_칸나누기, 리갈노트');
 await shot(pg, '42b-paper-tiles');
 ok((await pg.locator('.lib-tile').count()) === 13 && (await pg.locator('.lib-tile').first().textContent()) === '금감원노트', 'paper list is a tile grid with 13 tiles, 금감원노트 first');
-await pg.keyboard.press('Escape'); await pg.waitForTimeout(150);
+// (Escape closes the dialog itself, already before Everynote; the rest of this block needs the dialog, so just move the pointer away)
+await pg.mouse.move(2, 2); await pg.waitForTimeout(150);
 ok(await pg.locator('.lib-tplbtn').isHidden(), 'template button hidden for the bundled form');
 await pg.evaluate('pc2.selectKind(3)'); await pg.waitForTimeout(100);
 for (const k of [3, 6, 7, 8]) { await pg.evaluate(`pc2.selectKind(${k})`); await pg.waitForTimeout(150); await shot(pg, '43-paper-kind' + k); }

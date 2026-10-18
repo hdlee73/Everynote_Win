@@ -175,7 +175,9 @@ sealed class Bridge
         var v = System.Reflection.CustomAttributeExtensions.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>(typeof(Bridge).Assembly)?.InformationalVersion
                 ?? (ver == null ? "2.0.0" : ver.ToString(3));
         var plus = v.IndexOf('+'); if (plus > 0) v = v.Substring(0, plus);
-        return new { library = AppPaths.Library, data = AppPaths.Data, temp = AppPaths.Temp, documents = AppPaths.Documents, args = list, version = v, platform = "win", installed = IsInstalled(), arch = Arch };
+        var date = typeof(Bridge).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
+            .OfType<System.Reflection.AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == "BuildDate")?.Value ?? "";
+        return new { library = AppPaths.Library, data = AppPaths.Data, temp = AppPaths.Temp, documents = AppPaths.Documents, args = list, version = v, date, platform = "win", installed = IsInstalled(), arch = Arch };
     }
 
     // ------------------------------------------------------------------------------------------------- fs

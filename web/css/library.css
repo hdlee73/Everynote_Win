@@ -1,117 +1,148 @@
-/* Library (문서함) — LibraryDialog / FolderTreeView / PaperChoiceView. Sizes in dp == px, values from spec/library.md. */
-.lib-root{position:fixed;inset:0;z-index:5000;background:#fff;display:flex;overflow:hidden;color:#1C1C1E;
-  font-family:"Segoe UI","Malgun Gothic","Roboto","Noto Sans KR","Noto Sans CJK KR",sans-serif}
+/* Library (문서함) — Everynote, Samsung Notes for Windows layout: navigation pane on the left, big title + labelled actions, card grid. */
+.lib-root{position:fixed;inset:0;z-index:5000;background:#F2F2F4;display:flex;overflow:hidden;color:#010102;
+  font-family:"Segoe UI Variable Text","Segoe UI","Malgun Gothic","Roboto","Noto Sans KR","Noto Sans CJK KR",sans-serif}
 .lib-root *{box-sizing:border-box}
-.lib-ib{width:48px;height:52px;flex:none;display:flex;align-items:center;justify-content:center;color:#1C1C1E;cursor:pointer;background:transparent;border:0;padding:0}
-.lib-ib.sq{width:52px}
-.lib-ib.on{background:#E5F0FF;border-radius:26px}
+.lib-ib{width:40px;height:40px;flex:none;display:flex;align-items:center;justify-content:center;color:#010102;cursor:pointer;background:transparent;border:0;padding:0;border-radius:8px}
+.lib-ib:hover{background:rgba(0,0,0,.05)}
+.lib-ib.sq{width:44px;height:44px}
+.lib-ib.on{background:#E6E6E9}
 
-/* rail */
-.lib-rail{width:68px;flex:none;padding:12px 6px;display:flex;flex-direction:column;align-items:center;background:#fff}
-.lib-rail .lib-ib{width:52px}
-.lib-rail .gap{height:18px;width:1px;flex:none}
-.lib-rail .lib-ib.rb{margin-bottom:14px}
-.lib-rail .lib-ib.fo{margin-top:14px}
-.lib-dots{height:2px;flex:none;background:repeating-linear-gradient(90deg,#AEAEB2 0 2px,transparent 2px 7px)}
-.lib-rail .lib-dots{width:44px}
+/* collapsed navigation pane = icon rail */
+.lib-rail{width:60px;flex:none;padding:10px 8px;display:flex;flex-direction:column;align-items:center;background:#F3F3F5}
+.lib-rail .gap{height:16px;width:1px;flex:none}
+.lib-rail .lib-ib.rb{margin-bottom:6px}
+.lib-rail .lib-ib.fo{margin-top:8px}
+.lib-dots{height:1px;flex:none;background:repeating-linear-gradient(90deg,#C7C7CC 0 3px,transparent 3px 6px)}
+.lib-rail .lib-dots{width:36px;margin-top:4px}
 .lib-menu-btn{display:none}
-@media (max-width:599px){.lib-rail{display:none}.lib-menu-btn{display:flex}}
+.lib-railfill{flex:1}
+.lib-rail .lib-ib.st{margin-top:8px}
 
 /* page */
-.lib-page{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
-.lib-top{height:56px;flex:none;display:flex;align-items:center;padding:4px 6px 0}
-.lib-top .sp{flex:1}
-.lib-searchrow{display:none;padding:0 16px 6px;flex:none}
-.lib-searchrow.on{display:block}
-.lib-search{width:100%;height:46px;font-size:15px;color:#1C1C1E;background:#F2F2F7;border:2px solid #F2F2F7;border-radius:12px;padding:0 16px;outline:none}
-.lib-search:focus{background:#fff;border-color:#007AFF}
-.lib-search::placeholder{color:rgba(0,0,0,.38)}
-.lib-heading{flex:none;display:flex;flex-direction:column;align-items:center;padding:2px 16px 8px}
-.lib-up{display:none;align-items:center;justify-content:center;height:32px;padding:0 14px;border-radius:16px;background:#E5F0FF;color:#007AFF;font-size:13px;cursor:pointer;white-space:pre;max-width:100%}
-.lib-up.on{display:inline-flex}
-.lib-up .nm{overflow:hidden;text-overflow:ellipsis}
-.lib-title{width:100%;height:54px;padding-top:6px;font-size:30px;font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;justify-content:center}
-.lib-title span{overflow:hidden;text-overflow:ellipsis;max-width:100%}
-.lib-sub{height:26px;font-size:15px;color:#8E8E93;text-align:center;line-height:26px}
+.lib-page{flex:1;min-width:0;display:flex;flex-direction:column;position:relative;background:#F9F9FB}
+.lib-top{height:64px;flex:none;display:flex;align-items:center;gap:4px;padding:10px 20px 0 24px}
+.lib-top .sp{flex:1;min-width:8px}
+.lib-title{min-width:0;font-size:24px;font-weight:700;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+.lib-title span{overflow:hidden;text-overflow:ellipsis}
+.lib-actions{display:flex;align-items:center;gap:2px;flex:none}
+.lib-tb{height:34px;flex:none;display:flex;align-items:center;gap:6px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:#010102;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.lib-tb:hover{background:rgba(0,0,0,.05)}
+.lib-tb:focus-visible,.lib-ib:focus-visible{outline:2px solid rgba(56,122,255,.5);outline-offset:-2px}
+.lib-sbox{width:260px;height:36px;flex:none;margin-left:10px;display:flex;align-items:center;border-radius:8px;background:#E8E8EB;padding:0 2px 0 12px}
+.lib-sbox:focus-within{background:#fff;box-shadow:0 0 0 1px #C7C7CC}
+.lib-search{flex:1;min-width:0;height:34px;border:0;background:transparent;font:inherit;font-size:13.5px;color:#010102;outline:none;padding:0}
+.lib-search::placeholder{color:#848487}
+.lib-sbox .lib-ib{width:32px;height:32px}
+.lib-more{margin-left:4px}
+.lib-searchrow{display:none}
+.lib-heading{flex:none;display:flex;align-items:center;min-height:36px;padding:0 20px 4px 24px}
+.lib-heading .sp{flex:1}
+.lib-sub{font-size:13px;color:#848487;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.lib-page.trash .lib-sub{font-size:15px;color:#3A3A3D;white-space:normal}
+.lib-sortbox{display:flex;align-items:center;flex:none}
+.lib-sortbtn{font-size:12.5px;color:#3A3A3D;padding:0 8px}
+.lib-sortdir{width:32px;height:32px}
 .lib-shelf{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;position:relative}
-.lib-grid{display:grid;padding:6px 14px 96px;align-items:start}
-.lib-cell{margin:4px 7px 12px;min-width:0}
-.lib-empty{height:140px;display:flex;align-items:center;justify-content:center;font-size:16px;color:#8E8E93;grid-column:1/-1}
+.lib-grid{display:grid;padding:14px 20px 96px 20px;align-items:start;justify-content:start;row-gap:22px}
+.lib-grid.list{row-gap:2px;padding-right:24px}
+.lib-cell{min-width:0;padding:0 8px}
+.lib-grid.list .lib-cell{padding:0}
+.lib-empty{height:160px;display:flex;align-items:center;justify-content:center;font-size:15px;color:#848487;grid-column:1/-1}
+.lib-shelf::-webkit-scrollbar{width:8px}.lib-shelf::-webkit-scrollbar-thumb{background:#C9C9CE;border-radius:4px}
 
-/* cards */
-.lib-card{display:flex;flex-direction:column;align-items:center;cursor:pointer;min-width:0}
-.lib-frame{position:relative;width:100%}
-.lib-cover{position:absolute;inset:0;background:#fff;border:1px solid rgba(43,47,74,.102);border-radius:20px;overflow:hidden}
-.lib-cover.sm{border-radius:12px}
+/* cards: square cover with a hairline frame, title + date centred under it */
+.lib-card{display:flex;flex-direction:column;align-items:center;cursor:pointer;min-width:0;border-radius:10px;padding:4px 0 2px}
+.lib-card:hover .lib-cover{box-shadow:0 2px 8px rgba(0,0,0,.16)}
+.lib-frame{position:relative;flex:none}
+.lib-frame.dir{border-radius:8px;background:#E8E8EB;display:flex;align-items:center;justify-content:center}
+.lib-cover{position:absolute;inset:0;background:#fff;border:1px solid rgba(0,0,0,.09);border-radius:6px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.06);transition:box-shadow .15s}
+.lib-cover.sm{border-radius:5px}
 .lib-cover img,.lib-cover svg.ph{position:absolute;inset:0;width:100%;height:100%;display:block}
 .lib-cover img{object-fit:cover}
-.lib-cover svg.ph{color:#1C1C1E}
-.lib-fshape{position:absolute;left:0;right:0;bottom:0;display:block}
-.lib-fcount{position:absolute;left:14px;font-size:16px;color:#59607E;line-height:1.2}
-.lib-fav{position:absolute;top:8px;right:8px;width:26px;height:26px;padding:4px;border-radius:13px;background:rgba(255,255,255,.902);color:#FFB020}
-.lib-name{width:100%;padding:8px 2px 0;font-size:15px;font-weight:700;text-align:center;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;line-height:1.25}
-.lib-date{height:22px;width:100%;font-size:12px;color:#8E8E93;text-align:center;line-height:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lib-check{position:absolute;top:4px;left:4px;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer}
-.lib-check i{width:18px;height:18px;border:2px solid #757575;border-radius:2px;display:flex;align-items:center;justify-content:center;color:#fff}
-.lib-check.on i{background:#007AFF;border-color:#007AFF}
+.lib-cover svg.ph{color:#C7C7CC;padding:30%}
+.lib-fcount{position:absolute;right:8px;bottom:6px;font-size:12px;color:#848487}
+.lib-fav{position:absolute;top:5px;right:5px;width:20px;height:20px;padding:3px;border-radius:10px;background:rgba(255,255,255,.92);display:flex}
+.lib-name{width:100%;padding:8px 0 0;font-size:13px;font-weight:600;text-align:center;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;line-height:1.3}
+.lib-date{height:18px;width:100%;font-size:11px;color:#848487;text-align:center;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lib-check{position:absolute;top:2px;left:2px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.lib-check i{width:20px;height:20px;border:1.5px solid #848487;border-radius:50%;background:rgba(255,255,255,.9);display:flex;align-items:center;justify-content:center;color:#fff}
+.lib-check.on i{background:#DB332A;border-color:#DB332A}
 .lib-check i svg{display:none}
 .lib-check.on i svg{display:block}
 .lib-check.row{position:static;width:40px;height:48px;flex:none}
 
 /* list rows */
-.lib-row{display:flex;align-items:center;padding:8px 10px;background:#fff;border-radius:14px;cursor:pointer}
-.lib-row .img{position:relative;width:56px;height:56px;flex:none}
-.lib-row .img>svg.fs{display:block;width:56px;height:56px}
+.lib-row{display:flex;align-items:center;padding:8px 12px;border-radius:10px;cursor:pointer}
+.lib-row:hover{background:rgba(0,0,0,.035)}
+.lib-row .img{position:relative;width:48px;height:48px;flex:none;display:flex;align-items:center;justify-content:center}
 .lib-row .txt{flex:1;min-width:0;padding:0 4px 0 14px}
-.lib-row .txt .nm{font-size:15px;font-weight:700;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;line-height:1.25}
-.lib-row .txt .meta{font-size:12px;color:#8E8E93;line-height:1.3}
-.lib-row .star{width:22px;height:22px;flex:none;color:#FFB020}
+.lib-row .txt .nm{font-size:14px;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;line-height:1.25}
+.lib-row .txt .meta{font-size:12px;color:#848487;line-height:1.3}
 
-/* selection bar (replaces the top bar while selecting) */
-.lib-seltop{display:none;padding:4px 10px 0 6px}
-.lib-seltop.on{display:flex}
-.lib-page.selecting>.lib-top,.lib-page.selecting .lib-heading,.lib-page.selecting .lib-searchrow{display:none}
+/* selection bar (replaces the header while selecting) */
+.lib-seltop{display:none}
+.lib-page.selecting>.lib-top:not(.lib-seltop),.lib-page.selecting .lib-searchrow{display:none}
 .lib-page.selecting>.lib-seltop{display:flex}
-.lib-selcount{font-size:20px;font-weight:700;white-space:nowrap;padding:0 6px 0 2px}
+.lib-selall{display:flex;align-items:center;gap:2px;font-size:12px;color:#3A3A3D;cursor:pointer;flex:none;margin-left:-10px}
+.lib-selall .lib-check{position:static}
+.lib-selcount{font-size:22px;font-weight:700;white-space:nowrap;padding:0 6px 0 8px}
 .lib-selcmds{display:flex;align-items:center;gap:2px;min-width:0;overflow:hidden}
-.lib-cmd{flex:none;height:44px;padding:0 12px;border-radius:12px;font-size:14px;color:#1C1C1E;display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
-.lib-cmd:hover{background:#F2F2F7}
-.lib-cmd.red{color:#FF3B30}
-.lib-cmd.more{padding:0 8px}
-@media (max-width:640px){.lib-cmd .t{display:none}.lib-cmd{padding:0 9px}.lib-selcount{font-size:17px}}
+.lib-cmd{flex:none;height:34px;padding:0 10px;border-radius:8px;font-size:13px;color:#010102;display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
+.lib-cmd:hover{background:rgba(0,0,0,.05)}
+.lib-cmd.red{color:#DB332A}
+.lib-cmd.more{padding:0 6px}
+.lib-selcancel{margin-left:6px}
 
-/* compose FAB */
-.lib-fab{position:absolute;right:22px;bottom:24px;width:56px;height:56px;border-radius:28px;background:#fff;color:#E5484D;display:flex;align-items:center;justify-content:center;
-  box-shadow:0 3px 6px rgba(0,0,0,.18),0 1px 3px rgba(0,0,0,.12);cursor:pointer;z-index:3}
+/* compose FAB (narrow window) */
+.lib-fab{position:absolute;right:22px;bottom:24px;width:56px;height:56px;border-radius:28px;background:#FCFCFC;display:none;align-items:center;justify-content:center;
+  box-shadow:0 3px 8px rgba(0,0,0,.2),0 1px 3px rgba(0,0,0,.12);cursor:pointer;z-index:3}
 
-/* drawer */
+/* navigation pane (docked on a wide window, a drawer on a narrow one) */
 .lib-drawer{position:absolute;inset:0;z-index:10;display:none}
 .lib-drawer.on{display:block}
-.lib-scrim{position:absolute;inset:0;background:rgba(0,0,0,.251);opacity:0}
-.lib-panel{position:absolute;left:0;top:0;bottom:0;background:#fff;border-radius:0 28px 28px 0;box-shadow:0 6px 24px rgba(0,0,0,.3);padding:14px 10px 12px 6px;display:flex;flex-direction:column}
-.lib-ptop{height:48px;flex:none;display:flex;align-items:center}
-.lib-ptop .lib-ib{width:56px;height:48px}
-.lib-drow{height:52px;flex:none;display:flex;align-items:center;padding:0 16px 0 14px;border-radius:26px}
+.lib-scrim{position:absolute;inset:0;background:rgba(0,0,0,.25);opacity:0}
+.lib-panel{position:absolute;left:0;top:0;bottom:0;background:#F3F3F5;border-radius:0 16px 16px 0;box-shadow:0 6px 24px rgba(0,0,0,.25);padding:12px 12px 12px 12px;display:flex;flex-direction:column}
+.lib-ptop{height:52px;flex:none;display:flex;align-items:center;padding-left:2px;margin-bottom:6px}
+.lib-drow{height:44px;flex:none;display:flex;align-items:center;padding:0 12px 0 10px;border-radius:8px;margin:1px 0}
 .lib-drow.click{cursor:pointer}
-.lib-drow.on{background:#E5F0FF}
-.lib-drow .ico{width:28px;height:28px}
-.lib-drow .nm{flex:1;padding-left:18px;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.lib-drow .ct{font-size:16px;color:#8E8E93}
-.lib-panel .lib-dots{margin:8px 10px;flex:none}
+.lib-drow.click:hover{background:rgba(0,0,0,.04)}
+.lib-drow.on{background:#E6E6E9}
+.lib-drow.on .nm{font-weight:700}
+.lib-drow .ico{width:20px;height:20px}
+.lib-drow .nm{flex:1;padding-left:14px;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lib-drow .ct{font-size:12.5px;color:#848487}
+.lib-panel .lib-dots{margin:8px 4px;flex:none}
 .lib-panel .tree{flex:1;min-height:0}
-.lib-manage{flex:none;height:48px;margin:8px 24px 0;border-radius:24px;background:#F2F2F7;font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer}
 
 /* folder tree */
 .lib-tree{overflow-y:auto;background:#F3F6FA}
 .lib-tree.transparent{background:transparent}
-.lib-tree .rows{padding:10px 8px}
-.lib-trow{display:flex;align-items:center;height:46px;padding-right:3px;border-radius:10px}
-.lib-trow.sel{background:#E3EDFB}
-.lib-trow .arrow{width:28px;height:46px;flex:none;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#8E8E93}
-.lib-trow .fname{flex:1;min-width:0;height:46px;display:flex;align-items:center;gap:8px;font-size:14px;color:#334155;cursor:pointer}
-.lib-trow.sel .fname{color:#007AFF}
+.lib-tree .rows{padding:2px 0}
+.lib-trow{display:flex;align-items:center;height:42px;padding-right:12px;border-radius:8px;margin:1px 0}
+.lib-trow:hover{background:rgba(0,0,0,.035)}
+.lib-trow.sel{background:#E6E6E9}
+.lib-trow.sel .fname{font-weight:700}
+.lib-trow .arrow{width:22px;height:42px;flex:none;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.lib-trow .fname{flex:1;min-width:0;height:42px;display:flex;align-items:center;gap:12px;font-size:14.5px;color:#010102;cursor:pointer;padding-left:4px}
 .lib-trow .fname .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lib-trow .fname svg{flex:none;display:block}
+.lib-trow .ct{font-size:12.5px;color:#848487;flex:none}
+
+/* narrow window: drawer + FAB, actions move into ⋮, search opens over the header */
+@media (max-width:759px){.lib-actions .lib-tb .t{display:none}.lib-actions .lib-tb{padding:0 8px}.lib-sbox{width:180px}}
+@media (max-width:599px){
+  .lib-rail{display:none}.lib-menu-btn{display:flex}
+  .lib-top{padding:8px 8px 0 8px;height:56px}
+  .lib-title{font-size:20px;padding-left:4px}
+  .lib-actions{display:none}
+  .lib-sbox{width:auto;background:transparent;padding:0;margin:0}
+  .lib-sbox .lib-search{display:none}
+  .lib-page.searching .lib-sbox{position:absolute;left:8px;right:8px;top:10px;z-index:4;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.18);padding-left:12px}
+  .lib-page.searching .lib-sbox .lib-search{display:block}
+  .lib-heading{padding:0 12px 4px 16px}
+  .lib-grid{padding:10px 8px 96px}
+  .lib-fab{display:flex}
+}
 
 /* picker (copy/move) */
 .lib-picker-add{height:44px;font-size:15px;color:#007AFF;display:flex;align-items:center;justify-content:center;cursor:pointer}
@@ -180,18 +211,20 @@
 .set-row.radio{min-height:48px;padding-top:6px;padding-bottom:6px}
 .set-switch{width:46px;height:28px;border-radius:14px;background:#D1D1D6;position:relative;flex:none;transition:background .15s;outline:none}
 .set-switch i{position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:11px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:transform .15s}
-.set-switch.on{background:#007AFF}
+.set-switch.on{background:#DB332A}
 .set-switch.on i{transform:translateX(18px)}
 .set-switch:focus-visible{box-shadow:0 0 0 3px rgba(0,122,255,.4)}
 .set-dot{width:20px;height:20px;border-radius:10px;border:2px solid #8E8E93;flex:none;position:relative}
-.set-dot.on{border-color:#007AFF}
-.set-dot.on::after{content:"";position:absolute;inset:3px;border-radius:50%;background:#007AFF}
+.set-dot.on{border-color:#DB332A}
+.set-dot.on::after{content:"";position:absolute;inset:3px;border-radius:50%;background:#DB332A}
 .lib-railfill{flex:1}
 .lib-rail .lib-ib.st{margin-top:8px}
 
-/* docked folder tree (wide window, default): a column beside the document list instead of a sheet over it */
+/* docked navigation pane (wide window, default): a column beside the document list */
 .lib-root.docked .lib-rail{display:none}
-.lib-root.docked .lib-drawer{position:relative;inset:auto;display:block;order:-1;flex:none;width:300px;z-index:auto;border-right:1px solid #ECECF0;background:#fff}
+.lib-root.docked .lib-drawer{position:relative;inset:auto;display:block;order:-1;flex:none;width:300px;z-index:auto;background:#F3F3F5}
 .lib-root.docked .lib-scrim{display:none}
-.lib-root.docked .lib-panel{position:relative;width:100%;height:100%;border-radius:0;box-shadow:none;transform:none!important}
+.lib-root.docked .lib-panel{position:relative;width:100%;height:100%;border-radius:0;box-shadow:none;transform:none!important;padding:10px 16px 14px 14px}
 .lib-root.docked .lib-menu-btn{display:none}
+/* 휴지통: text-only 편집 / 비우기, no search box (Samsung Notes) */
+.lib-page.trash .lib-sbox{display:none}

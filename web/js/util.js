@@ -29,7 +29,7 @@ export function icon(name, size = 24, color = 'currentColor', extraStyle = '') {
   const wrap = document.createElement('span');
   wrap.className = 'ico';
   wrap.style.cssText = `display:inline-flex;width:${size}px;height:${size}px;color:${color};flex:none;${extraStyle}`;
-  wrap.innerHTML = `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+  wrap.innerHTML = `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
   return wrap;
 }
 export function setIcon(el, name) { // replace glyph inside an .ico span

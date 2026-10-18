@@ -9,15 +9,16 @@ await pg.addInitScript(()=>{Map.prototype.getOrInsertComputed??=function(k,f){if
 await pg.goto(`http://localhost:${PORT}/index.html`); await pg.waitForTimeout(1500);
 let fails=0; const check=(n,ok,x='')=>{console.log((ok?'PASS ':'FAIL ')+n+(x?'  '+x:''));if(!ok)fails++};
 const bytes=[...fs.readFileSync('dev/samples/sample-ko.pdf')];
-const LIB='C:\\Users\\dev\\Documents\\PDF Note\\sample.pdf';
+const LIB='C:\\Users\\dev\\Documents\\Everynote\\sample.pdf';
 await pg.evaluate(async([b,p])=>{const {host}=await import('./js/host.js');host._fake.put(p,new Uint8Array(b));await app.openPdf(p);},[bytes,LIB]);
 await pg.waitForTimeout(1500);
 
 // 7: bar placement
-const place=async(p)=>pg.evaluate(async p=>{app.setBarPlace(p);await new Promise(r=>setTimeout(r,200));const r=document.querySelector('[data-tag="reading_toolbar"]').getBoundingClientRect();const c=document.querySelector('.m-content').getBoundingClientRect();return {w:r.width,h:r.height,l:r.left,r:r.right,cl:parseFloat(getComputedStyle(document.querySelector('.m-content')).paddingLeft),cr:parseFloat(getComputedStyle(document.querySelector('.m-content')).paddingRight),cls:document.querySelector('[data-tag="reading_toolbar"]').className};},p);
+const place=async(p)=>pg.evaluate(async p=>{app.setBarPlace(p);await new Promise(r=>setTimeout(r,200));const r=document.querySelector('[data-tag="reading_toolbar"]').getBoundingClientRect();const c=document.querySelector('.m-content').getBoundingClientRect();return {w:r.width,h:r.height,l:r.left,r:r.right,cl:app.viewportLayer.getBoundingClientRect().left-c.left,cr:c.right-app.viewportLayer.getBoundingClientRect().right,cls:document.querySelector('[data-tag="reading_toolbar"]').className};},p);
 const bt=await place('bottom'); check('bottom: wide horizontal bar', bt.w>800&&bt.h<80, JSON.stringify(bt));
+// Everynote: the rail sits beside the page viewport in the content row, so the viewport edge moves by the rail width
 const lf=await place('left'); check('left rail: narrow, vertical, content shifted', lf.w<70&&lf.h>400&&lf.cl>=50&&lf.cls.includes('vert'), JSON.stringify(lf));
-const rt=await place('right'); check('right rail: content right edge shifted', rt.w<70&&rt.cr>=50&&rt.cl===0, JSON.stringify(rt));
+const rt=await place('right'); check('right rail: content right edge shifted', rt.w<70&&rt.cr>=50&&Math.abs(rt.cl)<1, JSON.stringify(rt));
 const fl=await place('float'); check('float horizontal', fl.w>300&&fl.h<80&&fl.cls.includes('float'), JSON.stringify(fl));
 await pg.evaluate(()=>app.setBarOrientation(true)); await pg.waitForTimeout(200);
 const fv=await pg.evaluate(()=>{const r=document.querySelector('[data-tag="reading_toolbar"]').getBoundingClientRect();return {w:r.width,h:r.height}});

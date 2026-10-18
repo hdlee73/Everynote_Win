@@ -32,7 +32,7 @@ const papers = document.createElement('div'); papers.id = 'papers'; papers.appen
 app.buildLassoBar(); vp.append(app.lassoBar);
 
 const bytes = new Uint8Array(await (await fetch('/dev/samples/sample-ko.pdf')).arrayBuffer());
-const path = 'C:\\Users\\dev\\Documents\\PDF Note\\sample-ko.pdf';
+const path = 'C:\\Users\\dev\\Documents\\Everynote\\sample-ko.pdf';
 host._fake.put(path, bytes);
 app.renderer = await PdfDoc.open(bytes);
 app.store = await new AnnotationStore().open(path);

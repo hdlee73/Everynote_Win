@@ -18,6 +18,7 @@ export async function builtinTemplate(name) {
 const extOf = p => { const n = baseName(p), i = n.lastIndexOf('.'); return i > 0 ? n.slice(i + 1).replace(/[^A-Za-z0-9]/g, '') || 'pdf' : 'pdf'; };
 import { ASSET_NAME, relPath, referencedAssets } from './sync.js';
 
+// The ZIP manifest keeps its original name and format string, so Everynote and Everynote backups (Windows and Android) restore on each other.
 export const BACKUP_FORMAT = 'Everynote backup v1';
 export const BACKUP_MANIFEST = 'everynote-backup.json';
 
@@ -130,4 +131,7 @@ export function compareVersions(a, b) {
   for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d; }
   return 0;
 }
-export const AUTHOR_LINE = '만든이 : 이현덕(with Claude), hdlee73@gmail.com';
+export const APP_NAME = 'Everynote';
+export const AUTHOR_LINE = '만든이 이현덕 (hdlee73@gmail.com)';
+/** Date of this release, shown in 앱 정보 when the host does not report its build date. Update together with VERSION. */
+export const RELEASE_DATE = '2026-10-15';

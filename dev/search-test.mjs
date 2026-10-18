@@ -20,9 +20,9 @@ const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++
 const R = await page.evaluate(async (b64) => {
   const { PdfDoc, ocrHook, host, S } = window.T;
   const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-  host._fake.put('C:\\Users\\dev\\Documents\\PDF Note\\sample-ko.pdf', bytes.slice());
+  host._fake.put('C:\\Users\\dev\\Documents\\Everynote\\sample-ko.pdf', bytes.slice());
   const doc = await PdfDoc.open(bytes.slice());
-  const URI = 'C:\\Users\\dev\\Documents\\PDF Note\\sample-ko.pdf';
+  const URI = 'C:\\Users\\dev\\Documents\\Everynote\\sample-ko.pdf';
   const emptyStore = () => ({ marks: [], strokes: [], outlines: [], translations: [], elements: [], studyEntries: [], bookmarks: [] });
   const run = async (query, { store = emptyStore(), start = 0, precise = false, uri = URI, d = doc, cancelAfter = null, count = null } = {}) => {
     const hits = [], prog = [], warns = []; const canceled = { value: false };

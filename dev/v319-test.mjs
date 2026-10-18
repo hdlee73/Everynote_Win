@@ -26,18 +26,19 @@ const ev = (f, a) => page.evaluate(f, a);
 check('page preview default is all pages', await ev(() => app.showAllThumbnails === true && app.recentPrefs.getBoolean('thumb_all', true) === true));
 // eraser next to 필기 모드 in the bottom bar
 await ev(() => document.querySelector('[data-tag="reading_toolbar"] [aria-label="지우개"]').click()); await page.waitForTimeout(250);
-check('bar eraser starts writing with the eraser (strip shown, no width/colour row)', await ev(() => app.writeMode && app.inkMode === 2 && app.inkOptions.style.display === 'none' && getComputedStyle(app.stripBox.parentElement).display !== 'none'));
+// Everynote: the floating toolbar is opt-in (off by default), so the strip itself is not shown here
+check('bar eraser starts writing with the eraser (no width/colour row)', await ev(() => app.writeMode && app.inkMode === 2 && app.inkOptions.style.display === 'none'));
 await ev(() => app.eraserButton.click()); await ev(() => app.penButton.click()); await page.waitForTimeout(250);
 check('pen: the strip has no width/colour row any more (v3.21 pen panel)', await ev(() => app.inkMode === 1 && app.inkOptions.style.display === 'none'));
 await ev(() => app.penButton.click()); await page.waitForTimeout(250);
-check('pen tapped again: panel with width slider + 17 colour dots', await ev(() => !!document.querySelector('.amenu [data-tag="pen_width"]') && document.querySelectorAll('.amenu .m-sw .dot').length === 17));
+check('pen tapped again: panel with width slider + 24 colour dots (3 rows)', await ev(() => !!document.querySelector('.amenu [data-tag="pen_width"]') && document.querySelectorAll('.amenu .m-sw .dot').length === 24));
 await page.keyboard.press('Escape'); await page.mouse.click(5, 5);
 await ev(() => app.hlButton.click()); await page.waitForTimeout(200);
 await ev(() => app.hlButton.click()); await page.waitForTimeout(250);
 check('highlighter: second tap shows its panel (5 colours + chip)', await ev(() => app.highlighterMode && document.querySelectorAll('.amenu .m-sw .dot').length === 6));
 await page.keyboard.press('Escape'); await page.mouse.click(5, 5);
-// floating strip: drag the grip
-await ev(() => app.penButton.click()); await page.waitForTimeout(200);
+// floating strip (Everynote: shown from the pen panel's 플로팅 툴바 표시): drag the grip
+await ev(() => { if (!app.writeStripShown()) app.setWriteStripShown(true); app.penButton.click(); }); await page.waitForTimeout(200);
 const gb = await ev(() => app.stripGrip.getBoundingClientRect().toJSON());
 check('strip has a visible grip', gb.width > 10 && gb.height > 10);
 await page.mouse.move(gb.x + gb.width / 2, gb.y + gb.height / 2); await page.mouse.down(); await page.mouse.move(gb.x + 140, gb.y + 220, { steps: 6 }); await page.mouse.up(); await page.waitForTimeout(200);

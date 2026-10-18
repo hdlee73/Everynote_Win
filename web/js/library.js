@@ -409,13 +409,15 @@ export class LibraryRepository {
   async list(directory) { return (await this._entries(directory)).map(e => e.path); }
 
   // ---- settings
-  sortMode(v) { if (v === undefined) return Math.max(0, Math.min(3, this._get('sort', 0) | 0)); this._put('sort', v | 0); }
+  sortMode(v) { if (v === undefined) return Math.max(0, Math.min(3, this._get('sort', 2) | 0)); this._put('sort', v | 0); }
+  /** ↑ / ↓ of the sort row: reverses whatever order sortMode gives. */
+  sortReverse(v) { if (v === undefined) return !!this._get('sort_reverse', false); this._put('sort_reverse', v ? true : null); }
   viewMode(v) { if (v === undefined) return Math.max(0, Math.min(2, this._get('view', 0) | 0)); this._put('view', v | 0); }
   pinFavorites(v) { if (v === undefined) return !!this._get('pin_favorites', false); this._put('pin_favorites', !!v); }
   folderColor(folder, color) {
     const key = 'color:' + normPath(folder);
     if (color === undefined) {
-      const saved = this._get(key, LibraryRepository.FOLDER_COLORS[0]) | 0;
+      const saved = this._get(key, LibraryRepository.FOLDER_COLORS[5]) | 0;
       const i = LibraryRepository.LEGACY_FOLDER_COLORS.indexOf(saved);
       return i >= 0 ? LibraryRepository.FOLDER_COLORS[i] : saved;
     }
@@ -452,7 +454,8 @@ export class LibraryRepository {
     if (mode === 1) base = (a, b) => byName(b, a);
     else if (mode === 2) base = (a, b) => (mods.get(pathKey(b)) - mods.get(pathKey(a))) || byName(a, b);
     else if (mode === 3) base = (a, b) => (this.openedAt(b) - this.openedAt(a)) || byName(a, b);
-    return pin ? (a, b) => ((this.favorite(a) ? 0 : 1) - (this.favorite(b) ? 0 : 1)) || base(a, b) : base;
+    const ordered = this.sortReverse() ? (a, b) => base(b, a) : base;
+    return pin ? (a, b) => ((this.favorite(a) ? 0 : 1) - (this.favorite(b) ? 0 : 1)) || ordered(a, b) : ordered;
   }
   /** Folder view: sub-folders first, then documents, filtered by name substring, in the current sort order. */
   async sorted(directory, query = '') {

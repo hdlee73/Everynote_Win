@@ -260,3 +260,10 @@ body.m2-resizing[data-m2-axis="y"]{cursor:row-resize!important}
 .m2-vbar .m2-vtime{flex:none;font-size:11px}
 .m2-ybar{justify-content:center}
 .m2-inline-player video,.m2-inline-player iframe{height:calc(100% - 40px)!important}
+/* Everynote 앱 정보 */
+.m2-about{color:#010102}
+.m2-about-logo{display:block;width:56px;height:56px;margin:2px 0 8px}
+.m2-about-link{color:#0B7A6B}
+.m2-about-new{color:#DB332A}
+.m2-about-status{color:#848487}
+.m2-about-check input{accent-color:#DB332A}

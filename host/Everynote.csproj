@@ -31,6 +31,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Shown as the update date in 앱 정보 (Info().date). -->
+    <AssemblyMetadata Include="BuildDate" Value="$([System.DateTime]::UtcNow.ToString('yyyy-MM-dd'))" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Resource Include="Assets\app.ico" />
     <!-- The whole web app is embedded: no loose folder next to the exe. Served via WebResourceRequested. -->
     <EmbeddedResource Include="..\web\**\*" Exclude="..\web\**\*.map" LogicalName="web/%(RecursiveDir)%(Filename)%(Extension)" />
