@@ -639,4 +639,86 @@ export class LibraryRepository {
   insertPage(file, requested, afterIndex, sizeMode = 0) { return this._sync(async () => { await this._managedFile(file); return NotebookFiles.insert(file, requested, afterIndex, sizeMode); }); }
   deletePage(file, index) { return this._sync(async () => { await this._managedFile(file); return NotebookFiles.delete(file, index); }); }
   append(file, requested) { return this._sync(async () => { await this._managedFile(file); return NotebookFiles.append(file, requested); }); }
+  // ---- merge documents / extract pages into a new file (annotations travel with the pages)
+  /** Builds a new library PDF from page lists: parts = [{ file, pages: [0-based indexes in order] }]. Returns the new file. */
+  composeDocument(parts, title, destination) {
+    return this._sync(async () => {
+      await this._folder(destination);
+      if (!parts.length || parts.some(x => !x.pages.length)) throw new IOException('가져올 페이지가 없습니다');
+      const { PDFDocument, PDFName, PDFString } = await pdfLib();
+      const target = await NotebookFiles.unique(destination, NotebookFiles.pdfName(title));
+      const temp = tmpName(destination, '.merge-');
+      try {
+        const out = await PDFDocument.create({ updateMetadata: false });
+        out.setProducer('Everynote'); out.setCreator('Everynote');
+        const maps = []; let offset = 0;
+        for (const part of parts) {
+          await this._managedFile(part.file);
+          const src = await loadForEdit(part.file, '암호가 걸린 PDF는 합칠 수 없습니다');
+          const total = src.getPageCount();
+          if (part.pages.some(i => i < 0 || i >= total)) throw new IOException('페이지 범위가 올바르지 않습니다');
+          for (const page of await out.copyPages(src, part.pages)) out.addPage(page);
+          maps.push(new Map(part.pages.map((p, i) => [p, offset + i]))); offset += part.pages.length;
+        }
+        const paper = this.paper(parts[0].file);
+        if (paper) {
+          const info = infoDict(out);
+          info.set(PDFName.of('PDFNoteNotebook'), PDFString.of('true'));
+          info.set(PDFName.of('PDFNotePaper'), PDFString.of(paper.spec().replace(/[\\()]/g, m => '\\' + m)));
+        }
+        await host.writeBytes(temp, await out.save({ useObjectStreams: false }));
+        await NotebookFiles.replace(temp, target);
+        if (paper) this._putPaper(target, paper);
+        let annotations = true;
+        try { await this._carryAnnotations(parts, maps, target); } catch (e) { annotations = false; }
+        await this.flush();
+        return { file: target, pages: offset, annotations };
+      } finally { await quietDelete(temp); }
+    });
+  }
+  async _carryAnnotations(parts, maps, target) {
+    const S = await annotationStore(); if (!S) return;
+    const lists = ['elements', 'studyEntries', 'marks', 'outlines', 'strokes', 'translations'];
+    const merged = { elements: [], studyEntries: [], marks: [], bookmarks: [], outlines: [], strokes: [], translations: [] };
+    let any = false;
+    for (let i = 0; i < parts.length; i++) {
+      if (!(await Sidecars.modified(parts[i].file))) continue;
+      const body = JSON.parse((await S.load(parts[i].file)).toJson()), map = maps[i];
+      for (const k of lists) for (const o of body[k] || []) if (map.has(o.page)) { o.page = map.get(o.page); merged[k].push(o); any = true; }
+      for (const b of body.bookmarks || []) if (map.has(b)) { merged.bookmarks.push(map.get(b)); any = true; }
+    }
+    if (!any) return;
+    const store = await S.load(target);
+    store.loadJson(JSON.stringify(merged)); store._historyReset(store.toJson());
+    await store.save(); await store.flush();
+  }
+
+  // ---- bulk import of a whole folder (PDFs only; the sub-folder structure is rebuilt in the library)
+  /** files = [{ path, rel }] (rel = folder-relative path with \ separators). Returns { imported, skipped, failed }. */
+  importTree(files, rootName, destination, progress) {
+    return (async () => {
+      const result = { imported: 0, skipped: 0, failed: 0, folder: null };
+      const base = await this._uniqueFolder(destination, rootName);
+      result.folder = base;
+      let n = 0;
+      for (const f of files) {
+        n++; if (progress) progress(n, files.length, f.rel);
+        try {
+          const parts = String(f.rel).split('\\').filter(Boolean); parts.pop();
+          let dir = base;
+          for (const part of parts) { dir = joinP(dir, part.replace(/[\\/:*?"<>|]/g, '_')); await this.createFolderIfMissing(dir); }
+          if (await this.imported(f.path)) { result.skipped++; continue; }
+          await this.importPdf(f.path, baseName(f.path), dir); result.imported++;
+        } catch (e) { result.failed++; }
+      }
+      return result;
+    })();
+  }
+  async _uniqueFolder(parent, name) {
+    const safe = String(name || '폴더').replace(/[\\/:*?"<>|]/g, '_').trim() || '폴더';
+    let dir = joinP(parent, safe), i = 1;
+    while (await exists(dir)) dir = joinP(parent, `${safe} (${i++})`);
+    await host.mkdir(dir); return dir;
+  }
+  async createFolderIfMissing(dir) { if (!(await exists(dir))) await host.mkdir(dir); }
 }

@@ -91,6 +91,8 @@ static class PathPolicy
     static readonly object L = new();
     static readonly HashSet<string> chosenRead = new(StringComparer.OrdinalIgnoreCase);
     static readonly HashSet<string> chosenWrite = new(StringComparer.OrdinalIgnoreCase);
+    // folders the user picked in the folder dialog (this session only): everything below them may be read
+    static readonly HashSet<string> chosenTrees = new(StringComparer.OrdinalIgnoreCase);
     static readonly string allowFile = Path.Combine(AppPaths.Data, "allowed.json");
 
     static readonly string[] ReadRoots = { AppPaths.Library, AppPaths.Data, AppPaths.SystemTemp, AppPaths.Fonts, @"C:\Windows\Fonts" };
@@ -129,7 +131,12 @@ static class PathPolicy
     public static bool CanRead(string full)
     {
         foreach (var r in ReadRoots) if (Under(full, r)) return true;
-        lock (L) return chosenRead.Contains(full) || chosenWrite.Contains(full);
+        lock (L)
+        {
+            if (chosenRead.Contains(full) || chosenWrite.Contains(full)) return true;
+            foreach (var t in chosenTrees) if (Under(full, t)) return true;
+            return false;
+        }
     }
 
     public static bool CanWrite(string full)
@@ -170,6 +177,11 @@ static class PathPolicy
             }
         }
         catch { }
+    }
+
+    public static void AllowReadTree(string p)
+    {
+        try { var f = Full(p); lock (L) chosenTrees.Add(f); } catch { }
     }
 
     public static void AllowWrite(string p)

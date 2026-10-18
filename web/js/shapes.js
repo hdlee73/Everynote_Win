@@ -146,6 +146,8 @@ export class Shapes {
     const cw = b.width() / t.cols, ch = b.height() / t.rows;
     c.save();
     try {
+      const rad = Math.max(2, Math.min(pageWidth * .02, ch * .5, cw * .5));   // Samsung Notes: rounded outer corners
+      c.save(); c.beginPath(); rr(c, b.left, b.top, b.width(), b.height(), rad, rad); c.clip();
       if (alphaOf(t.fill) > 0) { c.fillStyle = argb(t.fill); c.fillRect(b.left, b.top, b.width(), b.height()); }
       if (alphaOf(t.head) > 0) { c.fillStyle = argb(t.head); c.fillRect(b.left, b.top, b.width(), ch); }
       for (let r = 0; r < t.rows; r++) for (let col = 0; col < t.cols; col++) {
@@ -153,9 +155,10 @@ export class Shapes {
         if (alphaOf(color) === 0) continue;
         c.fillStyle = argb(color); c.fillRect(b.left + col * cw, b.top + r * ch, cw, ch);
       }
+      c.restore();
       const width = Math.max(1, pageWidth * .0022);
-      c.lineWidth = width; c.strokeStyle = argb(AnnotationPainter.adj(t.line)); c.lineCap = 'butt'; c.lineJoin = 'miter';
-      c.strokeRect(b.left, b.top, b.width(), b.height());
+      c.lineWidth = width; c.strokeStyle = argb(AnnotationPainter.adj(t.line)); c.lineCap = 'butt'; c.lineJoin = 'round';
+      c.beginPath(); rr(c, b.left, b.top, b.width(), b.height(), rad, rad); c.stroke();
       c.beginPath();
       for (let i = 1; i < t.rows; i++) { c.moveTo(b.left, b.top + i * ch); c.lineTo(b.right, b.top + i * ch); }
       for (let j = 1; j < t.cols; j++) { c.moveTo(b.left + j * cw, b.top); c.lineTo(b.left + j * cw, b.bottom); }

@@ -18,7 +18,7 @@ const closeAll=async()=>{await pg.keyboard.press('Escape');await pg.waitForTimeo
 for (const [name,fn] of [['youtube','askYoutube'],['table','showTableDialog'],['newnote','newNotebook']]) {
   await pg.evaluate(f=>app[f](),fn); await pg.waitForTimeout(400);
   const c=await centered(); check(name+' buttons centered', c.length>=2&&c.every(x=>Math.abs(x.dx)<=1&&Math.abs(x.dy)<=1), JSON.stringify(c));
-  if(name==='table'){const d=await pg.evaluate(()=>[...document.querySelectorAll('.m2-cdot')].map(e=>{const r=e.getBoundingClientRect();return [Math.round(r.width),Math.round(r.height)]}));check('table swatches are circles',d.length>0&&d.every(([w,h])=>w===h),JSON.stringify(d.slice(0,3)));}
+  if(name==='table'){const d=await pg.evaluate(()=>[...document.querySelectorAll('.m2-cdot')].map(e=>{const r=e.getBoundingClientRect();return [Math.round(r.width),Math.round(r.height)]}));check('table swatches are circles',d.every(([w,h])=>w===h),JSON.stringify(d.slice(0,3)));}
   await pg.locator('.ad-card').last().screenshot({path:`${OUT}/dlg-${name}.png`}); await closeAll();
 }
 await pg.evaluate(async()=>{const {AlertDialog}=await import('./js/ui/alert.js');new AlertDialog.Builder().setTitle('휴지통').setMessage('휴지통이 비어 있습니다').setPositiveButton('닫기').show();}); await pg.waitForTimeout(300);

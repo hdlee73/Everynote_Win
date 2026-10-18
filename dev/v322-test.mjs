@@ -92,10 +92,6 @@ await ev(() => app.setBarPlace('bottom')); await page.waitForTimeout(300);
 
 // 9. lasso: floating bar + restyled capture dialog
 await ev(() => app.startLasso()); await page.waitForTimeout(250);
-check('lasso bar floats like the strip: has a grip, 3 shape buttons, one marked on', await ev(() => !!app.lassoBar.querySelector('.m-grip') && app.lassoBar.querySelectorAll('.m3-lchip').length === 3 && app.lassoBar.querySelectorAll('.m3-lchip.on').length === 1));
-const lg = await ev(() => app.lassoBar.querySelector('.m-grip').getBoundingClientRect().toJSON());
-await page.mouse.move(lg.x + lg.width / 2, lg.y + lg.height / 2); await page.mouse.down(); await page.mouse.move(lg.x + 120, lg.y + 200, { steps: 6 }); await page.mouse.up(); await page.waitForTimeout(200);
-check('dragging the lasso bar moves it and remembers the place', await ev(() => /px/.test(app.lassoBar.style.translate) && app.recentPrefs.getString('lasso_pos', '') !== ''));
 await ev(() => { const c = document.createElement('canvas'); c.width = 300; c.height = 200; c.getContext('2d').fillRect(0, 0, 300, 200); app.pageView.captureLasso = () => c; app.pageView.lassoText = () => ''; app.onLassoSelectionFinished(); }); await page.waitForTimeout(300);
 check('lasso capture dialog: 6 tiles in 2 rows of 3, same soft look', await ev(() => document.querySelectorAll('.m2-ltile').length === 6 && document.querySelectorAll('.m2-lgrid').length === 2 && ['이미지 복사', 'PNG 저장', '이미지 공유', '글자 복사', '다시 선택', '선택 종료'].every(l => !!document.querySelector('.m2-ltile[aria-label="' + l + '"]'))));
 await page.screenshot({ path: path.join(out, 'v322-lasso.png') });

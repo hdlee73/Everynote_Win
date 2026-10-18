@@ -17,13 +17,7 @@ await pg.waitForTimeout(1500);
 // (Everynote: like Samsung Notes the tab strip only shows with two or more open documents, so open a second one first)
 await pg.evaluate(async([b,p])=>{const {host}=await import('./js/host.js');host._fake.put(p,new Uint8Array(b));await app.openPdf(p);},[bytes,LIB.replace('sample.pdf','sample2.pdf')]);
 await pg.waitForTimeout(1200);
-await pg.click('.m-tabadd'); await pg.waitForTimeout(300);
-const labels=await pg.evaluate(()=>[...document.querySelectorAll('.amenu .amenu-row .amenu-label')].map(e=>e.textContent));
-check('tab + menu order', JSON.stringify(labels)===JSON.stringify(['새 노트 만들기','파일 가져오기','저장된 문서 열기']), JSON.stringify(labels));
-check('tab + menu is the anchored card', await pg.evaluate(()=>!!document.querySelector('.amenu')&&!document.querySelector('.m-sheet, .asheet')));
-await pg.keyboard.press('Escape'); await pg.waitForTimeout(200);
-const plus=await pg.evaluate(()=>{const a=document.querySelector('.m-tabadd'),s=a.querySelector('svg');const r=a.getBoundingClientRect(),q=s.getBoundingClientRect();return {dx:Math.abs((r.left+r.width/2)-(q.left+q.width/2)),dy:Math.abs((r.top+r.height/2)-(q.top+q.height/2))}});
-check('tab + glyph centred', plus.dx<1&&plus.dy<1, JSON.stringify(plus));
+check('document tab strip is hidden', await pg.evaluate(()=>!document.querySelector('.m-tabadd')||document.querySelector('.m-tabadd').offsetParent===null));
 
 // 2: submenu opens right beside the tapped row
 for(const vw of [1100,420]){

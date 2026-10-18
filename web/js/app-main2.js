@@ -14,6 +14,8 @@ import { AnnotationPainter } from './painter.js';
 import { PdfDoc } from './pdfdoc.js';
 import { NotebookFiles, samePath } from './library.js';
 import { SettingsView } from './settings.js';
+import { showPopover, sxTitle, sxDivider, sxRow, sxIconRow, sxSwatches, numberWheel, pointerPosition } from './samsung-ui.js';
+import { icon as sxIcon } from './util.js';
 import { LibraryDialog, PaperChoiceView, ProgressDialog, rebindButton, inputField, defaultNoteStyle } from './library-dialog.js';
 import * as Search from './search.js';
 import { ColorPicker } from './ui/colorpicker.js';
@@ -475,7 +477,8 @@ M.showTranslations = function () {
   });
   listDialog('번역 포스트잇', labels, i => { this._goTo(items[i].page); this.editTranslation(items[i]); });
 };
-M.editMark = function (mark) {
+M.editMark = function (mark, direct) {
+  if (mark.noteOnly && !direct) { this.showStickyPopup(mark); return; }
   this.showMemoEditor('페이지 ' + (mark.page + 1) + (mark.noteOnly ? ' 메모 포스트잇' : ' 하이라이트'), mark, '저장',
     text => { mark.note = text; mark.visible = true; this.store.save(); this.redrawPages(); },
     mark.noteOnly ? '메모 삭제' : '하이라이트 삭제',
@@ -529,7 +532,7 @@ M.showMarkList = function () {
     const state = note == null || note === '' ? '' : (!mark.visible ? '[숨김] ' : (mark.minimized ? '[최소화] ' : '[펼침] '));
     return 'p.' + (mark.page + 1) + '  ' + state + (note == null || note === '' ? '(메모 없음)' : note);
   });
-  listDialog('메모·하이라이트', labels, i => { this._goTo(items[i].page); this.editMark(items[i]); });
+  listDialog('메모·하이라이트', labels, i => { this._goTo(items[i].page); this.editMark(items[i], true); });
 };
 M.showBookmarks = function () {
   if (this.store.bookmarks.size === 0) { toast('즐겨찾기한 페이지가 없습니다'); return; }
@@ -899,6 +902,7 @@ M.showLibrary = function () {
   this.libraryDialog = new LibraryDialog(this, this.library, this.libraryFolder, {
     open: file => this.openPdf(file),
     importFiles: () => this.choosePdf(),
+    importFolder: folder => this.importFolder(folder),
     newNote: (folder, refresh) => this.createNotebook(this.library.root, refresh),
     settings: () => this.showSettings(),
     changed: (source, target, moved) => { if (moved) this.libraryChanged(source, target); },
@@ -908,6 +912,34 @@ M.showLibrary = function () {
     removed: files => { for (const s of [...this.sessions]) if (files.some(f => samePath(f, s.uri))) this.closeDocument(s); },
   }, { mode: samePath(this.libraryFolder, this.library.root) ? 0 : 3 });   // Samsung Notes opens on 모든 노트; a sub-folder reopens where it was
   this.libraryDialog.show();
+};
+/** 폴더 일괄 불러오기: every PDF under a chosen folder is imported; the sub-folders are rebuilt in the library. */
+M.importFolder = async function (destination) {
+  let root;
+  try { root = await host.pickFolder('불러올 폴더 선택'); } catch (e) { toast('폴더 선택기를 열 수 없습니다'); return; }
+  if (!root) return;
+  const progress = ProgressDialog.show('폴더 불러오기', '문서를 찾는 중…');
+  try {
+    const found = []; let others = 0;
+    const walk = async (dir, rel, depth) => {
+      if (depth > 12 || found.length >= 5000) return;
+      let entries; try { entries = await host.list(dir); } catch (e) { return; }
+      entries.sort((a, b) => String(a.name).localeCompare(String(b.name), 'ko'));
+      for (const e of entries) {
+        if (e.isDir) await walk(e.path, rel + e.name + '\\', depth + 1);
+        else if (/\.pdf$/i.test(e.name)) found.push({ path: e.path, rel: rel + e.name });
+        else others++;
+      }
+    };
+    await walk(root, '', 0);
+    if (!found.length) { progress.dismiss(); toast('이 폴더에는 가져올 PDF가 없습니다'); return; }
+    const r = await this.library.importTree(found, baseName(String(root).replace(/[\\/]+$/, '')), destination || this.library.root,
+      (i, n, rel) => progress.setMessage(`(${i}/${n}) ${rel}`));
+    progress.dismiss();
+    if (this.libraryDialog && this.libraryDialog.isShowing && this.libraryDialog.isShowing()) { try { this.libraryDialog.tree.reload(); this.libraryDialog.refresh(); } catch (e) { /* ignore */ } }
+    alertCard({ title: '폴더 불러오기 완료', message: `가져옴 ${r.imported}개` + (r.skipped ? ` · 이미 가져온 문서 ${r.skipped}개 건너뜀` : '') + (r.failed ? ` · 실패 ${r.failed}개` : '')
+      + (others ? `\nPDF가 아닌 파일 ${others}개는 가져오지 않았습니다. (한글·Office 문서는 하나씩 열어 변환하세요)` : ''), positive: ['확인'] });
+  } catch (e) { progress.dismiss(); toast('폴더를 불러오지 못했습니다: ' + errMsg(e), 3500); }
 };
 /** Lets the user pick a PDF or picture to use as the background of new note pages (kept as a private copy). */
 M.requestTemplate = async function (target) {
@@ -1251,10 +1283,60 @@ M.createPlacedElement = async function (page, x, y) {
   this.placementKind = ''; this.memoMode = false; this.pageView.setMemoMode(false); this.updateToolStates();
   this.editPageElement(element, true);
 };
+/** 표 설정 (Samsung Notes): two number wheels for the rows and columns of a new table. */
+M.showTableSetup = function () {
+  const rows = numberWheel(1, 30, 2), cols = numberWheel(1, 12, 3);
+  rows.dataset.tag = 'table_rows'; cols.dataset.tag = 'table_cols';
+  const view = h('div', { class: 'sx-setup' },
+    h('div', { class: 'sx-heads' }, h('span', null, sxIcon('ic_list_view', 20, 'currentColor'), '행'), h('span', null, sxIcon('ic_grid', 20, 'currentColor'), '열')),
+    h('div', { class: 'sx-wheels' }, rows, h('span', { class: 'sx-times' }, '×'), cols));
+  alertCard({
+    title: '표 설정', view, positive: ['완료', () => {
+      const t = Table.create(rows.value(), cols.value(), 0xFFB7B3A4 | 0, 0x00E5F0FF, 0x00FFFFFF);
+      this.placementText = t.serialize(); this.placeElement('table', '');
+    }], negative: ['취소'],
+  });
+};
+/** Tap on a table: Samsung style popover (cut / copy / duplicate / fit width, add row or column, delete, style). */
+M.showTablePopup = function (element) {
+  const t = Table.parse(element.text), save = () => { element.text = t.serialize(); this.store.save(); this.redrawPages(); };
+  const grow = (r, c) => { const n = t.resized(r, c); element.text = n.serialize(); this.store.save(); this.redrawPages(); };
+  const wide = element.right - element.left >= 0.89;
+  const content = h('div', null,
+    sxIconRow([
+      { icon: 'ic_cut', label: '잘라내기', action: () => this.copySelectedElement(true) },
+      { icon: 'ic_copy', label: '복사', action: () => this.copySelectedElement(false) },
+      { icon: 'ic_duplicate', label: '복제', action: () => this.duplicateSelectedElement() },
+      null,
+      { icon: 'ic_size', label: '페이지 폭에 맞추기', disabled: wide, action: () => { const w = element.right - element.left; element.left = .05; element.right = .95; if (w <= 0) element.right = .95; this.store.save(); this.redrawPages(); } },
+    ]),
+    sxDivider(),
+    sxRow('셀 내용 편집', 'ic_compose', () => this.editTableCells(element)),
+    sxRow('행 추가', 'ic_list_view', () => { if (t.rows < 30) grow(t.rows + 1, t.cols); else toast('행은 30개까지 만들 수 있습니다'); }),
+    sxRow('열 추가', 'ic_grid', () => { if (t.cols < 12) grow(t.rows, t.cols + 1); else toast('열은 12개까지 만들 수 있습니다'); }),
+    sxRow('표 삭제', 'ic_table', () => this.deleteElement(element), { danger: true }),
+    sxDivider(),
+    sxRow('표 스타일', 'ic_palette', () => this.showTableDialog(element)));
+  const { x, y } = pointerPosition();
+  showPopover(content, { x, y, width: 236, tag: 'table_popup' });
+};
+/** Tap on a memo (sticky note): background colours and delete (Samsung Notes style); the text is edited from the same menu. */
+export const STICKY_COLORS = [0xFFFFE5B0, 0xFFD6F0E0, 0xFFF4D6D2, 0xFFCCDDF3].map(c => c | 0);
+M.showStickyPopup = function (mark) {
+  const content = h('div', null,
+    sxTitle('배경 색상'),
+    sxSwatches(STICKY_COLORS, mark.paper | 0, c => { mark.paper = c | 0; this.store.save(); this.redrawPages(); }),
+    sxDivider(),
+    sxRow('내용 편집', 'ic_compose', () => this.editMark(mark, true)),
+    sxRow('삭제', 'ic_delete', () => { const a = this.store.marks, i = a.indexOf(mark); if (i >= 0) a.splice(i, 1); this.store.save(); this.redrawPages(); toast('메모를 삭제했습니다'); }, { danger: false }));
+  const { x, y } = pointerPosition();
+  showPopover(content, { x, y, width: 220, tag: 'sticky_popup' });
+};
 M.onElementTapped = function (element) {
   if (element.kind === 'audio') { this.showAudioPlayer(element); return; }
   if (element.kind === 'text') { this.beginInlineText(element, false); return; }
   if (element.kind === 'hyperlink') { this.openHyperlink(element); return; }
+  if (element.kind === 'table') { this.showTablePopup(element); return; }
   if (element.kind === 'link' && youtubeId(element.text) != null) { element.kind = 'youtube'; element.text = youtubeId(element.text); this.store.save(); }
   const kind = element.kind, R = AnchoredMenu.Row, rows = [];
   if (kind === 'link') rows.push(new R('링크 열기', 'ic_link', () => { if (this.validWebUrl(element.text)) this._openExternal(element.text, '링크를 열 앱이 없습니다'); }).tint('#5856D6'));
@@ -1595,7 +1677,10 @@ M.showShapeDialog = function (existing) {
     let line = null;
     Shapes.KINDS.forEach((id, i) => {
       if (i % 3 === 0) { line = h('div', { class: 'm2-shape-line' }); box.append(line); }
-      const b = h('div', { class: 'm2-shape-btn', role: 'button' }, Shapes.NAMES[i]);
+      const pv = h('canvas', { width: 96, height: 64, class: 'm2-shape-pv' });
+      const g = pv.getContext('2d'); g.scale(2, 2);
+      Shapes.drawShape(g, new RectF(8, 6, 40, 26), Shapes.shapeSpec(id, 0xFF3A3A3C | 0, 0x00000000, 3), 520);
+      const b = h('div', { class: 'm2-shape-btn', role: 'button', 'aria-label': Shapes.NAMES[i], title: Shapes.NAMES[i] }, pv, h('span', null, Shapes.NAMES[i]));
       b.addEventListener('click', () => { kind[0] = id; refresh(); });
       buttons.push(b); line.append(b);
     });
@@ -1624,6 +1709,7 @@ M.showShapeDialog = function (existing) {
 };
 M.showTableDialog = function (existing) {
   if (!this.renderer) { toast('문서를 먼저 여세요'); return; }
+  if (existing == null) { this.showTableSetup(); return; }
   const lineColors = [0xFF1C1C1E, 0xFF8E8E93, 0xFFFF3B30, 0xFFFF9500, 0xFF34C759, 0xFF30B0C7, 0xFF007AFF, 0xFFAF52DE].map(toInt);
   const headColors = [0x00000000, 0xFFE5F0FF, 0xFFFFE3E8, 0xFFFFF4CC, 0xFFE3F7E8, 0xFFEDE3FA, 0xFFD9D9DE, 0xFF1C1C1E].map(toInt);
   const fillColors = [0x00000000, 0xFFFFFFFF, 0xFFF2F2F7, 0xFFFFF9E0, 0xFFEAF6EC, 0xFFEAF2FF, 0xFFFCEAF0, 0xFFF3ECFA].map(toInt);

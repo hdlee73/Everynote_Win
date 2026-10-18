@@ -573,9 +573,14 @@ export class LibraryDialog {
     const rows = [];
     if (files.length === 1) rows.push(new R('이름 변경', 'ic_rename', () => this.runSelectionCommand('이름 변경')));
     rows.push(new R('복사본 만들기', 'ic_copy', () => this.runSelectionCommand('복사')));
+    const here = files.length ? parentOf(files[0]) : this._target(), refreshed = () => { this.selectionMode = false; this.selected.clear(); this.refresh(); };
+    if (files.length >= 2) rows.push(new R('문서 합치기', 'ic_page_add', async () => (await import('./pagetools.js')).mergeDialog(repo, this._orderedSelection(files), here, refreshed)));
+    if (files.length === 1) rows.push(new R('페이지 발췌하여 새 파일 만들기', 'ic_page_add', async () => (await import('./pagetools.js')).extractDialog(repo, files[0], here, refreshed)));
     rows.push(new R(allFavorite ? '즐겨찾기 해제' : '즐겨찾기에 추가', allFavorite ? 'ic_star' : 'ic_star_outline', () => this.runSelectionCommand('즐겨찾기')));
     this._menu(anchor, rows);
   }
+  /** Selected documents in the order they are shown on the shelf. */
+  _orderedSelection(files) { const set = new Set(files); const shown = this._items.filter(f => set.has(f)); return shown.length === files.length ? shown : files; }
   async runSelectionCommand(action) {
     const files = [...this.selected], repo = this.repository;
     if (action === '전체') {
@@ -876,6 +881,7 @@ export class LibraryDialog {
       new R('새 노트 만들기', 'ic_compose', () => { if (this.actions.newNote) this.actions.newNote(target(), () => this.refresh()); }).tint('#34C759'),
       new R('파일 가져오기', 'ic_import', () => { this.dismiss(); if (this.actions.importFiles) this.actions.importFiles(target()); }).tint('#007AFF'),
       new R('폴더 만들기', 'ic_folder_open', () => this.createFolder(target(), () => { this.tree.reload(); this.refresh(); })).tint('#F5A623'),
+      new R('폴더 일괄 불러오기', 'ic_folder_open', () => { if (this.actions.importFolder) this.actions.importFolder(target()); }).tint('#007AFF'),
     ]);
   }
   libraryMenu(anchor) {
@@ -885,6 +891,7 @@ export class LibraryDialog {
       new R('PDF 가져오기', 'ic_pdf_import', () => { this.dismiss(); if (this.actions.importFiles) this.actions.importFiles(this._target()); }),
       R.divider());
     rows.push(new R('폴더 만들기', 'ic_folder_add', () => this.createFolder(this._target(), () => { this.tree.reload(); this.refresh(); })));
+    if (this.mode !== TRASH && this.actions.importFolder) rows.push(new R('폴더 일괄 불러오기', 'ic_folder_open', () => this.actions.importFolder(this._target())));
     rows.push(
       new R('선택', null, () => { this.selectionMode = !this.selectionMode; this.selected.clear(); this._render(++this.generation); }),
       new R('보기 방법', null, () => new AlertDialog.Builder().setTitle('보기 방법').setSingleChoiceItems(LibraryRepository.VIEW_NAMES, repo.viewMode(), (d, i) => { repo.viewMode(i); d.dismiss(); this._render(++this.generation); }).show()),

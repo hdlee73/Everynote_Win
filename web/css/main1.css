@@ -361,3 +361,8 @@
 .m-penpanel .m-sw .dot .ico{transform:scale(.7)}
 .m-penpanel .m-iseg{gap:4px}
 .m-welcome-logo{display:block;width:64px;height:64px;margin:0 auto 10px}
+
+/* the document tab strip is never shown (open documents are switched from 페이지 관리 or Ctrl+Tab) */
+.m-tabstrip,.m-tabstrip.single{display:none!important}
+.m-lassobox{padding:6px 8px}
+.m-lassoshapes .m-pp-radio svg{opacity:.75}

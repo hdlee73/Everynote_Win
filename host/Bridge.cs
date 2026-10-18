@@ -132,6 +132,7 @@ sealed class Bridge
             case "fs.delete": return FsDelete(PathPolicy.WritePath(S(a, "path")));
 
             case "dialog.open": return await win.Dispatcher.InvokeAsync(() => DialogOpen(a));
+            case "dialog.folder": return await win.Dispatcher.InvokeAsync(() => DialogFolder(a));
             case "dialog.save": return await win.Dispatcher.InvokeAsync(() => DialogSave(a));
             case "net.http": return await NetHttp(a);
             case "zip.create": return await Task.Run(() => ZipCreate(a));
@@ -477,6 +478,14 @@ sealed class Bridge
         if (d.ShowDialog(win) != true) return new string[0];
         foreach (var f in d.FileNames) PathPolicy.AllowRead(f);
         return d.FileNames;
+    }
+
+    object DialogFolder(JsonElement a)
+    {
+        var d = new OpenFolderDialog { Title = S(a, "title", false) ?? "폴더 선택" };
+        if (d.ShowDialog(win) != true || string.IsNullOrEmpty(d.FolderName)) return null;
+        PathPolicy.AllowReadTree(d.FolderName);
+        return d.FolderName;
     }
 
     object DialogSave(JsonElement a)

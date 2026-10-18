@@ -326,6 +326,7 @@ const methods = {
     this.thumbInkOnly = p.getBoolean('thumb_ink', false);
     this.buildUi();
     this.pageView.setLassoShape(this.lassoShape);
+    this.applyLassoOptions();
     this.applyEraserRadius();
     this.applyDarkPage();
     this.inkPen = Math.min(4, p.getInt('ink_pen', 0));
@@ -562,7 +563,7 @@ const methods = {
     this.penButton = this.barIcon(readBar, 'tool_pen', '펜', 0xFFE8405A, v => this.penTap(v));
     this.hlButton = this.barIcon(readBar, 'tool_highlighter', '형광펜', 0xFFF5D85C, v => this.highlightTap(v));
     this.eraserButton = this.barIcon(readBar, 'tool_eraser', '지우개', 0xFF9A9A9F, v => this.eraserBarTap(v));
-    this.lassoButton = this.barIcon(readBar, 'ic_lasso', '올가미 선택', NAVY, () => this.toggleLasso());
+    this.lassoButton = this.barIcon(readBar, 'ic_lasso', '올가미 선택', NAVY, v => this.lassoTap(v));
     sep();
     this.undoButton = this.barIcon(readBar, 'ic_undo', '실행 취소', NAVY, () => this.undoInk());
     this.redoButton = this.barIcon(readBar, 'ic_redo', '다시 실행', NAVY, () => this.redoInk());
@@ -785,6 +786,28 @@ const methods = {
   applyEraserRadius() { const r = this.eraserRadius(), m = this.eraserMode(); for (const v of this.allPageViews()) { if (v.setEraserRadius) v.setEraserRadius(r); if (v.setEraserMode) v.setEraserMode(m); } },
   /** Every page view, including the second pane of a split screen. */
   allPageViews() { return [...new Set([this.firstPageView, this.secondPageView, ...(this.paneViews || [])])].filter(Boolean); },
+  /** Lasso tool: the first tap starts it, a second tap opens its panel (Samsung style: 자유형 / 사각형 and 부분 선택된 개체 포함). */
+  lassoTap(anchor) {
+    if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
+    if (this.pageView && this.pageView.isLassoMode()) this.showLassoMenu(anchor); else this.toggleLasso();
+  },
+  lassoPartial() { return this.recentPrefs.getBoolean('lasso_partial', true); },
+  applyLassoOptions() { const on = this.lassoPartial(); for (const v of this.allPageViews()) if (v.setLassoPartial) v.setLassoPartial(on); },
+  showLassoMenu(anchor) {
+    const box = h('div', { class: 'm-menubox m-lassobox', dataset: { tag: 'lasso_menu' } });
+    const names = ['자유형', '사각형', '원형'], icons = ['ic_lasso', 'ic_rect', 'ic_circle'], list = h('div', { class: 'm-radios m-lassoshapes', role: 'radiogroup', dataset: { tag: 'lasso_shape' } });
+    const rows = names.map((label, i) => {
+      const dot = h('span', { class: 'm-radio' });
+      const it = h('div', { class: 'chip m-pp-radio', role: 'radio', 'aria-label': label, dataset: { tag: 'lassopanel_shape_' + i } }, dot, mkIcon(icons[i], 22, 'currentColor'), h('span', null, label));
+      it.addEventListener('click', () => { this.chooseLassoShape(i); refresh(); });
+      list.append(it); return { it, dot };
+    });
+    const refresh = () => rows.forEach(({ it, dot }, i) => { const on = i === this.lassoShape; dot.classList.toggle('on', on); it.classList.toggle('on', on); it.setAttribute('aria-checked', String(on)); });
+    refresh();
+    box.classList.add('m-penpanel');
+    box.append(list, switchRow('부분 선택된 개체 포함', () => this.lassoPartial(), v => { this.recentPrefs.putBoolean('lasso_partial', v); this.applyLassoOptions(); }, 'lasso_partial'));
+    AnchoredMenu.show(anchor, true, [Row.custom(box)], null);
+  },
   /** Eraser range (v3.10): five sizes drawn as circles plus a fine slider; the circle also follows the pen / mouse while erasing. */
   showEraserMenu(anchor) {
     const box = h('div', { class: 'm-menubox m-eraserbox', dataset: { tag: 'eraser_menu' } });
@@ -1060,6 +1083,20 @@ const methods = {
     if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
     this.setWriteMode(!this.writeMode);
   },
+  /** 페이지 발췌: pages of the open library document become a new document (asks for the page numbers). */
+  async extractCurrentPages() {
+    const session = this.activeSession;
+    if (!session || !this.library.managed(session.uri)) { toast('문서함에 저장된 문서에서만 사용할 수 있습니다'); return; }
+    const { extractDialog } = await import('./pagetools.js');
+    extractDialog(this.library, session.uri, this.library.root, file => { if (file) this.openPdf(file); }, String(this.currentPage + 1));
+  },
+  /** 문서 합치기: the open document followed by other library documents picked in the library shelf's selection mode. */
+  async mergeWithOthers() {
+    toast('문서함에서 합칠 문서를 선택하세요 (선택 > ⋮ > 문서 합치기)', 3500);
+    this.showLibrary();
+    const d = this.libraryDialog, session = this.activeSession;
+    if (d && d.startSelection) { d.startSelection(); if (session && this.library.managed(session.uri)) { d.selected.add(session.uri); d._render(++d.generation); } }
+  },
   /** 페이지 관리 (top bar): page previews, go to, add / delete pages, outline. */
   showPageManageMenu(anchor) {
     if (this.renderer == null) { toast('문서를 먼저 여세요'); return; }
@@ -1070,6 +1107,10 @@ const methods = {
       Row.divider(),
       new Row('페이지 추가', 'ic_page_add', () => this.choosePageToInsert(this.currentPage)),
       new Row('다른 형식으로 페이지 추가', 'ic_page_add', () => this.chooseOtherPageFormat(this.currentPage)),
+      ...this.sessions.length > 1 ? [Row.divider(), ...this.sessions.filter(x => x !== this.activeSession).map(x => new Row('문서 전환 · ' + x.title, 'ic_document_tab', () => this.switchDocument(x)))] : [],
+      Row.divider(),
+      new Row('현재 페이지 발췌하여 새 파일', 'ic_page_add', () => this.extractCurrentPages()),
+      new Row('다른 문서와 합치기', 'ic_page_add', () => this.mergeWithOthers()),
       new Row('페이지 삭제', 'ic_delete', () => this.confirmDeletePage(this.currentPage)).danger()], null);
   },
   shareRows() {
@@ -1936,7 +1977,7 @@ const methods = {
     if (this.placementKind !== '') { this.createPlacedElement(page, x, y); return; }
     const m = new Mark();
     m.page = page; m.left = Math.max(0, x - 0.025); m.right = Math.min(1, x + 0.025); m.top = Math.max(0, y - 0.025); m.bottom = Math.min(1, y + 0.025);
-    m.color = this.selectedColor | 0; m.note = ''; m.noteOnly = true;
+    m.color = this.selectedColor | 0; m.note = ''; m.noteOnly = true; m.paper = 0xFFFFE5B0 | 0;
     this.showMemoEditor('새 메모 포스트잇', m, '저장', note => {
       if (!note) return;
       m.note = note; this.store.marks.push(m); this.store.save(); this.pageView.invalidate(); toast('메모 포스트잇을 저장했습니다');

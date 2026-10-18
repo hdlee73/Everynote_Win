@@ -159,7 +159,7 @@ const methods = {
   },
   updateLassoBar() {
     if (!this.lassoBar || !this.pageView) return;
-    const on = this.pageView.isLassoMode(), was = this.lassoBar.style.display !== 'none';
+    const on = false, was = false;   // the shape bar was replaced by the lasso panel (showLassoMenu)
     setShown(this.lassoBar, on);
     if (!on) return;
     if (!was) this.applyFloatPos(this.lassoBar, 'lasso');
@@ -179,7 +179,7 @@ const methods = {
     this.onSelectionAdjustStarted();
     this.highlightMode = this.memoMode = this.outlineMode = false; this.placementKind = ''; this.inkMode = 0; this.leaveHighlighter();
     this.pageView.setLassoShape(this.lassoShape); this.pageView.setLassoMode(true); this.updateToolStates();
-    this.toast(this.lassoShape === LASSO_RECT ? '드래그해서 네모 영역을 지정하세요. 모양은 위쪽 막대에서 바꿀 수 있습니다.'
+    this.toast(this.lassoShape === LASSO_RECT ? '드래그해서 네모 영역을 지정하세요. 모양은 올가미 도구를 한 번 더 눌러 바꿀 수 있습니다.'
       : this.lassoShape === LASSO_CIRCLE ? '중심에서 바깥쪽으로 드래그해 원형 영역을 지정하세요.'
         : '손가락 또는 S펜으로 원하는 영역을 둘러 그리세요. 두 손가락으로 확대할 수 있습니다.');
   },
@@ -255,13 +255,13 @@ const methods = {
     edit.addEventListener('pointerup', () => this.showInlineBar(true));   // touching the text box (tap, long press, selection) brings it back
     for (const t of ['keyup', 'click', 'select']) edit.addEventListener(t, () => { if (this._inlineSync) this._inlineSync(); });
     layer.append(edit);
-    this.inlineMove = this.inlineHandle('✥', '글상자 이동', (dx, dy, page) => {
+    this.inlineMove = this.inlineHandle(`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M12 3l-2.5 2.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M3 12l2.5-2.5M3 12l2.5 2.5M21 12l-2.5-2.5M21 12l-2.5 2.5"/></svg>`, '글상자 이동', (dx, dy, page) => {
       const w = e.right - e.left, hh = e.bottom - e.top;
       const nx = Math.max(0, Math.min(1 - w, e.left + dx / page.width())), ny = Math.max(0, Math.min(1 - hh, e.top + dy / page.height()));
       e.left = nx; e.right = nx + w; e.top = ny; e.bottom = ny + hh;
     });
-    this.inlineResize = this.inlineHandle('↔', '글상자 너비', (dx, dy, page) => { e.right = Math.max(e.left + .12, Math.min(1, e.right + dx / page.width())); });
-    const del = this.inlineDelete = h('div', { class: 'm3-handle', role: 'button', 'aria-label': '글상자 삭제', dataset: { tag: 'inline_delete' }, style: { background: css(0xFFEF5B7C) } }, '✕');
+    this.inlineResize = this.inlineHandle(`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12h17M3.5 12l3-3M3.5 12l3 3M20.5 12l-3-3M20.5 12l-3 3"/></svg>`, '글상자 너비', (dx, dy, page) => { e.right = Math.max(e.left + .12, Math.min(1, e.right + dx / page.width())); });
+    const del = this.inlineDelete = h('div', { class: 'm3-handle m3-handle-del', role: 'button', 'aria-label': '글상자 삭제', title: '글상자 삭제', dataset: { tag: 'inline_delete' } }); del.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15M9.5 7V5h5v2M6.5 7l.8 12.2a1 1 0 0 0 1 .8h7.4a1 1 0 0 0 1-.8L17.5 7M10 11v5M14 11v5"/></svg>`;
     del.addEventListener('click', () => this.deleteInlineText());
     del.addEventListener('pointerdown', ev => ev.stopPropagation());
     layer.append(del);
@@ -272,7 +272,7 @@ const methods = {
   },
   /** drag(dx, dy, pageRect) with screen px deltas. */
   inlineHandle(glyph, description, drag) {
-    const handle = h('div', { class: 'm3-handle', role: 'button', 'aria-label': description, style: { background: css(ACCENT) } }, glyph);
+    const handle = h('div', { class: 'm3-handle', role: 'button', 'aria-label': description, title: description }); handle.innerHTML = glyph;
     let last = null;
     handle.addEventListener('pointerdown', ev => { last = [ev.clientX, ev.clientY]; handle.setPointerCapture(ev.pointerId); ev.preventDefault(); ev.stopPropagation(); });
     handle.addEventListener('pointermove', ev => {
