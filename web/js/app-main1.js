@@ -621,6 +621,11 @@ const methods = {
     this.dockHandle.addEventListener('click', () => this.showFullscreenDock(false));
     root.append(this.dockHandle);
 
+    // the way out of full screen: a round button at the top right of the page area (Samsung Notes)
+    this.fsExit = h('button', { class: 'm-fsexit', type: 'button', 'aria-label': '전체 화면 종료', title: '전체 화면 종료', dataset: { tag: 'fullscreen_exit' } }, mkIcon('ic_fullscreen_exit', 20, '#252525'));
+    this.fsExit.addEventListener('click', () => this.toggleFullscreen());
+    (this.viewportLayer || root).append(this.fsExit);
+
     const mount = document.getElementById('app') || document.body;
     mount.append(root);
     this.showWelcome();
@@ -1817,17 +1822,18 @@ const methods = {
   },
 
   // ============================================================ fullscreen
-  /** The bottom menu and the full-screen floating dock never show together: the dock exists only in full screen, the bar only outside it. */
+  /** Samsung Notes full screen: only the top bar and the tab strip hide; the tool strip keeps its place and a round button (top right) leaves full screen. The old floating dock is no longer shown. */
   enforceChrome() {
-    if (this.bottomBar) this.bottomBar.style.display = this.fullscreen ? 'none' : '';
-    if (!this.fullscreen && this.fullscreenDock) {
+    if (this.bottomBar) this.bottomBar.style.display = '';
+    if (this.fsExit) this.fsExit.classList.toggle('show', !!this.fullscreen);
+    if (this.fullscreenDock) {
       this.dockShown = false; clearTimeout(this._dockTimer); clearTimeout(this._dockHideEnd);
       this.fullscreenDock.style.transition = 'none'; this.fullscreenDock.style.display = 'none';
       if (this.dockHandle) this.dockHandle.style.display = 'none';
     }
   },
   showFullscreenDock(brief) {
-    if (!this.fullscreen) { this.enforceChrome(); return; }
+    this.enforceChrome(); return;
     this.dockShown = true;
     this.dockHandle.style.display = 'none';
     clearTimeout(this._dockTimer); clearTimeout(this._dockHideEnd);
@@ -1952,12 +1958,7 @@ const methods = {
   toggleFullscreen() {
     this.fullscreen = !this.fullscreen;
     const disp = this.fullscreen ? 'none' : '';
-    this.header.style.display = disp; this.tabStrip.style.display = disp; this.bottomBar.style.display = disp; this.railMargin();
-    if (this.fullscreen) {
-      this.showFullscreenDock(true);
-      let hints = 0; try { hints = +localStorage.getItem('everynote.fullscreenHint') || 0; } catch { /* ignore */ }
-      if (hints < 3) { try { localStorage.setItem('everynote.fullscreenHint', String(hints + 1)); } catch { /* ignore */ } toast('메뉴는 화면 아래에서 위로 쓸어올리거나 아래쪽 ⌃ 버튼을 누르면 다시 나옵니다'); }
-    } else this.hideFullscreenDock(false);
+    this.header.style.display = disp; this.tabStrip.style.display = disp; this.railMargin(); this.enforceChrome();
     host.call('window.fullscreen', { on: this.fullscreen }).catch(() => {});
   },
   /** Back button == Esc: selection popup (desktop), inline text, search panel, full screen. Returns true when handled. */

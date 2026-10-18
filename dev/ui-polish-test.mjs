@@ -49,12 +49,14 @@ for (const side of ['right','left']) {
   check('rail '+side+' page label vertically centered', Math.abs(pl)<=1, 'dy='+pl);
 }
 await pg.evaluate(()=>app.setBarPlace('bottom')); await pg.waitForTimeout(300);
-// fullscreen dock icons follow the tool strip (Everynote: monochrome ink line icons, like Samsung Notes)
+// full screen (Samsung Notes): the top bar hides, the tool strip stays, a round button at the top right leaves full screen
 await pg.evaluate(()=>app.toggleFullscreen()); await pg.waitForTimeout(500);
-const tints=await pg.evaluate(()=>[...document.querySelectorAll('[data-tag=fullscreen_toolbar] svg')].map(s=>getComputedStyle(s).color));
-check('fullscreen dock icons are one ink colour', tints.length>=5&&new Set(tints).size===1, JSON.stringify(tints));
+const fsr=await pg.evaluate(()=>({strip:getComputedStyle(app.bottomBar).display!=='none'&&app.bottomBar.getBoundingClientRect().width>0,header:getComputedStyle(app.header).display==='none',exit:app.fsExit.classList.contains('show')&&app.fsExit.getBoundingClientRect().width>0,dock:getComputedStyle(app.fullscreenDock).display==='none'}));
+check('full screen keeps the tool strip, hides the top bar and the old dock, shows the exit button', fsr.strip&&fsr.header&&fsr.exit&&fsr.dock, JSON.stringify(fsr));
 await pg.screenshot({path:`${OUT}/fullscreen.png`});
-await pg.evaluate(()=>app.toggleFullscreen()); await pg.waitForTimeout(300);
+await pg.click('[data-tag=fullscreen_exit]'); await pg.waitForTimeout(300);
+check('the round button leaves full screen', await pg.evaluate(()=>!app.fullscreen&&!app.fsExit.classList.contains('show')));
+
 // highlighter transparency menu: slider + quick buttons, kept in prefs, applied to the highlight colour
 await pg.evaluate(()=>{app.setWriteMode(true);}); await pg.waitForTimeout(200);
 await pg.evaluate(()=>app.highlightTap(app.hlButton)); await pg.waitForTimeout(200);
