@@ -309,30 +309,17 @@ const methods = {
     this.placeHandle(this.inlineMove, left - 8, top - 34);
     this.placeHandle(this.inlineDelete, left + width - 22, top - 34);
     this.placeHandle(this.inlineResize, left + width - 12, editBottom - 10);
-    this.placeInlineBar(left, left + width, top, editBottom);
+    this.placeInlineBar();
   },
   /** Keeps the toolbar clear of the text being typed: above the box first (the keyboard covers the lower part), else below, else at the top. */
-  showInlineBar(shown) { if (this.inlineBar) this.inlineBar.style.display = shown ? '' : 'none'; },
-  placeInlineBar(editLeft, editRight, editTop, editBottom) {
+  showInlineBar() { if (this.inlineBar) this.inlineBar.style.display = ''; },   // the column beside the strip never covers the text, so it stays open
+  /** The typing options are a column beside the tool strip (same side as the strip, like the pen's panel), not a pill around the text box. */
+  placeInlineBar() {
     const bar = this.inlineBar, layer = this.viewportLayer;
-    if (!bar || !layer || layer.clientHeight <= 0) return;
-    const barH = bar.offsetHeight > 0 ? bar.offsetHeight : 42, H = layer.clientHeight, W = layer.clientWidth, gap = 6, minSide = 200;
-    // beside the text first (right, else left), level with the top of the box; above / below only when neither side has room
-    const right = W - editRight - gap - 4, left = editLeft - gap - 4;
-    const side = right >= minSide ? 1 : left >= minSide ? -1 : 0;
-    const set = (k, v) => { if (bar.style[k] !== v) bar.style[k] = v; };
-    if (side) {
-      const w = Math.min(424, side === 1 ? right : left), x = side === 1 ? editRight + gap : editLeft - gap - w;
-      set('width', w + 'px'); set('left', x + 'px'); set('transform', 'none');
-      set('top', Math.max(0, Math.min(editTop, Math.max(0, H - barH))) + 'px');
-      return;
-    }
-    set('width', ''); set('left', '50%'); set('transform', 'translateX(-50%)');
-    let topMargin;
-    if (editTop - 36 - barH - gap >= 2) topMargin = editTop - 36 - barH - gap;
-    else if (H - editBottom - 14 >= barH + gap) topMargin = editBottom + 14 + gap;
-    else topMargin = 4;
-    set('top', Math.max(0, Math.min(topMargin, Math.max(0, H - barH))) + 'px');
+    if (!bar || !layer) return;
+    const left = this.effectiveBarPlace() === 'left', set = (k, v) => { if (bar.style[k] !== v) bar.style[k] = v; };
+    set('top', '8px'); set('bottom', 'auto'); set('left', left ? '8px' : 'auto'); set('right', left ? 'auto' : '8px'); set('transform', 'none');
+    set('maxHeight', Math.max(120, layer.clientHeight - 16) + 'px');
   },
   placeHandle(handle, left, top) {
     if (!handle) return;
@@ -429,8 +416,8 @@ const methods = {
   /** Typing toolbar (icon buttons, Samsung Notes style): row 1 Aa . B I U . size . delete . done; row 2 align L/C/R . bullet / number / check list.
    *  The font and colour rows open only when "Aa" is tapped. */
   buildInlineBar(e) {
-    const card = h('div', { class: 'm3-inline-bar', dataset: { tag: 'inline_style_bar' } });
-    const panel = h('div', { class: 'm3-inline-panel', style: { display: 'none' } });
+    const card = h('div', { class: 'm3-inline-bar side', dataset: { tag: 'inline_style_bar' } });
+    const panel = h('div', { class: 'm3-inline-panel' });   // typing options open beside the tool strip like the pen's panel (Samsung Notes)
     // Android v1.32.0: the font is a combo box showing the chosen font in its own typeface; its menu previews every font
     const faces = h('div', { class: 'm3-fontbox', role: 'button', 'aria-label': '글꼴 선택', dataset: { tag: 'text_fonts' } });
     const showFont = () => { const at = Math.max(0, FONT_IDS.indexOf(e.font)); faces.textContent = '글꼴  ' + FONT_NAMES[at] + '  ▾'; faces.style.font = AnnotationPainter.typeface(e.font, false, false).css(14); };
@@ -458,11 +445,11 @@ const methods = {
       b.addEventListener('mousedown', ev => ev.preventDefault());     // keep the caret in the text box
       b.addEventListener('click', onClick); return b;
     };
-    const row = h('div', { class: 'm3-inline-row' }), row2 = h('div', { class: 'm3-inline-row m3-inline-row2' });
+    const row = h('div', { class: 'm3-inline-row m3-row-style' }), rowSize = h('div', { class: 'm3-inline-row m3-row-size' }), row2 = h('div', { class: 'm3-inline-row m3-inline-row2' }), rowAct = h('div', { class: 'm3-inline-row m3-row-act' });
     const style = tbtn('Aa', '글꼴·색 펼치기', 'text_style_toggle', () => {
       const open = panel.style.display === 'none'; panel.style.display = open ? '' : 'none'; style.classList.toggle('on', open);
     });
-    style.classList.add('m3-aa');
+    style.classList.add('m3-aa'); style.style.display = 'none';
     const bold = tbtn(h('span', { style: { fontWeight: '800', fontSize: '16px' } }, 'B'), '굵게', 'text_bold', () => { e.bold = !e.bold; this.applyInlineStyle(); });
     const italic = tbtn(icon('ic_italic', 20, 'currentColor'), '기울임', 'text_italic', () => { e.italic = !e.italic; this.applyInlineStyle(); });
     const underline = tbtn(icon('ic_underline', 20, 'currentColor'), '밑줄', 'text_underline', () => { e.underline = !e.underline; this.applyInlineStyle(); });
@@ -473,11 +460,12 @@ const methods = {
     const lm = tbtn(icon('ic_minus', 18, 'currentColor'), '줄간격 좁게', 'text_line_less', () => this.changeInlineLine(-.05));
     const lp = tbtn(icon('ic_plus', 18, 'currentColor'), '줄간격 넓게', 'text_line_more', () => this.changeInlineLine(.05));
     lineRow.append(h('div', { class: 'm3-line-label' }, '줄간격'), lm, this.inlineLine, lp, fit);
-    row.append(style, bold, italic, underline, strike, h('div', { class: 'm3-sep' }), minus, this.inlineSize, plus, h('div', { style: { flex: '1' } }));
-    row.append(iconButton('ic_delete', '글상자 삭제', DANGER, () => this.deleteInlineText(), 34, 34, 7));
+    row.append(style, bold, italic, underline, strike);
+    rowSize.append(minus, this.inlineSize, plus);
+    rowAct.append(iconButton('ic_delete', '글상자 삭제', DANGER, () => this.deleteInlineText(), 34, 34, 7), h('div', { style: { flex: '1' } }));
     const done = iconButton('ic_check', '입력 완료', 0xFFFFFFFF | 0, () => this.commitInlineText(), 34, 34, 7);
     done.dataset.tag = 'text_done'; done.style.background = css(ACCENT); done.style.borderRadius = '17px'; done.style.marginLeft = '4px';
-    row.append(done);
+    rowAct.append(done);
     const aligns = [[0, 'left', '왼쪽 정렬', 'ic_align_left'], [1, 'center', '가운데 정렬', 'ic_align_center'], [2, 'right', '오른쪽 정렬', 'ic_align_right']]
       .map(([v, name, label, ic]) => ({ v, b: tbtn(icon(ic, 20, 'currentColor'), label, 'text_align_' + name, () => { e.align = v; this.applyInlineStyle(); }) }));
     const lists = [[1, 'bullet', '글머리 기호', 'ic_list_bullet'], [2, 'number', '번호 매기기', 'ic_list_number'], [3, 'check', '체크리스트', 'ic_list_check']]
@@ -489,7 +477,8 @@ const methods = {
       const al = AnnotationPainter.alignIndex(e.align), ck = this.currentLineKind();
       aligns.forEach(a => mark(a.b, al === a.v)); lists.forEach(l => mark(l.b, ck === l.v));
     };
-    card.append(row, row2, panel);
+    panel.prepend(row, rowSize); panel.append(row2, rowAct);
+    card.append(panel);
     this.inlineBar = card;
     this.viewportLayer.append(card);
   },

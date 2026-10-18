@@ -92,3 +92,22 @@
 .m3-handle-del{color:#DB332A}
 .m3-handle svg{display:block;pointer-events:none}
 .m3-inline-text{border:1.5px solid #3A3A3D;border-radius:10px;background:rgba(255,255,255,.55)}
+
+/* typing options: a column beside the tool strip (Samsung Notes), always open while a text box is edited */
+.m3-inline-bar.side{position:absolute;z-index:42;left:auto;right:8px;top:8px;transform:none;width:236px;max-width:calc(100% - 16px);padding:10px 8px;background:rgba(255,255,255,.97);border-radius:18px;box-shadow:0 3px 14px rgba(0,0,0,.2);overflow-x:hidden;overflow-y:auto;scrollbar-width:thin}
+.m3-inline-bar.side>*{width:100%;min-width:0}
+.m3-inline-bar.side .m3-inline-panel{display:flex;flex-direction:column;gap:6px}
+.m3-inline-bar.side .m3-inline-row{height:auto;min-height:36px;flex-wrap:wrap;justify-content:space-between}
+.m3-inline-bar.side .m3-fontbox{margin:0;height:36px}
+.m3-inline-bar.side .m3-row-style,.m3-inline-bar.side .m3-row-size{justify-content:space-around}
+.m3-inline-bar.side .m3-line-row{flex-wrap:wrap;gap:2px}
+.m3-inline-bar.side .m3-fit-ruler{margin:4px 0 0}
+.m3-inline-bar.side .m3-inline-row2{height:auto;justify-content:flex-start;gap:2px}
+.m3-inline-bar.side .m3-sep{display:none}
+.m3-inline-bar.side .m3-row-act{justify-content:flex-end}
+/* round button that leaves full screen (top right of the page area; Samsung Notes) */
+.m-fsexit{position:absolute;z-index:48;top:12px;right:14px;width:36px;height:36px;border:0;border-radius:18px;background:#fff;box-shadow:0 2px 8px rgba(0,0,0,.25);display:none;align-items:center;justify-content:center;cursor:pointer;color:#252525;padding:0}
+.m-fsexit.show{display:flex}
+.m3-inline-bar.side .m2-swatches{display:flex;flex-wrap:wrap;justify-content:flex-start;height:auto!important;padding:4px 2px!important;gap:6px;width:100%}
+.m3-inline-bar.side .m2-dot{margin:0}
+.m3-inline-bar.side .m3-tbtn{width:30px;margin:0}

@@ -53,12 +53,11 @@ await shot('04-inline');
 check('inline textarea has focus + text', await ev(() => app.inlineEdit.value.includes('두번째') && app.inlineElement.text.includes('안녕')));
 // v1.27: slim one-row bar, above the box, font/colour rows only after "Aa"
 const geo = await ev(() => { const b = app.inlineBar.getBoundingClientRect(), t = app.inlineEdit.getBoundingClientRect(), l = app.viewportLayer.getBoundingClientRect(); return { barBottom: b.bottom, boxTop: t.top, barH: b.height, panelShown: getComputedStyle(app.inlineBar.querySelector('.m3-inline-panel')).display !== 'none', barL: b.left - l.left, barR: b.right - l.left, w: l.width }; });
-check('style bar = two compact icon rows, hidden font/colour panel', geo.barH < 90 && !geo.panelShown, JSON.stringify(geo));
-check('style bar sits above the box (clear of the text)', geo.barBottom <= geo.boxTop, JSON.stringify(geo));
 await shot('04b-inline-bar-above');
 await page.click('[data-tag="text_bold"]'); await page.click('[aria-label="글자 크게"]'); await page.click('[aria-label="글자 크게"]');
-await page.click('[data-tag="text_style_toggle"]'); await page.waitForTimeout(150);
+await page.waitForTimeout(150);   // the typing options are a column beside the strip, always open
 check('Aa opens font + colour rows (+ rainbow chip)', await ev(() => getComputedStyle(app.inlineBar.querySelector('.m3-inline-panel')).display !== 'none') && (await page.locator('[data-tag="text_colors"] [data-tag="color_more"]').count()) === 1);
+check('typing options are a column beside the tool strip (not a pill over the text)', await ev(() => { const b = app.inlineBar.getBoundingClientRect(), v = app.viewportLayer.getBoundingClientRect(); return b.height > b.width && Math.abs(b.right - v.right) < 12; }));
 await shot('04c-inline-bar-open');
 // v3 toolbar: icon-only formatting buttons (tooltips + aria-labels)
 const tb = await ev(() => { const b = [...app.inlineBar.querySelectorAll('.m3-tbtn,.m3-ib')].filter(x => x.dataset.tag !== 'text_style_toggle'); return { n: b.length, textless: b.every(x => (x.textContent.trim() === '' || x.dataset.tag === 'text_bold') && (x.querySelector('svg') || x.dataset.tag === 'text_bold') && x.title && x.getAttribute('aria-label')) }; });
@@ -109,7 +108,7 @@ const mb = await page.locator('.m3-handle').first().boundingBox();
 await page.mouse.move(mb.x + 15, mb.y + 15); await page.mouse.down(); await page.mouse.move(mb.x + 75, mb.y + 55, { steps: 5 }); await page.mouse.up();
 check('move handle moved element', (await ev(() => app.inlineElement.left)) > before);
 await ev(() => app.inlineEdit.focus()); await page.keyboard.type('z');
-check('format bar hides once typing starts', await ev(() => getComputedStyle(app.inlineBar).display === 'none'));
+check('typing options stay open beside the strip while typing', await ev(() => getComputedStyle(app.inlineBar).display !== 'none'));
 await ev(() => app.inlineEdit.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })));
 check('format bar returns when the text box is touched', await ev(() => getComputedStyle(app.inlineBar).display !== 'none'));
 await page.click('[data-tag="text_done"]');
