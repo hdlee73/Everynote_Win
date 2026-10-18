@@ -1,4 +1,4 @@
-// v3.28.0: lasso panel, merge / extract, folder import, shape / table / sticky memo popovers, no tab strip.  node dev/v328-test.mjs
+// v3.29.0: lasso panel, merge / extract, folder import, shape / table / sticky memo popovers, no tab strip.  node dev/v328-test.mjs
 import {chromium} from '/tmp/npmtest/node_modules/playwright/index.mjs';
 import {serve} from './server.mjs'; import fs from 'fs';
 const PORT=8200+Math.floor(Math.random()*700); const s=await serve(PORT);
