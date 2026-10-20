@@ -23,7 +23,26 @@ function rr(c, x, y, w, h, rx, ry) {
 }
 
 export class Table {
-  constructor() { this.rows = 3; this.cols = 3; this.line = 0xFF3A3A3C | 0; this.head = 0xFFE5F0FF | 0; this.fill = 0x00FFFFFF; this.cells = []; this.bg = []; }
+  constructor() { this.rows = 3; this.cols = 3; this.line = 0xFF3A3A3C | 0; this.head = 0xFFE5F0FF | 0; this.fill = 0x00FFFFFF; this.cells = []; this.bg = []; this.colW = null; this.rowH = null; }
+
+  /** Column / row sizes as fractions of the table (sum 1); equal when never resized. */
+  colWeights() { return Table._norm(this.colW, this.cols); }
+  rowWeights() { return Table._norm(this.rowH, this.rows); }
+  static _norm(w, n) {
+    if (!w || w.length !== n || w.some(x => !(x > 0))) return new Array(n).fill(1 / n);
+    const sum = w.reduce((a, b) => a + b, 0); return w.map(x => x / sum);
+  }
+  /** Cumulative borders 0..1 (length n + 1). */
+  static edges(w) { const e = [0]; for (const x of w) e.push(e[e.length - 1] + x); e[e.length - 1] = 1; return e; }
+  /** Moves the border between neighbour [i] and [i+1] to cumulative position [pos] (0..1); each side keeps at least [min]. */
+  static dragBorder(w, i, pos, min = .04) {
+    const e = Table.edges(w), lo = e[i] + min, hi = e[i + 2] - min;
+    if (hi < lo) return w;
+    const p = Math.max(lo, Math.min(hi, pos)), out = w.slice(); out[i] = p - e[i]; out[i + 1] = e[i + 2] - p; return out;
+  }
+  setColWeights(w) { this.colW = Table._equal(w) ? null : w.slice(); }
+  setRowWeights(w) { this.rowH = Table._equal(w) ? null : w.slice(); }
+  static _equal(w) { return w.every(x => Math.abs(x - 1 / w.length) < .00015); }
 
   static parse(text) {
     const t = new Table();
@@ -35,9 +54,17 @@ export class Table {
     for (let i = 0; i < t.cells.length; i++) t.cells[i] = i + 1 < lines.length ? lines[i + 1] : '';
     t.bg = new Array(t.cells.length).fill(0);
     const colorLine = t.cells.length + 1;
-    if (colorLine < lines.length && lines[colorLine].startsWith('~')) {
-      const parts = lines[colorLine].substring(1).split(',');
-      for (let i = 0; i < t.bg.length && i < parts.length; i++) if (/^[0-9A-F]{8}$/.test(parts[i])) t.bg[i] = Shapes.parseColor(parts[i]);
+    for (let k = colorLine; k < lines.length; k++) {
+      const line = lines[k];
+      if (line.startsWith('~')) {
+        const parts = line.substring(1).split(',');
+        for (let i = 0; i < t.bg.length && i < parts.length; i++) if (/^[0-9A-F]{8}$/.test(parts[i])) t.bg[i] = Shapes.parseColor(parts[i]);
+      } else if (line.startsWith('@')) {
+        const [c, r] = line.substring(1).split(';');
+        const cw = (c || '').split(',').map(Number), rh = (r || '').split(',').map(Number);
+        if (cw.length === t.cols && cw.every(x => x > 0)) t.colW = cw;
+        if (rh.length === t.rows && rh.every(x => x > 0)) t.rowH = rh;
+      }
     }
     return t;
   }
@@ -55,6 +82,8 @@ export class Table {
     const t = Table.create(newRows, newCols, this.line, this.head, this.fill);
     for (let r = 0; r < Math.min(this.rows, newRows); r++)
       for (let c = 0; c < Math.min(this.cols, newCols); c++) { t.cells[r * newCols + c] = this.cells[r * this.cols + c]; t.bg[r * newCols + c] = this.bg[r * this.cols + c]; }
+    if (newCols === this.cols && this.colW) t.colW = this.colW.slice();
+    if (newRows === this.rows && this.rowH) t.rowH = this.rowH.slice();
     return t;
   }
 
@@ -62,6 +91,10 @@ export class Table {
     let s = `${this.rows},${this.cols},${Shapes.hex(this.line)},${Shapes.hex(this.head)},${Shapes.hex(this.fill)}`;
     for (const cell of this.cells) s += '\n' + (cell == null ? '' : String(cell).replace(/[\n\r]/g, ' '));
     const bg = this.bg || []; if (bg.some(color => alphaOf(color) !== 0)) s += '\n~' + bg.map(color => (alphaOf(color) !== 0 ? Shapes.hex(color) : '')).join(',');
+    if (this.colW || this.rowH) {
+      const f = w => w.map(x => x.toFixed(4)).join(',');
+      s += '\n@' + f(this.colWeights()) + ';' + f(this.rowWeights());
+    }
     return s;
   }
 }
@@ -143,34 +176,35 @@ export class Shapes {
   static drawTable(c, b, text, pageWidth) {
     const t = Table.parse(text);
     b = RectF.from(b);
-    const cw = b.width() / t.cols, ch = b.height() / t.rows;
+    const xs = Table.edges(t.colWeights()).map(f => b.left + f * b.width()), ys = Table.edges(t.rowWeights()).map(f => b.top + f * b.height());
+    const cw = b.width() / t.cols, ch = b.height() / t.rows, ch0 = ys[1] - ys[0];
     c.save();
     try {
-      const rad = Math.max(2, Math.min(pageWidth * .02, ch * .5, cw * .5));   // Samsung Notes: rounded outer corners
+      const rad = Math.max(2, Math.min(pageWidth * .02, Math.min(...ys.slice(1).map((y, i) => y - ys[i])) * .5, Math.min(...xs.slice(1).map((x, i) => x - xs[i])) * .5));   // Samsung Notes: rounded outer corners
       c.save(); c.beginPath(); rr(c, b.left, b.top, b.width(), b.height(), rad, rad); c.clip();
       if (alphaOf(t.fill) > 0) { c.fillStyle = argb(t.fill); c.fillRect(b.left, b.top, b.width(), b.height()); }
-      if (alphaOf(t.head) > 0) { c.fillStyle = argb(t.head); c.fillRect(b.left, b.top, b.width(), ch); }
+      if (alphaOf(t.head) > 0) { c.fillStyle = argb(t.head); c.fillRect(b.left, b.top, b.width(), ch0); }
       for (let r = 0; r < t.rows; r++) for (let col = 0; col < t.cols; col++) {
         const color = t.bg[r * t.cols + col];
         if (alphaOf(color) === 0) continue;
-        c.fillStyle = argb(color); c.fillRect(b.left + col * cw, b.top + r * ch, cw, ch);
+        c.fillStyle = argb(color); c.fillRect(xs[col], ys[r], xs[col + 1] - xs[col], ys[r + 1] - ys[r]);
       }
       c.restore();
       const width = Math.max(1, pageWidth * .0022);
       c.lineWidth = width; c.strokeStyle = argb(AnnotationPainter.adj(t.line)); c.lineCap = 'butt'; c.lineJoin = 'round';
       c.beginPath(); rr(c, b.left, b.top, b.width(), b.height(), rad, rad); c.stroke();
       c.beginPath();
-      for (let i = 1; i < t.rows; i++) { c.moveTo(b.left, b.top + i * ch); c.lineTo(b.right, b.top + i * ch); }
-      for (let j = 1; j < t.cols; j++) { c.moveTo(b.left + j * cw, b.top); c.lineTo(b.left + j * cw, b.bottom); }
+      for (let i = 1; i < t.rows; i++) { c.moveTo(b.left, ys[i]); c.lineTo(b.right, ys[i]); }
+      for (let j = 1; j < t.cols; j++) { c.moveTo(xs[j], b.top); c.lineTo(xs[j], b.bottom); }
       c.stroke();
-      const size = Math.max(6, Math.min(ch * .46, pageWidth * .03));
+      const size = Math.max(6, Math.min(Math.min(...ys.slice(1).map((y, i) => y - ys[i])) * .46, pageWidth * .03));
       c.textAlign = 'left'; c.textBaseline = 'alphabetic';
       const fm = Typeface.DEFAULT.metrics(c, size);
       const headLit = alphaOf(t.head) > 0, fillLit = alphaOf(t.fill) > 0;
       for (let r = 0; r < t.rows; r++) for (let col = 0; col < t.cols; col++) {
         const s = t.cells[r * t.cols + col];
         if (s == null || s === '') continue;
-        const avail = cw - size * .6;
+        const cellW = xs[col + 1] - xs[col], cellH = ys[r + 1] - ys[r], avail = cellW - size * .6;
         if (avail <= 0) continue;
         const bold = r === 0 && headLit;
         c.font = Typeface.DEFAULT.css(size, bold);
@@ -179,7 +213,7 @@ export class Shapes {
         const dark = cellLit && (0.299 * ((cellBg >> 16) & 255) + 0.587 * ((cellBg >> 8) & 255) + 0.114 * (cellBg & 255)) < 110;
         const lit = cellLit || (r === 0 && headLit) || (r > 0 && fillLit);
         c.fillStyle = argb(dark ? 0xFFFFFFFF : lit ? 0xFF1C1C1E : AnnotationPainter.adj(0xFF1C1C1E));
-        c.fillText(shown, b.left + col * cw + size * .3, b.top + r * ch + ch / 2 - (fm.ascent + fm.descent) / 2);
+        c.fillText(shown, xs[col] + size * .3, ys[r] + cellH / 2 - (fm.ascent + fm.descent) / 2);
       }
     } finally { c.restore(); }
   }

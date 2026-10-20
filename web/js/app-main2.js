@@ -1009,7 +1009,7 @@ M.importFolder = async function (destination) {
     };
     await walk(root, '', 0);
     if (!found.length) { progress.dismiss(); toast('이 폴더에는 가져올 PDF가 없습니다'); return; }
-    const r = await this.library.importTree(found, baseName(String(root).replace(/[\\/]+$/, '')), destination || this.library.root,
+    const r = await this.library.importTree(found, baseName(String(root).replace(/[\\/]+$/, '')) || String(root), destination || this.library.root,
       (i, n, rel) => progress.setMessage(`(${i}/${n}) ${rel}`));
     progress.dismiss();
     if (this.libraryDialog && this.libraryDialog.isShowing && this.libraryDialog.isShowing()) { try { this.libraryDialog.tree.reload(); this.libraryDialog.refresh(); } catch (e) { /* ignore */ } }
@@ -1086,6 +1086,22 @@ M.chooseOtherPageFormat = function (afterIndex) {
 M.insertPage = function (session, paper, afterIndex, sizeMode = 0) {
   const file = session.uri;
   return this.modifyPages(session, '새 페이지를 추가하는 중…', () => this.library.insertPage(file, paper, afterIndex, sizeMode), () => session.store.insertPageAfter(afterIndex), afterIndex + 1, '페이지 추가 실패');
+};
+/** 표지 만들기: draws a cover picture and puts it in front of the document (an existing cover is replaced). */
+M.makeCover = async function () {
+  if (!this.activeSession || !this.renderer) { toast('문서를 먼저 여세요'); return; }
+  const session = this.activeSession;
+  if (!this.library.managed(session.uri)) { toast('문서함에 저장한 뒤 표지를 만드세요'); return; }
+  let info;
+  try { info = await this.library.coverInfo(session.uri); } catch (e) { toast(errMsg(e)); return; }
+  const saved = (() => { try { return JSON.parse(this.recentPrefs.getString('cover_spec', '{}')); } catch (e) { return {}; } })();
+  const title = baseName(session.uri).replace(/\.pdf$/i, '');
+  const { showCoverDialog, coverPng } = await import('./cover.js');
+  showCoverDialog({ ...saved, title, subtitle: '' }, info.has, async spec => {
+    this.recentPrefs.putString('cover_spec', JSON.stringify({ tpl: spec.tpl, color: spec.color, name: spec.name }));
+    const png = await coverPng(spec, info.aspect), file = session.uri;
+    await this.modifyPages(session, info.has ? '표지를 바꾸는 중…' : '표지를 만드는 중…', () => this.library.putCover(file, png, info.has), () => { if (!info.has) session.store.insertPageAfter(-1); }, 0, '표지 만들기 실패');
+  });
 };
 M.confirmDeletePage = function (index) {
   if (!this.activeSession || !this.renderer) return;
@@ -1712,6 +1728,7 @@ M.insertRows = function () {
   const R = AnchoredMenu.Row;
   return [
     ...this.pasteElementRow(R),
+    new R('붙여넣기 (글자·이미지)', 'ic_paste', () => this.pasteFromMenu()).tint('#007AFF'),
     new R('사진·이미지', 'ic_image', () => this.insertImage()).tint('#007AFF'),
     new R('스티커', 'ic_sticker', () => this.showStickerPicker()).tint('#FF9500'),
     new R('도형', 'ic_rect', () => this.showShapeDialog(null)).tint('#AF52DE'),
@@ -1975,7 +1992,45 @@ M.onPasteEvent = function (e) {
   if (img) { e.preventDefault(); this.importImage(img); return; }
   const id = youtubeId(text);
   if (id != null) { e.preventDefault(); this.importYoutube(id); return; }
+  if (text.trim() !== '') { e.preventDefault(); this.pasteText(text); return; }
   e.preventDefault(); this._pasteDialog();
+};
+/** Text copied in another program becomes a typing box (글상자): at the long-pressed point, else near the top of the shown page. */
+M.pasteText = function (text) {
+  if (!this.renderer || !this.store) { toast('문서를 먼저 여세요'); return; }
+  text = String(text).replace(/\r\n?/g, '\n').replace(/\s+$/, '').slice(0, 20000);
+  if (text.trim() === '') { toast('붙여넣을 글자가 없습니다'); return; }
+  const t = this.freshDrop();
+  const page = t != null ? t[0] | 0 : this.currentPage, x = t != null ? t[1] : .08, y = t != null ? t[2] : .08;
+  this.commitInlineText();
+  const box = this.newTextBox(page, x, y);
+  box.left = Math.max(0, Math.min(.5, x)); box.right = Math.min(.95, box.left + .6); box.top = Math.max(0, Math.min(.9, y));
+  box.text = text; this.fitTextElement(box);
+  this.store.elements.push(box); this.store.save(); this.redrawPages();
+  if (this.pageView && this.pageView.selectElement) { try { this.pageView.selectElement(box); } catch (err) { /* keep the box as is */ } }
+  toast('글상자로 붙여넣었습니다. 탭하면 고칠 수 있습니다');
+};
+/** '붙여넣기' of the insert menu: whatever is on the clipboard (picture, link, text). */
+M.pasteFromMenu = async function () {
+  if (!this.renderer) { toast('문서를 먼저 여세요'); return; }
+  if (this.elementClip && !(navigator.clipboard && navigator.clipboard.readText)) { this.pasteElement(); return; }
+  const drop = this.dropTarget, dropTime = this.dropTime;
+  try {
+    if (navigator.clipboard && navigator.clipboard.read) {
+      const items = await navigator.clipboard.read();
+      for (const item of items) { const it = item.types.find(t => t.startsWith('image/')); if (it) { this.dropTarget = drop; this.dropTime = dropTime; this.importImage(await item.getType(it)); return; } }
+      for (const item of items) if (item.types.includes('text/plain')) {
+        const text = await (await item.getType('text/plain')).text();
+        if (this.elementClip && text === this.elementClip.sys) { this.dropTarget = null; this.pasteElement(drop && Date.now() - dropTime < 30000 ? { page: drop[0], x: drop[1], y: drop[2] } : null); return; }
+        const id = youtubeId(text); if (id != null) { this.importYoutube(id); return; }
+        if (text.trim() !== '') { this.dropTarget = drop; this.dropTime = dropTime; this.pasteText(text); return; }
+      }
+    } else if (navigator.clipboard && navigator.clipboard.readText) {
+      const text = await navigator.clipboard.readText();
+      if (text.trim() !== '') { this.dropTarget = drop; this.dropTime = dropTime; this.pasteText(text); return; }
+    }
+  } catch (e) { /* permission denied / empty */ }
+  toast('클립보드에 붙여넣을 글자나 이미지가 없습니다. Ctrl+V로도 붙여넣을 수 있습니다');
 };
 M._pasteDialog = function () {
   alertCard({ title: '이미지 붙여넣기', message: '클립보드에 이미지가 없습니다. 브라우저의 ‘이미지 복사’를 사용하거나 저장된 이미지를 선택하세요.', positive: ['이미지 선택', () => this.pickImage()], negative: ['닫기'] });
@@ -1990,11 +2045,14 @@ M.pasteImage = async function () {
         if (it) { this.importImage(await item.getType(it)); return; }
       }
       for (const item of items) if (item.types.includes('text/plain')) {
-        const id = youtubeId(await (await item.getType('text/plain')).text());
+        const text = await (await item.getType('text/plain')).text(), id = youtubeId(text);
         if (id != null) { this.importYoutube(id); return; }
+        if (text.trim() !== '') { this.pasteText(text); return; }
       }
     } else if (navigator.clipboard && navigator.clipboard.readText) {
-      const id = youtubeId(await navigator.clipboard.readText()); if (id != null) { this.importYoutube(id); return; }
+      const text = await navigator.clipboard.readText(), id = youtubeId(text);
+      if (id != null) { this.importYoutube(id); return; }
+      if (text.trim() !== '') { this.pasteText(text); return; }
     }
   } catch (e) { /* permission denied / empty: fall through to the hint dialog */ }
   this._pasteDialog();

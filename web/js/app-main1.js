@@ -1113,6 +1113,7 @@ const methods = {
       Row.divider(),
       new Row('페이지 추가', 'ic_page_add', () => this.choosePageToInsert(this.currentPage)),
       new Row('다른 형식으로 페이지 추가', 'ic_page_add', () => this.chooseOtherPageFormat(this.currentPage)),
+      new Row('표지 만들기', 'ic_page_add', () => this.makeCover()),
       ...this.sessions.length > 1 ? [Row.divider(), ...this.sessions.filter(x => x !== this.activeSession).map(x => new Row('문서 전환 · ' + x.title, 'ic_document_tab', () => this.switchDocument(x)))] : [],
       Row.divider(),
       new Row('현재 페이지 발췌하여 새 파일', 'ic_page_add', () => this.extractCurrentPages()),

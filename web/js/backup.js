@@ -134,4 +134,4 @@ export function compareVersions(a, b) {
 export const APP_NAME = 'Everynote';
 export const AUTHOR_LINE = '만든이 이현덕 (hdlee73@gmail.com)';
 /** Date of this release, shown in 앱 정보 when the host does not report its build date. Update together with VERSION. */
-export const RELEASE_DATE = '2026-10-15';
+export const RELEASE_DATE = '2026-10-20';
