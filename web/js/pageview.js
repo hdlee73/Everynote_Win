@@ -627,9 +627,10 @@ export class PdfPageView {
     return [clamp((vx - d.left) / d.width(), 0, 1), clamp((vy - d.top) / d.height(), 0, 1)];
   }
   pageFraction(y) { const r = this.pageRect(); return r.height() <= 0 ? 0.5 : clamp((y - r.top) / r.height(), 0, 1); }
-  focusOnPoint(x, y) {
+  /** Centres a page point; zoomIn=false keeps the current zoom (search results), otherwise the view zooms in to at least 170%. */
+  focusOnPoint(x, y, zoomIn = true) {
     if (!this.bitmap) return;
-    this.scale = Math.max(this.scale, 1.7);
+    if (zoomIn) this.scale = Math.max(this.scale, 1.7);
     const size = this.contentSize();
     this.panX = this.width / 2 - (this.baseLeft(size) + x * size[0]);
     this.panY = this.height / 2 - (this.baseTop(size) + y * size[1]);
