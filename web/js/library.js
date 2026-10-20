@@ -321,6 +321,24 @@ export const NotebookFiles = {
     doc.removePage(index);
     return NotebookFiles._save(doc, file);
   },
+  /** Whether page 1 is a cover made by 표지 만들기 (info flag EverynoteCover), and the aspect (width / height) of page 1. */
+  async coverInfo(file) {
+    const { PDFName } = await pdfLib();
+    const doc = await loadForEdit(file, '표지를 만들 수 없는 PDF입니다');
+    const v = infoDict(doc).get(PDFName.of('EverynoteCover')), [w, h] = pageSize(doc, 0, 0);
+    return { has: !!(v && v.decodeText && v.decodeText() === 'true'), aspect: w / h };
+  },
+  /** Puts a cover picture (JPEG or PNG bytes) in front of the document, or replaces the existing cover page. Returns the page count. */
+  async putCover(file, png, replace) {
+    const { PDFName, PDFString } = await pdfLib();
+    const doc = await loadForEdit(file, '표지를 만들 수 없는 PDF입니다');
+    const size = pageSize(doc, 0, 0);
+    if (replace) doc.removePage(0);
+    const page = doc.insertPage(0, size);
+    page.drawImage(await (png[0] === 0x89 ? doc.embedPng(png) : doc.embedJpg(png)), { x: 0, y: 0, width: size[0], height: size[1] });
+    infoDict(doc).set(PDFName.of('EverynoteCover'), PDFString.of('true'));
+    return NotebookFiles._save(doc, file);
+  },
   async _save(doc, file) {
     const temp = tmpName(parentOf(file), '.page-');
     try {
@@ -634,7 +652,58 @@ export class LibraryRepository {
     } finally { await quietDelete(temp); }
   }
 
+  // ---- folders: rename / move / copy / delete (documents, annotations, favorites and colors travel with them)
+  /** Moves or copies a whole folder into [destination] as [name]. Returns { folder, changes: [[oldDoc, newDoc]...] }. */
+  transferFolder(source, destination, name, move) { return this._sync(() => this._transferFolder(source, destination, name, move)); }
+  async _transferFolder(source, destination, name, move) {
+    await this._folder(destination);
+    if (samePath(source, this.root) || !this.managed(source) || !(await isDirectory(source))) throw new IOException('저장된 폴더를 선택하세요');
+    const valid = NotebookFiles.name(name), src = pathKey(source), into = pathKey(destination);
+    if (into === src || into.startsWith(src + '\\')) throw new IOException('폴더를 자기 자신 안으로 옮길 수 없습니다');
+    let target = joinP(destination, valid);
+    if (move && samePath(source, target)) return { folder: normPath(source), changes: [] };
+    if (move && await exists(target)) throw new IOException('같은 이름의 폴더가 있습니다');
+    if (!move) { let i = 1; while (await exists(target)) target = joinP(destination, `${valid} (${i++})`); }
+    const changes = [];
+    await this._copyFolderTree(source, target, move, changes);
+    await this.flush();
+    return { folder: normPath(target), changes };
+  }
+  async _copyFolderTree(from, to, move, changes) {
+    await host.mkdir(to);
+    const color = this._get('color:' + normPath(from), null);
+    if (color != null) this._put('color:' + normPath(to), color);
+    const failed = [];
+    for (const e of await this._entries(from)) {
+      try {
+        if (e.isDir) await this._copyFolderTree(e.path, joinP(to, e.name), move, changes);
+        else changes.push([e.path, await this._transfer(e.path, to, e.name, move)]);
+      } catch (err) { failed.push(err); }
+    }
+    if (move && !failed.length) {
+      // anything else in the folder (hidden files, non-PDF files) goes along; then the emptied source folder disappears
+      try { for (const f of await host.list(from)) if (!f.isDir) await host.move(joinP(from, f.name), joinP(to, f.name)); } catch { /* ignore */ }
+      this._put('color:' + normPath(from), null);
+      await quietDelete(from);
+    }
+    if (failed.length) throw failed[0];
+  }
+  /** Moves every document of a folder to the trash and removes the folder. */
+  async trashFolder(folder) {
+    if (samePath(folder, this.root) || !this.managed(folder)) throw new IOException('저장된 폴더를 선택하세요');
+    const removed = [];
+    const walk = async dir => { for (const e of await this._entries(dir)) { if (e.isDir) await walk(e.path); else { await this.trash(e.path); removed.push(e.path); } } };
+    await walk(folder);
+    this._put('color:' + normPath(folder), null);
+    await quietDelete(folder);
+    await this.flush();
+    return removed;
+  }
+
   // ---- page operations on library notes / PDFs
+  coverInfo(file) { return this._sync(async () => { await this._managedFile(file); return NotebookFiles.coverInfo(file); }); }
+  putCover(file, png, replace) { return this._sync(async () => { await this._managedFile(file); return NotebookFiles.putCover(file, png, replace); }); }
+
   async _managedFile(file) { if (!this.managed(file) || !(await isFile(file))) throw new IOException('저장된 PDF가 아닙니다'); }
   insertPage(file, requested, afterIndex, sizeMode = 0) { return this._sync(async () => { await this._managedFile(file); return NotebookFiles.insert(file, requested, afterIndex, sizeMode); }); }
   deletePage(file, index) { return this._sync(async () => { await this._managedFile(file); return NotebookFiles.delete(file, index); }); }
@@ -698,15 +767,15 @@ export class LibraryRepository {
   importTree(files, rootName, destination, progress) {
     return (async () => {
       const result = { imported: 0, skipped: 0, failed: 0, folder: null };
-      const base = await this._uniqueFolder(destination, rootName);
+      const base = await this._importFolder(destination, rootName);
       result.folder = base;
       let n = 0;
       for (const f of files) {
         n++; if (progress) progress(n, files.length, f.rel);
         try {
-          const parts = String(f.rel).split('\\').filter(Boolean); parts.pop();
+          const parts = String(f.rel).split(/[\\/]/).filter(Boolean); parts.pop();
           let dir = base;
-          for (const part of parts) { dir = joinP(dir, part.replace(/[\\/:*?"<>|]/g, '_')); await this.createFolderIfMissing(dir); }
+          for (const part of parts) { dir = joinP(dir, LibraryRepository.folderTitle(part, '폴더')); await this.createFolderIfMissing(dir); }
           if (await this.imported(f.path)) { result.skipped++; continue; }
           await this.importPdf(f.path, baseName(f.path), dir); result.imported++;
         } catch (e) { result.failed++; }
@@ -714,11 +783,23 @@ export class LibraryRepository {
       return result;
     })();
   }
-  async _uniqueFolder(parent, name) {
-    const safe = String(name || '폴더').replace(/[\\/:*?"<>|]/g, '_').trim() || '폴더';
-    let dir = joinP(parent, safe), i = 1;
-    while (await exists(dir)) dir = joinP(parent, `${safe} (${i++})`);
-    await host.mkdir(dir); return dir;
+  /** A folder name that Windows accepts: illegal characters, trailing dots / spaces and device names fixed, 100 characters at most
+   *  (a drive root such as "D:" becomes "D 드라이브"). */
+  static folderTitle(name, fallback = '가져온 폴더') {
+    let t = String(name == null ? '' : name).trim();
+    const drive = /^([A-Za-z]):?$/.exec(t); if (drive) t = drive[1].toUpperCase() + ' 드라이브';
+    // eslint-disable-next-line no-control-regex
+    t = t.replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_').replace(/[. ]+$/, '').replace(/^\.+/, '').trim();
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(t)) t = '_' + t;
+    if (t.length > 100) t = t.slice(0, 100).replace(/[. ]+$/, '');
+    return t || fallback;
+  }
+  /** The destination folder of an import: an existing folder of the same name is reused (so importing it again only adds what is new). */
+  async _importFolder(parent, name) {
+    const dir = joinP(parent, LibraryRepository.folderTitle(name));
+    if (!(await exists(dir))) await host.mkdir(dir);
+    this._dirs.set(pathKey(dir), true);
+    return dir;
   }
   async createFolderIfMissing(dir) { if (!(await exists(dir))) await host.mkdir(dir); }
 }

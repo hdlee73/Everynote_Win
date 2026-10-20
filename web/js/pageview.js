@@ -9,6 +9,7 @@
 //  * requestDisallowInterceptTouchEvent is a no-op (nothing above us scrolls).
 import { RectF, clamp, argb } from './util.js';
 import { AnnotationPainter } from './painter.js';
+import { Table } from './shapes.js';
 import { Mark, InkStroke, InkPoint } from './store.js';
 
 const DP = 1;
@@ -21,6 +22,8 @@ const THEME_LIGHT = { backdrop: '#D9DADF', border: 'rgba(0,0,0,0.20)', shadow: '
 const THEME_DARK = { backdrop: '#2B2C31', border: 'rgba(255,255,255,0.16)', shadow: 'rgba(0,0,0,0.70)' };
 // handle ids of the selected element (elementDrag): 1 move, 2..5 corners TL TR BL BR, 6 rotate, 7..10 edges T B L R, 11 delete
 const H_MOVE = 1, H_ROT = 6, H_T = 7, H_B = 8, H_L = 9, H_R = 10, H_DEL = 11;
+// table cell sizing: H_COL + j drags the border left of column j, H_ROW + i the border above row i
+const H_COL = 100, H_ROW = 200;
 
 // Action codes (MotionEvent.ACTION_*)
 const DOWN = 0, UP = 1, MOVE = 2, CANCEL = 3, POINTER_DOWN = 5, POINTER_UP = 6;
@@ -693,6 +696,11 @@ export class PdfPageView {
     if (bars || b.width() >= 44) out.push({ id: H_T, x: b.centerX(), y: b.top, kind: 'e', w: 9, h: 4 }, { id: H_B, x: b.centerX(), y: b.bottom, kind: 'e', w: 9, h: 4 });
     if (bars || b.height() >= 44) out.push({ id: H_L, x: b.left, y: b.centerY(), kind: 'e', w: 4, h: 9 }, { id: H_R, x: b.right, y: b.centerY(), kind: 'e', w: 4, h: 9 });
     if (turns) out.push({ id: H_ROT, x: b.centerX(), y: b.top - 28 * DP, kind: 'r' });
+    if (se.kind === 'table') {   // grips on the inner borders: drag to size the columns / rows (ids H_COL + j, H_ROW + i)
+      const t = Table.parse(se.text), xs = Table.edges(t.colWeights()), ys = Table.edges(t.rowWeights());
+      for (let j = 1; j < t.cols; j++) out.push({ id: H_COL + j, x: b.left + xs[j] * b.width(), y: b.top + Math.min(.28, Math.max(.12, 18 * DP / Math.max(1, b.height()))) * b.height(), kind: 'g', vert: true });
+      for (let i = 1; i < t.rows; i++) out.push({ id: H_ROW + i, x: b.left + Math.min(.28, Math.max(.12, 18 * DP / Math.max(1, b.width()))) * b.width(), y: b.top + ys[i] * b.height(), kind: 'g', vert: false });
+    }
     const flip = !(turns && se.rot) && (dest.top + se.top * dest.height() - 42 * DP) < 0;
     out.push({ id: H_DEL, x: b.right + 14 * DP, y: flip ? b.bottom + 28 * DP : b.top - 28 * DP, kind: 'd' });
     return out;
@@ -707,6 +715,10 @@ export class PdfPageView {
     if (turns) { ctx.beginPath(); ctx.moveTo(b.centerX(), b.top); ctx.lineTo(b.centerX(), b.top - 24 * d); ctx.stroke(); }
     for (const h of this._handleSpots(se, b, dest)) {
       if (h.kind === 'c') { ctx.beginPath(); ctx.arc(h.x, h.y, 8 * d, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); }
+      else if (h.kind === 'g') {
+        const gw = (h.vert ? 4 : 11) * d, gh = (h.vert ? 11 : 4) * d;
+        roundRectPath(ctx, h.x - gw, h.y - gh, h.x + gw, h.y + gh, 4 * d, 4 * d); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
+      }
       else if (h.kind === 'e') { roundRectPath(ctx, h.x - h.w * d, h.y - h.h * d, h.x + h.w * d, h.y + h.h * d, 4 * d, 4 * d); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke(); }
       else if (h.kind === 'r') {
         ctx.beginPath(); ctx.arc(h.x, h.y, 10 * d, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
@@ -755,7 +767,7 @@ export class PdfPageView {
       if (hit === 0) { if (touch || !this._toolActive()) this._setSelected(null); this.invalidate(); return false; }
       if (hit !== H_MOVE && hit !== H_ROT && hit !== H_DEL && !PdfPageView.resizable(se)) hit = H_MOVE;
       this._L('onSelectionAdjustStarted'); this.elementDrag = hit; this.elementMoved = false; this.elementStartX = e.x; this.elementStartY = e.y;
-      this.elementOrigin.set(new RectF(se.left, se.top, se.right, se.bottom)); this.elementRot0 = se.rot || 0; this._stretch0 = !!se.stretch;
+      this.elementOrigin.set(new RectF(se.left, se.top, se.right, se.bottom)); this.elementRot0 = se.rot || 0; this._stretch0 = !!se.stretch; this._tableText0 = se.text;
       return true;
     }
     if (this.elementDrag === 0) return false;
@@ -772,6 +784,17 @@ export class PdfPageView {
         let deg = Math.atan2(e.x - cx, -(e.y - cy)) * 180 / Math.PI; if (deg < 0) deg += 360;
         const snap = Math.round(deg / 15) * 15; if (Math.abs(snap - deg) < 4) deg = snap % 360;
         el.rot = Math.fround(deg); this.invalidate(); return true;
+      }
+      if (this.elementDrag >= H_COL) {   // a table's column / row border
+        let px = e.x, py = e.y;
+        if (el.rot) {
+          const ocx = dest.left + (o.left + o.right) / 2 * dest.width(), ocy = dest.top + (o.top + o.bottom) / 2 * dest.height();
+          [px, py] = PdfPageView.unrotate(px, py, ocx, ocy, el.rot);
+        }
+        const t = Table.parse(this._tableText0), col = this.elementDrag < H_ROW;
+        if (col) { const fx = ((px - dest.left) / dest.width() - o.left) / Math.max(1e-6, w); t.setColWeights(Table.dragBorder(t.colWeights(), this.elementDrag - H_COL - 1, fx)); }
+        else { const fy = ((py - dest.top) / dest.height() - o.top) / Math.max(1e-6, h); t.setRowWeights(Table.dragBorder(t.rowWeights(), this.elementDrag - H_ROW - 1, fy)); }
+        el.text = t.serialize(); this.invalidate(); return true;
       }
       if (this.elementDrag === H_MOVE) {
         const left = Math.max(0, Math.min(1 - w, o.left + dx)), top = Math.max(0, Math.min(1 - h, o.top + dy));
@@ -807,7 +830,7 @@ export class PdfPageView {
     }
     if (action === UP || action === CANCEL) {
       const moved = this.elementMoved, id = this.elementDrag; this.elementDrag = 0; this.elementMoved = false;
-      if (action === CANCEL) { const o = this.elementOrigin; se.rot = this.elementRot0; se.stretch = !!this._stretch0; se.left = o.left; se.top = o.top; se.right = o.right; se.bottom = o.bottom; this.invalidate(); }
+      if (action === CANCEL) { const o = this.elementOrigin; if (this._tableText0 != null && se.kind === 'table') se.text = this._tableText0; se.rot = this.elementRot0; se.stretch = !!this._stretch0; se.left = o.left; se.top = o.top; se.right = o.right; se.bottom = o.bottom; this.invalidate(); }
       else if (moved) this._L('onInkChanged'); else if (id === H_MOVE) this._L('onElementTapped', se);
       return true;
     }

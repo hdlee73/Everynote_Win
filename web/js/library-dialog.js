@@ -570,9 +570,10 @@ export class LibraryDialog {
   selectionMenu(anchor) {
     const R = AnchoredMenu.Row, repo = this.repository, files = [...this.selected];
     const allFavorite = files.length > 0 && files.every(f => repo.favorite(f));
-    const rows = [];
+    const rows = [], anyFolder = files.some(f => repo.isDirectory(f));
     if (files.length === 1) rows.push(new R('이름 변경', 'ic_rename', () => this.runSelectionCommand('이름 변경')));
-    rows.push(new R('복사본 만들기', 'ic_copy', () => this.runSelectionCommand('복사')));
+    rows.push(new R(anyFolder ? '복사' : '복사본 만들기', 'ic_copy', () => this.runSelectionCommand('복사')));
+    if (anyFolder) { this._menu(anchor, rows); return; }
     const here = files.length ? parentOf(files[0]) : this._target(), refreshed = () => { this.selectionMode = false; this.selected.clear(); this.refresh(); };
     if (files.length >= 2) rows.push(new R('문서 합치기', 'ic_page_add', async () => (await import('./pagetools.js')).mergeDialog(repo, this._orderedSelection(files), here, refreshed)));
     if (files.length === 1) rows.push(new R('페이지 발췌하여 새 파일 만들기', 'ic_page_add', async () => (await import('./pagetools.js')).extractDialog(repo, files[0], here, refreshed)));
@@ -588,7 +589,7 @@ export class LibraryDialog {
       else for (const f of this._items) if (!repo.isDirectory(f)) this.selected.add(f);
       this._render(++this.generation); return;
     }
-    if (!files.length) { toast('문서를 선택하세요'); return; }
+    if (!files.length) { toast('문서나 폴더를 선택하세요'); return; }
     if (this.mode === TRASH) {
       const items = files.map(f => this._trash.get(pathKey(f))).filter(Boolean);
       if (action === '복원') this.restoreItems(items); else this.confirmPurge(items);
@@ -600,7 +601,7 @@ export class LibraryDialog {
       this.selectionMode = false; this.selected.clear(); this.refresh();
       toast(allFavorite ? '즐겨찾기에서 뺐습니다' : '즐겨찾기에 추가했습니다');
     } else if (action === '이름 변경') this.rename(files[0]);
-    else if (action === '공유') this.share(files);
+    else if (action === '공유') this.share(files.filter(f => !repo.isDirectory(f)).concat(files.filter(f => repo.isDirectory(f))));
     else if (action === '삭제') this.deleteDocuments(files);
     else this.chooseDestination(files, action === '이동');
   }
@@ -829,6 +830,7 @@ export class LibraryDialog {
     const frame = h('div', { class: 'lib-frame' + (isDir ? ' dir' : ''), style: { width: cell + 'px', height: cell + 'px' } });
     if (isDir) {
       frame.append(folderGlyph(repo.folderColor(file), Math.round(cell * .46)), h('div', { class: 'lib-fcount' }, String(m.count ?? 0)));
+      if (this.selectionMode) frame.append(checkboxEl(this.selected.has(file), '선택 ' + name, () => this.toggleSelected(file)));
     } else {
       frame.append(this._cover(file, version, false));
       if (!trashItem && repo.favorite(file)) frame.append(h('div', { class: 'lib-fav' }, icon('ic_star', 14, '#FFB020')));
@@ -856,7 +858,7 @@ export class LibraryDialog {
     const row = h('div', { class: 'lib-row', 'aria-label': name, dataset: { tag: 'document:' + name } }, img,
       h('div', { class: 'txt' }, h('div', { class: 'nm' }, stripPdf(name)), h('div', { class: 'meta' }, meta)));
     if (!isDir && !trashItem && repo.favorite(file)) row.append(icon('ic_star', 18, '#FFB020'));
-    if (this.selectionMode && !isDir) row.append(checkboxEl(this.selected.has(file), '선택 ' + name, () => this.toggleSelected(file), 'row'));
+    if (this.selectionMode) row.append(checkboxEl(this.selected.has(file), '선택 ' + name, () => this.toggleSelected(file), 'row'));
     row.addEventListener('click', () => this.openOrSelect(file, row));
     onLongPress(row, el => this.longPressed(file, el));
     return row;
@@ -915,6 +917,12 @@ export class LibraryDialog {
   folderMenu(target, anchor) {
     const R = AnchoredMenu.Row;
     this._menu(anchor, [
+      new R('선택', null, () => { this.selectionMode = true; this.selected.clear(); this.selected.add(target); this._render(++this.generation); }),
+      new R('이름 변경', 'ic_rename', () => this.rename(target)),
+      new R('잘라내기 (이동)', 'ic_move', () => this.chooseDestination([target], true)),
+      new R('복사', 'ic_copy', () => this.chooseDestination([target], false)),
+      new R('삭제', 'ic_delete', () => this.deleteDocuments([target])).tint('#FF3B30'),
+      R.divider(),
       new R('폴더 색상', null, () => this.chooseFolderColor(target)),
       new R('하위 폴더 만들기', null, () => this.createFolder(target, () => { this.tree.reload(); this.refresh(); })),
       ...this._backupRows(target),
@@ -941,7 +949,8 @@ export class LibraryDialog {
     catch (e) { toast('공유할 수 없습니다: ' + e.message, LONG_TOAST); }
   }
   rename(file) {
-    const f = inputField({ text: stripPdf(baseName(file)), label: '이름' });
+    const dir = this.repository.isDirectory(file);
+    const f = inputField({ text: dir ? baseName(file) : stripPdf(baseName(file)), label: '이름' });
     const dialog = new AlertDialog.Builder().setTitle('이름 변경').setView(f.view).setPositiveButton('저장').setNegativeButton('취소').create();
     dialog.show();
     const save = () => {
@@ -967,9 +976,16 @@ export class LibraryDialog {
     if (this.busy) return; this.busy = true;
     const progress = ProgressDialog.show('', move ? '문서를 이동하는 중…' : '문서를 복사하는 중…');
     try {
-      const saved = await this.repository.transfer(file, target, name, move);
-      this.busy = false; progress.dismiss();
-      if (this.actions.changed) this.actions.changed(file, saved, move);
+      if (this.repository.isDirectory(file)) {
+        const r = await this.repository.transferFolder(file, target, name, move);
+        this.busy = false; progress.dismiss();
+        if (this.actions.changed) for (const [a, b] of r.changes) this.actions.changed(a, b, move);
+        this.tree.reload();
+      } else {
+        const saved = await this.repository.transfer(file, target, name, move);
+        this.busy = false; progress.dismiss();
+        if (this.actions.changed) this.actions.changed(file, saved, move);
+      }
       this.selectionMode = false; this.selected.clear(); this.refresh();
     } catch (e) { this.busy = false; progress.dismiss(); toast(e.message || '작업에 실패했습니다', LONG_TOAST); }
   }
@@ -978,27 +994,32 @@ export class LibraryDialog {
     const progress = ProgressDialog.show('', move ? '문서를 이동하는 중…' : '문서를 복사하는 중…');
     const changes = []; let error = '';
     for (const file of files) {
-      try { changes.push([file, await this.repository.transfer(file, destination, baseName(file), move)]); }
-      catch (e) { error = e.message || '작업에 실패했습니다'; }
+      try {
+        if (this.repository.isDirectory(file)) changes.push(...(await this.repository.transferFolder(file, destination, baseName(file), move)).changes);
+        else changes.push([file, await this.repository.transfer(file, destination, baseName(file), move)]);
+      } catch (e) { error = e.message || '작업에 실패했습니다'; }
     }
-    this.busy = false; progress.dismiss();
+    this.busy = false; progress.dismiss(); if (this.tree) this.tree.reload();
     if (this.actions.changed) for (const [a, b] of changes) this.actions.changed(a, b, move);
     this.selectionMode = false; this.selected.clear(); this.refresh();
     if (error) toast(error, LONG_TOAST);
   }
   deleteDocuments(files) {
-    new AlertDialog.Builder().setTitle('문서 삭제').setMessage(`${files.length}개 문서를 휴지통으로 이동할까요?`)
+    const folders = files.filter(f => this.repository.isDirectory(f)).length;
+    new AlertDialog.Builder().setTitle(folders ? '삭제' : '문서 삭제').setMessage(folders ? `선택한 ${files.length}개 항목(폴더 ${folders}개 포함)을 삭제할까요? 폴더 안의 문서는 휴지통으로 이동합니다.` : `${files.length}개 문서를 휴지통으로 이동할까요?`)
       .setPositiveButton('삭제', async () => {
         if (this.busy) return; this.busy = true;
         const progress = ProgressDialog.show('', '휴지통으로 이동하는 중…');
         const removed = []; let error = '';
         for (const file of files) {
-          try { await this.repository.trash(file); removed.push(file); }
+          try {
+            if (this.repository.isDirectory(file)) removed.push(...await this.repository.trashFolder(file)); else { await this.repository.trash(file); removed.push(file); }
+          }
           catch (e) { error = e.message || '삭제에 실패했습니다'; }
         }
         this.busy = false; progress.dismiss();
         if (this.actions.removed) this.actions.removed(removed);
-        this.selectionMode = false; this.selected.clear(); this.refresh();
+        this.selectionMode = false; this.selected.clear(); if (this.tree) this.tree.reload(); this.refresh();
         if (error) toast(error, LONG_TOAST);
       }).setNegativeButton('취소').show();
   }
