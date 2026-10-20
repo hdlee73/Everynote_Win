@@ -2305,10 +2305,8 @@ function fitText(el, min, max) {
   requestAnimationFrame(() => { let s = max; while (s > min && el.scrollWidth > el.clientWidth) { s--; el.style.fontSize = s + 'px'; } });
 }
 M.closeSidePanel = function () {
-  const searched = this.panelTab === 0 && this.searchHits && this.searchHits.length > 0;
   this.sidebarVisible = false; if (this.sidePanel) this.sidePanel.style.display = 'none';
   this.closeSearch(); this.hideKeyboard(); this.applySearchHighlights();
-  if (searched && this.renderer && this.resetZoomAll) this.resetZoomAll();   // Android v1.32.0: the zoom of a search jump does not stay
   window.dispatchEvent(new Event('resize'));
 };
 /** Preview panel ⋮ menu (Android v1.32.0): favorites only / all pages (checked), add page, delete page. */
@@ -2606,7 +2604,7 @@ M.selectHit = async function (index, scrollToRow) {
   const row = this.searchList.children[index];
   if (scrollToRow && row) this.searchScroll.scrollTo({ top: Math.max(0, row.offsetTop - 8), behavior: 'smooth' });
   await nextFrame();
-  const target = this.viewForPage(hit.page); if (target && this.searchCurrent === index) target.focusOnPoint(hit.x, hit.y);
+  const target = this.viewForPage(hit.page); if (target && this.searchCurrent === index) target.focusOnPoint(hit.x, hit.y, false);
 };
 M.stepSearch = function (direction) {
   if (this.searchHits.length === 0) { if (this.searchInput.value.trim().length > 0 && !this.searching) this.startSearch(); return; }
