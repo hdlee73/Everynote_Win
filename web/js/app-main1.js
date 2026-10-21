@@ -18,6 +18,7 @@ import { AnnotationStore, Mark, OutlineItem, TranslationNote } from './store.js'
 import { LibraryRepository, samePath } from './library.js';
 import { FolderIconDrawable, ProgressDialog, rebindButton } from './library-dialog.js';
 import * as office from './office.js';
+import { openEpub } from './epub.js';
 import { ColorPicker } from './ui/colorpicker.js';
 import { buildSplit } from './app-split.js';
 
@@ -33,7 +34,7 @@ const TAPE_COLORS = [0xFFFFE066, 0xFFFFB3C1, 0xFF9AD8B7, 0xFF9EC9F5, 0xFFC9A7F2,
 const PEN_ICONS = ['ic_pen_ball', 'ic_pen_pencil', 'ic_pen_fountain', 'ic_pen_brush', 'ic_pen_marker'];
 const ZOOM_STEP = 1.25;
 const PICTURE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
-const OFFICE_EXTS = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'hwp', 'hwpx', ...PICTURE_EXTS];
+const OFFICE_EXTS = ['pdf', 'epub', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'hwp', 'hwpx', ...PICTURE_EXTS];
 const sameColor = (a, b) => (a | 0) === (b | 0);
 const later = (fn, ms = 0) => setTimeout(fn, ms);
 
@@ -53,7 +54,7 @@ function setVis(el, mode) {
 }
 function isShown(view) { const s = view.el.style; return s.display !== 'none' && s.visibility !== 'hidden'; }
 const isTyping = t => !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
-const overlayOpen = () => !!document.querySelector('.ad-root,.amenu,.lib-root,.lib-prog');
+const overlayOpen = () => !!document.querySelector('.ad-root,.amenu,.lib-root,.lib-prog,.epub-root');
 
 /** segmented(labels, current, choose): row of pill chips (MainActivity.segmented). */
 function segmentedView(labels, current, choose) {
@@ -1245,7 +1246,7 @@ const methods = {
   // ============================================================ file choosing / routing
   async choosePdf() {
     let files = [];
-    try { files = await host.openDialog('문서 열기', [{ name: 'PDF·Office·한글 문서·이미지', exts: OFFICE_EXTS }], true); } catch (e) { toast('문서 열기 실패: ' + (e && e.message || e)); return; }
+    try { files = await host.openDialog('문서 열기', [{ name: 'PDF·EPUB·Office·한글 문서·이미지', exts: OFFICE_EXTS }], true); } catch (e) { toast('문서 열기 실패: ' + (e && e.message || e)); return; }
     for (const f of files || []) await this.openPdf(f);
   },
   async chooseConvertedPdf() {
@@ -1405,6 +1406,7 @@ const methods = {
   },
   async openPdfNow(uri, textOnly, requestedPage, activate) {
     const title = this.queryName(uri);
+    if (/\.epub$/i.test(title) && !textOnly) { await openEpub(this, uri, title); return; }
     if (this.isOfficeDocument(title) && !textOnly) {
       const lower = title.toLowerCase();
       if (lower.endsWith('.hwp') || lower.endsWith('.hwpx')) await this.convertHwp(uri, title);
