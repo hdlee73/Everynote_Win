@@ -22,15 +22,16 @@ export async function readZip(bytes) {
   const dec = new TextDecoder('utf-8');
   for (let i = 0; i < count; i++) {
     if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('EPUB 구조를 읽을 수 없습니다');
-    const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), nlen = dv.getUint16(p + 28, true),
+    const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), usize = dv.getUint32(p + 24, true), nlen = dv.getUint16(p + 28, true),
       elen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true), lho = dv.getUint32(p + 42, true);
     const name = dec.decode(bytes.subarray(p + 46, p + 46 + nlen));
-    if (!name.endsWith('/')) entries.set(name.toLowerCase(), { name, method, csize, lho });
+    if (!name.endsWith('/')) entries.set(name.toLowerCase(), { name, method, csize, usize, lho });
     p += 46 + nlen + elen + clen;
   }
   return {
     names: [...entries.values()].map(x => x.name),
     has: n => entries.has(String(n).toLowerCase()),
+    size: n => { const en = entries.get(String(n).toLowerCase()); return en ? en.usize : 0; },
     async read(n) {
       const en = entries.get(String(n).toLowerCase());
       if (!en) return null;
@@ -74,6 +75,7 @@ export class EpubBook {
     return book;
   }
   async text(path) { const b = await this.zip.read(path); return b ? textOf(b) : null; }
+  size(path) { return this.zip.size(path); }
   spineIndex(path) { const l = String(path).toLowerCase(); return this.spine.findIndex(s => s.toLowerCase() === l); }
   /** Title of the table-of-contents entry that chapter [index] belongs to. */
   chapterTitle(index) {
@@ -153,83 +155,177 @@ export function loadSettings() {
 }
 const saveSettings = s => { try { localStorage.setItem('everynote.epub.settings', JSON.stringify(s)); } catch (e) { /* ignore */ } };
 
-/** Style sheet injected into every chapter: overrides the book's own sizes only where the reader has a control. */
-export function readerCss(s) {
+/**
+ * Style sheet injected into every chapter. The body becomes a column container exactly one frame wide and high, so each column is one
+ * page and a page turn is a horizontal scroll by one frame width. [side] is the horizontal padding in px; [top]/[bottom] keep the text
+ * clear of the page number. Font size is applied by scaleFonts(), not here.
+ */
+export function readerCss(s, side, top = 24, bottom = 40) {
   const fam = FONT_STACK[s.font], dark = s.theme >= 2, link = dark ? '#8ab4ff' : '#0a5bd8', lh = (s.line / 10).toFixed(1);
-  return `html{zoom:${s.zoom / 100};background:${THEME_BG[s.theme]} !important;color:${THEME_FG[s.theme]} !important;}`
-    + `body{margin:0 !important;padding:16px ${Math.round(s.margin * 100 / s.zoom)}px 56px !important;box-sizing:border-box !important;max-width:none !important;width:auto !important;overflow-wrap:break-word;background:transparent !important;}`
+  return `html{height:100% !important;overflow:hidden !important;background:${THEME_BG[s.theme]} !important;color:${THEME_FG[s.theme]} !important;}`
+    + `body{margin:0 !important;padding:${top}px ${side}px ${bottom}px !important;width:100vw !important;height:100vh !important;box-sizing:border-box !important;max-width:none !important;background:transparent !important;overflow-wrap:break-word;`
+    + `column-width:calc(100vw - ${2 * side}px) !important;column-gap:${2 * side}px !important;column-fill:auto !important;}`
     + `body,body *{line-height:${lh} !important;color:inherit !important;background-color:transparent !important;max-width:100%;box-sizing:border-box;${fam ? `font-family:${fam} !important;` : ''}}`
-    + `code,pre,tt,kbd{font-family:monospace !important;}img,svg,video{max-width:100% !important;height:auto !important;}a,a *{color:${link} !important;}`;
+    + `code,pre,tt,kbd{font-family:monospace !important;}img,svg,video{max-width:100% !important;max-height:calc(100vh - ${top + bottom}px) !important;width:auto;height:auto !important;object-fit:contain;break-inside:avoid;}`
+    + `h1,h2,h3,h4{break-after:avoid;}a,a *{color:${link} !important;}`;
+}
+/** Side padding in px: the margin setting on a small gutter; a wide window gets a text column of at most 760 px (like an e-book reader). */
+export const sidePadding = (s, width) => Math.max(12 + s.margin * 1.5, Math.floor((width - 760) / 2));
+
+// ---------------------------------------------------------------- store ("EPUB 책": kept apart from the PDF library)
+const infoKey = key => 'everynote.epub.info.' + key;
+export const epubKey = (name, size) => name + '|' + size;
+const epubDir = app => joinPath((app.hostInfo && app.hostInfo.data) || 'C:\\', 'epubs');
+const readInfo = key => { try { return JSON.parse(localStorage.getItem(infoKey(key)) || 'null'); } catch (e) { return null; } };
+const writeInfo = (key, patch) => { try { localStorage.setItem(infoKey(key), JSON.stringify({ ...(readInfo(key) || {}), ...patch })); } catch (e) { /* ignore */ } };
+
+export async function listBooks(app) {
+  const dir = epubDir(app);
+  await host.mkdir(dir).catch(() => {});
+  const items = (await host.list(dir).catch(() => [])).filter(f => !f.isDir && /\.epub$/i.test(f.name));
+  return items.map(f => ({ ...f, info: readInfo(epubKey(f.name, f.size)) || {} })).sort((a, b) => (b.info.opened || 0) - (a.info.opened || 0) || a.name.localeCompare(b.name));
+}
+
+/** Copies a picked book into the shelf (the same name and size is kept once) and returns its stored path. */
+export async function addBook(app, source, name) {
+  const dir = epubDir(app);
+  await host.mkdir(dir).catch(() => {});
+  const safe = String(name || 'book.epub').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim() || 'book.epub';   // eslint-disable-line no-control-regex
+  const base = safe.replace(/\.epub$/i, ''), size = (await host.stat(source)).size;
+  for (let i = 0; i < 200; i++) {
+    const candidate = joinPath(dir, i === 0 ? base + '.epub' : `${base} (${i}).epub`), st = await host.stat(candidate);
+    if (!st.exists) { await host.copy(source, candidate); return candidate; }
+    if (st.size === size) return candidate;
+  }
+  throw new Error('책을 저장할 수 없습니다');
+}
+
+export async function openEpub(app, path, name) {
+  document.querySelectorAll('.epub-root').forEach(e => e.remove());
+  toast('책을 불러오는 중…', 1500);
+  let book, size = 0, stored = path;
+  try {
+    if (!String(path).toLowerCase().startsWith(epubDir(app).toLowerCase() + '\\')) stored = await addBook(app, path, name || baseName(path));
+    const bytes = await host.readBytes(stored);
+    size = bytes.length;
+    book = await EpubBook.open(bytes);
+  } catch (e) { toast('책을 열 수 없습니다: ' + (e && e.message || e), 4000); return; }
+  const stem = baseName(stored);
+  new EpubReader(app, book, stem, epubKey(stem, size), stored).start();
+}
+
+/** The "EPUB 책" category: every stored book with its progress; click opens it, the ✕ removes it from the shelf. */
+export async function showEpubShelf(app) {
+  document.querySelectorAll('.epub-shelf').forEach(e => e.remove());
+  const list = h('div', { class: 'epub-shelf-list' });
+  const root = h('div', { class: 'epub-shelf' },
+    h('div', { class: 'epub-bar epub-shelf-top' },
+      h('button', { class: 'epub-btn epub-back', type: 'button', 'aria-label': '닫기', onClick: () => close() }, '‹'),
+      h('div', { class: 'epub-title', style: { fontSize: '20px', fontWeight: '700' } }, 'EPUB 책'),
+      h('button', { class: 'epub-btn', type: 'button', style: { color: '#387aff' }, onClick: async () => {
+        let files; try { files = await host.openDialog('EPUB 책 가져오기', [{ name: 'EPUB', exts: ['epub'] }], true); } catch (e) { return; }
+        if (!files || !files.length) return;
+        close(); await openEpub(app, files[0], baseName(files[0]));
+        for (const f of files.slice(1)) addBook(app, f, baseName(f)).catch(() => {});
+      } }, '책 가져오기')),
+    list);
+  const close = () => { document.removeEventListener('keydown', onKey, true); root.remove(); };
+  const onKey = e => { if (e.key === 'Escape' && !document.querySelector('.ad-root')) { e.preventDefault(); e.stopImmediatePropagation(); close(); } };
+  document.addEventListener('keydown', onKey, true);
+  document.body.append(root);
+  const render = async () => {
+    const books = await listBooks(app);
+    list.replaceChildren(...(books.length ? books.map(b => {
+      const title = b.info.title || b.name.replace(/\.epub$/i, '');
+      return h('div', { class: 'epub-book', onClick: () => { close(); openEpub(app, b.path, b.name); } },
+        h('div', { class: 'epub-cover' }, '📖'),
+        h('div', { class: 'epub-meta' }, h('div', { class: 'epub-name' }, title),
+          h('div', { class: 'epub-sub' }, (b.info.percent != null ? b.info.percent + '% 읽음' : '아직 읽지 않음') + ' · ' + Math.max(1, Math.round(b.size / 1024)) + ' KB')),
+        h('button', { class: 'epub-btn epub-del', type: 'button', title: '목록에서 삭제', 'aria-label': '삭제', onClick: ev => {
+          ev.stopPropagation();
+          new AlertDialog.Builder().setTitle('책 삭제').setMessage(`‘${title}’을(를) EPUB 책 목록에서 삭제할까요? 이미 PDF로 변환한 문서는 문서함에 그대로 남습니다.`)
+            .setPositiveButton('삭제', async () => {
+              await host.delete(b.path).catch(() => {});
+              try { localStorage.removeItem(infoKey(epubKey(b.name, b.size))); localStorage.removeItem(posKey(epubKey(b.name, b.size))); } catch (e) { /* ignore */ }
+              render();
+            }).setNegativeButton('취소', null).show();
+        } }, '✕'));
+    }) : [h('div', { class: 'epub-empty' }, '저장된 EPUB 책이 없습니다. ‘책 가져오기’로 EPUB 파일을 고르면 이곳에 보관됩니다. 필기하려고 PDF로 변환한 문서는 문서함에 저장됩니다.')]));
+  };
+  await render();
 }
 
 // ---------------------------------------------------------------- reader
 const posKey = key => 'everynote.epub.pos.' + key;
 
-export async function openEpub(app, path, name) {
-  document.querySelectorAll('.epub-root').forEach(e => e.remove());
-  toast('책을 불러오는 중…', 1500);
-  let book, size = 0;
-  try {
-    const bytes = await host.readBytes(path);
-    size = bytes.length;
-    book = await EpubBook.open(bytes);
-  } catch (e) { toast('책을 열 수 없습니다: ' + (e && e.message || e), 4000); return; }
-  new EpubReader(app, book, name || baseName(path), (name || path) + '|' + size).start();
-}
-
 class EpubReader {
-  constructor(app, book, name, key) {
-    this.app = app; this.book = book; this.name = name; this.key = key;
-    this.s = loadSettings(); this.chapter = 0; this.history = []; this.urls = []; this.ratio = 0; this.token = 0; this.busy = false;
+  constructor(app, book, name, key, path) {
+    this.app = app; this.book = book; this.name = name; this.key = key; this.path = path;
+    this.s = loadSettings(); this.chapter = 0; this.page = 0; this.pages = 1; this.history = []; this.urls = [];
+    this.token = 0; this.busy = false; this.menu = false; this.ready = false; this.pending = null;
+    this.known = book.spine.map(() => 0); this.sumPages = 0; this.sumBytes = 0;
   }
   start() {
     const b = this.book;
     const btn = (label, fn, cls = '') => h('button', { class: 'epub-btn ' + cls, type: 'button', onClick: fn }, label);
     this.titleEl = h('div', { class: 'epub-title' }, b.title || this.name);
     this.frame = h('iframe', { class: 'epub-frame', sandbox: 'allow-same-origin' });
-    this.progress = h('div', { class: 'epub-progress' });
-    this.top = h('div', { class: 'epub-bar epub-top' }, btn('‹', () => this.back(), 'epub-back'), this.titleEl, btn('목차', () => this.showToc()), btn('Aa', () => this.togglePanel()), btn('필기', () => this.confirmConvert()));
-    this.bottom = h('div', { class: 'epub-bar epub-bottom' }, btn('‹ 이전', () => this.step(-1)), this.progress, btn('다음 ›', () => this.step(1)));
+    this.info = h('div', { class: 'epub-progress' });
+    this.footer = h('div', { class: 'epub-footer' });
+    this.slider = h('input', { type: 'range', class: 'epub-seek', min: 0, max: 1, value: 0, onInput: () => { this.info.textContent = (+this.slider.value + 1) + ' / ' + this.total() + '쪽'; }, onChange: () => this.goGlobal(+this.slider.value) });
+    this.top = h('div', { class: 'epub-bar epub-top', hidden: true }, btn('‹', () => this.leave(), 'epub-back'), this.titleEl, btn('목차', () => this.showToc()), btn('Aa', () => this.togglePanel()), btn('필기', () => this.confirmConvert()));
     this.panel = h('div', { class: 'epub-panel', hidden: true });
-    this.root = h('div', { class: 'epub-root' }, this.top, h('div', { class: 'epub-body' }, this.frame), this.bottom, this.panel);
+    this.bottom = h('div', { class: 'epub-bottom', hidden: true }, this.panel, this.slider, h('div', { class: 'epub-bar' }, btn('‹ 이전 장', () => this.step(-1)), this.info, btn('다음 장 ›', () => this.step(1))));
+    this.root = h('div', { class: 'epub-root' }, this.frame, this.footer, this.top, this.bottom);
     document.body.append(this.root);
     this.applyTheme();
     this.keys = e => {
       if (document.querySelector('.ad-root')) return;
-      if (e.key === 'Escape' || e.key === 'BrowserBack') { e.preventDefault(); e.stopImmediatePropagation(); this.back(); }
-      else if (e.key === 'ArrowRight') this.step(1);
-      else if (e.key === 'ArrowLeft') this.step(-1);
+      const k = e.key;
+      if (k === 'Escape' || k === 'BrowserBack') { e.preventDefault(); e.stopImmediatePropagation(); this.back(); }
+      else if (k === 'ArrowRight' || k === 'PageDown' || k === ' ') { e.preventDefault(); this.turn(1); }
+      else if (k === 'ArrowLeft' || k === 'PageUp') { e.preventDefault(); this.turn(-1); }
+      else if (k === 'ArrowDown') { e.preventDefault(); this.turn(1); }
+      else if (k === 'ArrowUp') { e.preventDefault(); this.turn(-1); }
     };
     document.addEventListener('keydown', this.keys, true);
     this.mouse = e => { if (e.button === 3) { e.preventDefault(); e.stopPropagation(); this.back(); } };
     window.addEventListener('mouseup', this.mouse, true);
+    this.resize = () => { clearTimeout(this._rt); this._rt = setTimeout(() => this.relayout(), 200); };
+    window.addEventListener('resize', this.resize);
     let at = 0, ratio = 0;
     try { const p = JSON.parse(localStorage.getItem(posKey(this.key)) || 'null'); if (p) { at = p.c | 0; ratio = +p.r || 0; } } catch (e) { /* first time */ }
-    this.open(Math.max(0, Math.min(b.spine.length - 1, at)), ratio, null);
+    writeInfo(this.key, { opened: Date.now(), title: b.title || this.name.replace(/\.epub$/i, '') });
+    this.open(Math.max(0, Math.min(b.spine.length - 1, at)), { ratio });
   }
 
   doc() { try { return this.frame.contentDocument; } catch (e) { return null; } }
-  scroller() { const d = this.doc(); return d && (d.scrollingElement || d.documentElement); }
-  currentRatio() { const s = this.scroller(); if (!s) return 0; const r = s.scrollHeight - s.clientHeight; return r <= 0 ? 0 : Math.max(0, Math.min(1, s.scrollTop / r)); }
+  win() { try { return this.frame.contentWindow; } catch (e) { return null; } }
 
   applyTheme() {
     const r = this.root.style;
     r.setProperty('--epub-bg', THEME_BG[this.s.theme]); r.setProperty('--epub-fg', THEME_FG[this.s.theme]); r.setProperty('--epub-bar', BAR[this.s.theme]);
   }
+  side() { return sidePadding(this.s, this.frame.clientWidth || window.innerWidth); }
+
+  /** Injects the style sheet and scales every element's font size (works whatever units the book uses). */
   applyStyle() {
     const d = this.doc();
-    if (!d || !d.head) return;
+    if (!d || !d.head || !d.body) return;
     let st = d.getElementById('en-style');
     if (!st) { st = d.createElement('style'); st.id = 'en-style'; d.head.append(st); }
-    st.textContent = readerCss(this.s);
+    st.textContent = readerCss(this.s, this.side());
+    const w = this.win(), z = this.s.zoom / 100, els = [d.body, ...d.body.querySelectorAll('*')];
+    if (!this.base || this.base.d !== d) { this.base = { d, map: new Map() }; els.forEach(e => e.style.removeProperty('font-size')); els.forEach(e => this.base.map.set(e, parseFloat(w.getComputedStyle(e).fontSize) || 16)); }
+    els.forEach(e => e.style.setProperty('font-size', (this.base.map.get(e) || 16) * z + 'px', 'important'));
   }
 
-  /** Loads chapter [index]; pictures, style sheets and fonts of the zip are given to the sandboxed frame as blob URLs. */
-  async open(index, ratio, fragment) {
+  /** Loads chapter [index]; pictures, style sheets and fonts of the zip go to the sandboxed frame as blob URLs. */
+  async open(index, pending) {
     const my = ++this.token;
     this.chapter = Math.max(0, Math.min(this.book.spine.length - 1, index));
+    this.pending = pending || { ratio: 0 }; this.ready = false; this.page = 0; this.pages = 1;
     const path = this.book.spine[this.chapter];
-    this.updateProgress(ratio);
     let html;
     try { html = await this.render(path); } catch (e) { toast('장을 표시할 수 없습니다'); return; }
     if (my !== this.token) return;
@@ -239,16 +335,13 @@ class EpubReader {
     if (my !== this.token) return;
     const d = this.doc();
     if (!d) return;
+    this.ready = true;
     this.applyStyle();
-    d.addEventListener('click', ev => this.onLink(ev, path));
-    d.addEventListener('scroll', () => this.updateProgress(), { passive: true });
+    d.addEventListener('click', ev => this.onClick(ev, path));
     d.addEventListener('keydown', this.keys, true);
-    const place = () => {
-      const t = fragment && (d.getElementById(fragment) || d.getElementsByName(fragment)[0]);
-      if (t) t.scrollIntoView(); else { const s = this.scroller(); if (s && ratio > 0) s.scrollTop = ratio * (s.scrollHeight - s.clientHeight); }
-      this.updateProgress();
-    };
-    place(); setTimeout(place, 400);   // again once pictures have their final height
+    d.addEventListener('wheel', ev => { ev.preventDefault(); const now = Date.now(); if (now - (this._wheel || 0) > 250 && Math.abs(ev.deltaY) + Math.abs(ev.deltaX) > 5) { this._wheel = now; this.turn(ev.deltaY + ev.deltaX > 0 ? 1 : -1); } }, { passive: false });
+    this.base = null; this.applyStyle();
+    for (const ms of [30, 400, 1200]) setTimeout(() => { if (my === this.token) this.measure(); }, ms);   // again once pictures have their final size
   }
   revoke() { for (const u of this.urls) URL.revokeObjectURL(u); this.urls = []; }
 
@@ -287,47 +380,124 @@ class EpubReader {
     return out;
   }
 
-  onLink(ev, path) {
+  // ---- pages
+  /** Number of pages the chapter has now; moves to the page asked for (a ratio, a page, the last page or an anchor). */
+  measure() {
+    const w = this.win(), d = this.doc();
+    if (!w || !d || !this.ready || !d.scrollingElement) return;
+    const count = Math.max(1, Math.round(d.scrollingElement.scrollWidth / w.innerWidth)), me = this.chapter;
+    const anchor = this.pages <= 1 ? 0 : this.page / this.pages;
+    if (this.known[me] === 0) { this.sumPages += count; this.sumBytes += Math.max(1, this.book.size(this.book.spine[me])); }
+    else this.sumPages += count - this.known[me];
+    this.known[me] = count; this.pages = count;
+    const p = this.pending; this.pending = null;
+    if (p && p.fragment) { const t = d.getElementById(p.fragment) || d.getElementsByName(p.fragment)[0]; this.goPage(t ? Math.floor((t.getBoundingClientRect().left + w.scrollX) / w.innerWidth) : 0); }
+    else if (p && p.page != null) this.goPage(p.page);
+    else if (p && p.last) this.goPage(count - 1);
+    else if (p && p.ratio != null) this.goPage(Math.floor(p.ratio * count + 1e-4));
+    else this.goPage(Math.min(count - 1, Math.round(anchor * count)));
+    this.save();
+  }
+  goPage(n) {
+    this.page = Math.max(0, Math.min(this.pages - 1, n));
+    const w = this.win();
+    if (w) w.scrollTo(this.page * w.innerWidth, 0);
+    this.labels();
+  }
+  turn(dir) {
+    if (!this.ready) return;
+    const next = this.page + dir;
+    if (next >= 0 && next < this.pages) { this.goPage(next); this.save(); return; }
+    const c = this.chapter + dir;
+    if (c < 0 || c >= this.book.spine.length) { toast(dir < 0 ? '첫 쪽입니다' : '마지막 쪽입니다'); return; }
+    this.open(c, dir < 0 ? { last: true } : { ratio: 0 });
+  }
+  step(dir) {
+    const c = this.chapter + dir;
+    if (c < 0 || c >= this.book.spine.length) { toast(dir < 0 ? '첫 부분입니다' : '마지막 부분입니다'); return; }
+    this.open(c, { ratio: 0 });
+  }
+  pagesOf(i) { if (this.known[i] > 0) return this.known[i]; return this.sumBytes > 0 ? Math.max(1, Math.round(this.book.size(this.book.spine[i]) * this.sumPages / this.sumBytes)) : 1; }
+  total() { let t = 0; for (let i = 0; i < this.known.length; i++) t += this.pagesOf(i); return Math.max(1, t); }
+  globalPage() { let b = 0; for (let i = 0; i < this.chapter; i++) b += this.pagesOf(i); return b + this.page; }
+  goGlobal(g) {
+    let before = 0;
+    for (let i = 0; i < this.known.length; i++) {
+      const n = this.pagesOf(i);
+      if (g < before + n || i === this.known.length - 1) {
+        if (i === this.chapter) this.goPage(g - before); else { this.push(); this.open(i, { page: Math.max(0, Math.min(n - 1, g - before)) }); }
+        return;
+      }
+      before += n;
+    }
+  }
+  labels() {
+    const total = this.total(), here = this.globalPage(), t = this.book.chapterTitle(this.chapter);
+    this.footer.textContent = (here + 1) + ' / ' + total + '쪽';
+    if (this.menu) {
+      this.info.textContent = (here + 1) + ' / ' + total + '쪽' + (t ? ' · ' + t : '');
+      this.slider.max = Math.max(1, total - 1); this.slider.value = Math.min(here, Math.max(1, total - 1));
+    }
+  }
+  /** Re-flows the chapter after a setting or window-size change, keeping the reading position. */
+  relayout() {
+    if (!this.ready) return;
+    const ratio = this.pages <= 1 ? 0 : this.page / this.pages;
+    this.known.fill(0); this.sumPages = 0; this.sumBytes = 0;
+    this.pending = { ratio };
+    this.applyStyle();
+    setTimeout(() => this.measure(), 60); setTimeout(() => this.measure(), 500);
+  }
+  save() {
+    try { localStorage.setItem(posKey(this.key), JSON.stringify({ c: this.chapter, r: this.pages <= 1 ? 0 : this.page / this.pages })); } catch (e) { /* ignore */ }
+    writeInfo(this.key, { percent: Math.min(100, Math.round(100 * (this.globalPage() + 1) / this.total())), title: this.book.title || this.name.replace(/\.epub$/i, '') });
+  }
+
+  // ---- input: centre click = menu, side clicks = pages, links first
+  onClick(ev, path) {
     const a = ev.target.closest && ev.target.closest('a[href]');
-    if (!a) return;
-    const href = a.getAttribute('href') || '';
-    ev.preventDefault();
+    if (a) { ev.preventDefault(); this.link(a.getAttribute('href') || '', path); return; }
+    if (!this.panel.hidden) { this.panel.hidden = true; return; }
+    const w = this.win().innerWidth, x = ev.clientX;
+    if (this.menu) this.setMenu(false);
+    else if (x < w * 0.3) this.turn(-1);
+    else if (x > w * 0.7) this.turn(1);
+    else this.setMenu(true);
+  }
+  link(href, path) {
     if (/^https?:/i.test(href)) { host.shellOpen(href).catch(() => {}); return; }
     if (/^(mailto|javascript|data):/i.test(href)) return;
     const [file, frag] = href.split('#');
-    const target = file ? resolvePath(dirOf(path), file) : path;
-    const at = this.book.spineIndex(target);
+    const target = file ? resolvePath(dirOf(path), file) : path, at = this.book.spineIndex(target);
     if (at < 0) return;
     if (at === this.chapter) {
-      const d = this.doc(), t = frag && d && (d.getElementById(frag) || d.getElementsByName(frag)[0]);
-      if (t) t.scrollIntoView();
+      const d = this.doc(), w = this.win(), t = frag && (d.getElementById(frag) || d.getElementsByName(frag)[0]);
+      if (t) { this.push(); this.goPage(Math.floor((t.getBoundingClientRect().left + w.scrollX) / w.innerWidth)); }
       return;
     }
-    this.push(); this.open(at, 0, frag || null);
+    this.push(); this.open(at, frag ? { fragment: frag } : { ratio: 0 });
   }
-  push() { if (this.history.length > 50) this.history.shift(); this.history.push({ c: this.chapter, r: this.currentRatio() }); }
-  step(dir) {
-    const next = this.chapter + dir;
-    if (next < 0 || next >= this.book.spine.length) { toast(dir < 0 ? '첫 부분입니다' : '마지막 부분입니다'); return; }
-    this.open(next, 0, null);
+  push() { if (this.history.length > 50) this.history.shift(); this.history.push({ c: this.chapter, r: this.pages <= 1 ? 0 : this.page / this.pages }); }
+  setMenu(on) {
+    this.menu = on; this.top.hidden = !on; this.bottom.hidden = !on; this.footer.style.visibility = on ? 'hidden' : '';
+    if (!on) this.panel.hidden = true; else this.labels();
   }
-  updateProgress(ratio) {
-    const r = ratio == null ? this.currentRatio() : ratio, t = this.book.chapterTitle(this.chapter);
-    this.progress.textContent = (t ? t + ' · ' : '') + (this.chapter + 1) + '/' + this.book.spine.length + ' · ' + Math.round(r * 100) + '%';
-    if (ratio == null) this.save();
-  }
-  save() { try { localStorage.setItem(posKey(this.key), JSON.stringify({ c: this.chapter, r: this.currentRatio() })); } catch (e) { /* ignore */ } }
 
-  // Back: settings panel, then the position before the last link / table-of-contents jump, then the previous screen.
+  // Back: settings panel, menu, the position before the last link / contents jump, then the previous screen.
   back() {
     if (!this.panel.hidden) { this.panel.hidden = true; return; }
-    if (this.history.length) { const p = this.history.pop(); this.open(p.c, p.r, null); return; }
+    if (this.menu && !this.history.length) { this.setMenu(false); return; }
+    this.leave();
+  }
+  leave() {
+    if (this.history.length) { const p = this.history.pop(); this.open(p.c, { ratio: p.r }); return; }
     this.close();
   }
   close() {
     this.save();
     document.removeEventListener('keydown', this.keys, true);
     window.removeEventListener('mouseup', this.mouse, true);
+    window.removeEventListener('resize', this.resize);
     this.token++; this.revoke(); this.root.remove();
   }
 
@@ -337,7 +507,7 @@ class EpubReader {
     const items = entries.map((e, i) => (b.toc.length ? (e.title === cur && b.spineIndex(e.path) <= this.chapter) : i === this.chapter) ? '● ' + e.title : '    ' + e.title);
     new AlertDialog.Builder().setTitle('목차').setItems(items, (d, which) => {
       const at = b.spineIndex(entries[which].path);
-      if (at >= 0) { this.push(); this.open(at, 0, null); }
+      if (at >= 0) { this.push(); this.open(at, { ratio: 0 }); this.setMenu(false); }
     }).setNegativeButton('닫기', null).show();
   }
 
@@ -346,16 +516,16 @@ class EpubReader {
     this.buildPanel(); this.panel.hidden = false;
   }
   buildPanel() {
-    const s = this.s, set = () => { saveSettings(s); this.applyStyle(); };
+    const s = this.s, set = () => { saveSettings(s); };
     const slider = (label, value, min, max, step, fmt, on) => {
       const shown = h('span', { class: 'epub-val' }, fmt(value));
-      const input = h('input', { type: 'range', min, max, step, value, onInput: () => { const v = +input.value; on(v); shown.textContent = fmt(v); set(); } });
+      const input = h('input', { type: 'range', min, max, step, value, onInput: () => { shown.textContent = fmt(+input.value); }, onChange: () => { on(+input.value); set(); this.relayout(); } });
       return h('label', { class: 'epub-row' }, h('span', { class: 'epub-label' }, label), input, shown);
     };
     const chips = (label, names, current, on, swatch) => h('div', { class: 'epub-row' }, h('span', { class: 'epub-label' }, label),
       ...names.map((n, i) => h('button', {
         type: 'button', class: 'epub-chip' + (i === current ? ' on' : ''), style: swatch ? { background: THEME_BG[i], color: THEME_FG[i] } : null,
-        onClick: () => { on(i); set(); this.applyTheme(); this.buildPanel(); },
+        onClick: () => { on(i); set(); this.applyTheme(); this.relayout(); this.buildPanel(); },
       }, n)));
     this.panel.replaceChildren(
       slider('글자 크기', s.zoom, ZOOM.min, ZOOM.max, ZOOM.step, v => v + '%', v => { s.zoom = v; }),
@@ -368,7 +538,7 @@ class EpubReader {
   // ---- conversion to a PDF for note taking
   confirmConvert() {
     new AlertDialog.Builder().setTitle('PDF로 변환해 필기하기')
-      .setMessage('지금의 글자 크기·줄 간격·여백·글꼴로 책을 PDF로 만들어 문서함에 저장하고, 필기 화면에서 엽니다.\n\n'
+      .setMessage('지금의 글자 크기·줄 간격·여백·글꼴로 책을 PDF로 만들어 문서함에 저장하고, 필기 화면에서 엽니다. 책은 EPUB 책 목록에 그대로 남습니다.\n\n'
         + '나중에 설정을 바꿔 다시 변환하면 새 PDF가 따로 만들어지며, 이미 쓴 필기는 새 PDF로 옮겨지지 않습니다. 표나 복잡한 그림이 있는 책은 읽기 화면과 모양이 다를 수 있습니다.')
       .setPositiveButton('변환', () => this.convert()).setNegativeButton('취소', null).show();
   }
@@ -400,6 +570,7 @@ class EpubReader {
     }
   }
 }
+
 
 async function tempDir(app) {
   const dir = (app.hostInfo && app.hostInfo.temp) || joinPath((app.hostInfo && app.hostInfo.data) || 'C:\\', 'tmp');

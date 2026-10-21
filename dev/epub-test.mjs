@@ -27,33 +27,53 @@ const R = await page.evaluate(async b64 => {
   const p = app.library.root + '\\sample.epub'; host._fake.put(p, bytes);
   await app.openPdf(p, false, 0, true);
   await new Promise(r => setTimeout(r, 1200));
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
   const root = document.querySelector('.epub-root'); out.open = !!root;
   const fr = root && root.querySelector('iframe'); const d = fr && fr.contentDocument;
   out.heading = d && d.querySelector('h1') && d.querySelector('h1').textContent;
   out.noScript = d && d.querySelectorAll('script').length === 0;
   out.styled = d && !!d.getElementById('en-style');
+  const click = (x, y) => d.dispatchEvent(new MouseEvent('click', { clientX: x, clientY: y, bubbles: true }));
+  const W = fr.contentWindow.innerWidth;
+  // full screen: no bars until the centre is tapped
+  out.fullScreen = root.querySelector('.epub-top').hidden && root.querySelector('.epub-bottom').hidden && fr.getBoundingClientRect().height === window.innerHeight;
+  out.footer = root.querySelector('.epub-footer').textContent;
+  click(W / 2, 200); out.menuShown = !root.querySelector('.epub-top').hidden && !root.querySelector('.epub-bottom').hidden;
   out.progress = root.querySelector('.epub-progress').textContent;
-  // settings
+  // settings: larger text re-paginates (page count grows, the frame size stays)
+  const total = () => +/\/ (\d+)쪽/.exec(root.querySelector('.epub-progress').textContent)[1];
+  const before = total(), frameBefore = fr.getBoundingClientRect().height;
   [...root.querySelectorAll('.epub-btn')].find(b => b.textContent === 'Aa').click();
   const panel = root.querySelector('.epub-panel'); out.panelShown = !panel.hidden;
-  const range = panel.querySelector('input[type=range]'); range.value = 150; range.dispatchEvent(new Event('input'));
-  out.zoomCss = d.getElementById('en-style').textContent.includes('zoom:1.5');
-  // back closes panel first, then link history, then reader
+  const range = panel.querySelector('input[type=range]'); range.value = 250; range.dispatchEvent(new Event('input')); range.dispatchEvent(new Event('change'));
+  await sleep(900);
+  out.zoomCss = parseFloat(getComputedStyle(d.querySelector('p') || d.body).fontSize) > 29;
+  out.pagesBefore = before; out.pagesAfter = total(); out.frameSame = fr.getBoundingClientRect().height === frameBefore;
+  // back closes panel first, then menu, then link history, then reader
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); out.panelClosed = panel.hidden && !!document.querySelector('.epub-root');
-  d.querySelector('a').click(); await new Promise(r => setTimeout(r, 700));
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); out.menuClosed = root.querySelector('.epub-top').hidden && !!document.querySelector('.epub-root');
+  d.querySelector('a').click(); await sleep(900);
+  const d2 = fr.contentDocument; d2.dispatchEvent(new MouseEvent('click', { clientX: W / 2, clientY: 200, bubbles: true }));
   out.chapterAfterLink = document.querySelector('.epub-progress').textContent;
-  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await new Promise(r => setTimeout(r, 700));
-  out.backToFirst = document.querySelector('.epub-progress').textContent.includes('1/2') && !!document.querySelector('.epub-root');
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(900);   // back to the page before the link
+  out.backToFirst = fr.contentDocument.querySelector('h1') && fr.contentDocument.querySelector('h1').textContent === '제목';
+  out.backAlive = !!document.querySelector('.epub-root');
+  // page turn by keyboard stays inside the reader
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); out.turned = !!document.querySelector('.epub-root');
+  // the book is kept on the shelf
+  const shelfBooks = await E.listBooks(app); out.shelf = shelfBooks.map(b => b.name);
   // pdf
   const pdf = await E.buildPdf(book, E.loadSettings(), () => {}, () => false);
   out.pdfHead = String.fromCharCode(...pdf.slice(0, 5)); out.pdfSize = pdf.length;
   const { PDFDocument } = await import('/vendor/pdflib/pdf-lib.esm.min.js'); out.pages = (await PDFDocument.load(pdf)).getPageCount();
-  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await new Promise(r => setTimeout(r, 300));
+  for (let i = 0; i < 2; i++) { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await new Promise(r => setTimeout(r, 300)); }
   out.closed = !document.querySelector('.epub-root');
   return out;
 }, b64);
 console.log(JSON.stringify(R, null, 1));
 check('title', R.title === '테스트 책'); check('spine', R.spine.length === 2 && R.spine[0] === 'OEBPS/text/a b.xhtml'); check('toc', R.toc.join() === '첫 장,둘째 장' && R.chTitle === '둘째 장');
 check('resolve', R.resolve === 'OEBPS/img/c d.png'); check('reader opens', R.open && R.heading === '제목' && R.noScript && R.styled);
-check('settings', R.panelShown && R.zoomCss); check('back order', R.panelClosed && R.chapterAfterLink.includes('2/2') && R.backToFirst); check('pdf', R.pdfHead === '%PDF-' && R.pages >= 2, 'pages ' + R.pages); check('closed', R.closed);
+check('full screen', R.fullScreen && R.footer.includes('쪽')); check('centre tap shows menu', R.menuShown);
+check('settings', R.panelShown && R.zoomCss && R.frameSame); check('re-paginates', R.pagesAfter > R.pagesBefore, R.pagesBefore + ' -> ' + R.pagesAfter);
+check('back order', R.panelClosed && R.menuClosed && R.backAlive && R.backToFirst && R.chapterAfterLink.includes('둘째 장') && R.turned); check('shelf', R.shelf.length === 1 && /sample/.test(R.shelf[0]), JSON.stringify(R.shelf)); check('pdf', R.pdfHead === '%PDF-' && R.pages >= 2, 'pages ' + R.pages); check('closed', R.closed);
 await browser.close(); server.close(); process.exit(fails ? 1 : 0);
