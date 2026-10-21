@@ -471,7 +471,7 @@ export class LibraryDialog {
     this.railButtons = icons.map((n, i) => {
       const b = this._ib(n, names[i], () => { if (i === 3) this.showTrash(); else this.showMode(i); }, 'sq rb'); rail.append(b); return b;
     });
-    rail.append(h('div', { class: 'lib-dots' }), this._ib('ic_folder_check', '폴더 열기', () => this.openDrawer(), 'sq fo'));
+    rail.append(h('div', { class: 'lib-dots' }), this._ib('ic_book', 'EPUB 책', () => this.actions.epubShelf && this.actions.epubShelf(), 'sq'), this._ib('ic_folder_check', '폴더 열기', () => this.openDrawer(), 'sq fo'));
     rail.append(h('div', { class: 'lib-railfill' }), this._ib('ic_settings', '설정', () => this.openSettings(), 'sq st'));
     this.rail = rail;
 
@@ -622,6 +622,8 @@ export class LibraryDialog {
       panel.append(row.el); this.drawerRows.push(row.el); this.drawerCounts.push(row.count);
     });
     panel.append(h('div', { class: 'lib-dots' }));
+    const er = this._drawerRow('ic_book', 'EPUB 책', () => { this._drawerPicked(); this.actions.epubShelf && this.actions.epubShelf(); });
+    panel.append(er.el);
     const fr = this._drawerRow('ic_folder_check', '폴더', () => this.selectFolder(repo.root));
     this.folderRow = fr.el; panel.append(fr.el); this.drawerCounts.push(fr.count);
     this.tree = new FolderTreeView(this.activity, repo, this.folder, f => this.selectFolder(f), { hideRoot: true });

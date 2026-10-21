@@ -23,6 +23,7 @@ import { printDocument } from './print.js';
 import { showAboutOffline } from './offline.js';
 import { createBackup, restoreBackup, compareVersions, AUTHOR_LINE, APP_NAME, RELEASE_DATE } from './backup.js';
 import { SyncClient, SyncError, transferDocument, transferFolder, buildRows, recordState, relPath } from './sync.js';
+import { showEpubShelf } from './epub.js';
 
 // ------------------------------------------------------------------------------------------------------------------ constants
 export const NAVY = '#1C1C1E', ACCENT = '#007AFF', ACTIVE_BG = '#E5F0FF', ACTIVE_FG = '#007AFF', GRAY = '#8E8E93', RED = '#FF3B30';
@@ -977,6 +978,7 @@ M.showLibrary = function () {
   this.libraryDialog = new LibraryDialog(this, this.library, this.libraryFolder, {
     open: file => this.openPdf(file),
     importFiles: () => this.choosePdf(),
+    epubShelf: () => showEpubShelf(this),
     importFolder: folder => this.importFolder(folder),
     newNote: (folder, refresh) => this.createNotebook(this.library.root, refresh),
     settings: () => this.showSettings(),
