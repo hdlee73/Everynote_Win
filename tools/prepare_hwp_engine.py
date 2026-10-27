@@ -76,6 +76,16 @@ if sec.count(seg_block) != 1:
 # A picture-only paragraph also needs a line as tall as the inline picture, otherwise pagination
 # counts it as zero height and the following content is drawn past the page bottom.
 seg_new = """    if para.line_segs.is_empty() && para.text.is_empty() {
+        // Inline (treatAsChar) tables of a generator without line segments carry a stale height; as
+        // inline objects they can never grow or split, so let them flow as normal block tables.
+        for c in para.controls.iter_mut() {
+            if let Control::Table(t) = c {
+                if t.common.treat_as_char {
+                    t.common.treat_as_char = false;
+                    t.attr &= !0x01;
+                }
+            }
+        }
         let inline_h = para.controls.iter().filter_map(|c| match c {
             Control::Picture(p) if p.common.treat_as_char => Some(p.common.height as i32),
             Control::Shape(s) if s.common().treat_as_char => Some(s.common().height as i32),
