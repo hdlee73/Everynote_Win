@@ -155,7 +155,7 @@ mod pdfnote_hwpx_table_regression {
 api.write_text(patched + helper + table_test)
 subprocess.run(["cargo", "test", "--locked", "--manifest-path", str(source / "Cargo.toml"),
                 "--lib", "pdfnote_", "--", "--nocapture"], check=True,
-               env={**os.environ, "PDFNOTE_TEST_HWPX_DIR": str(ROOT / "tools/test-data")})
+               env={**os.environ, "RHWP_TABLE_DRIFT": "1", "PDFNOTE_TEST_HWPX_DIR": str(ROOT / "tools/test-data")})
 subprocess.run(["wasm-pack", "build", str(source), "--target", "no-modules", "--release",
                 "--out-dir", "pkg-pdfnote", "--out-name", "rhwptopdf", "--", "--locked"], check=True)
 pkg = source / "pkg-pdfnote"
