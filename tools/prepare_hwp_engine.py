@@ -70,7 +70,28 @@ sec = section.read_text()
 seg_needle = "    if para.line_segs.is_empty() {\n        para.line_segs.push(LineSeg {"
 if sec.count(seg_needle) != 1:
     raise RuntimeError("HWPX default line segment code changed; patch requires review")
-section.write_text(sec.replace(seg_needle, "    if para.line_segs.is_empty() && para.text.is_empty() {\n        para.line_segs.push(LineSeg {"))
+seg_block = "    if para.line_segs.is_empty() {\n        para.line_segs.push(LineSeg {\n            text_start: 0,\n            tag: 0x00060000,\n            ..Default::default()\n        });\n    }\n"
+if sec.count(seg_block) != 1:
+    raise RuntimeError("HWPX default line segment block changed; patch requires review")
+# A picture-only paragraph also needs a line as tall as the inline picture, otherwise pagination
+# counts it as zero height and the following content is drawn past the page bottom.
+seg_new = """    if para.line_segs.is_empty() && para.text.is_empty() {
+        let inline_h = para.controls.iter().filter_map(|c| match c {
+            Control::Picture(p) if p.common.treat_as_char => Some(p.common.height as i32),
+            Control::Shape(s) if s.common().treat_as_char => Some(s.common().height as i32),
+            _ => None,
+        }).max().unwrap_or(0);
+        para.line_segs.push(LineSeg {
+            text_start: 0,
+            tag: 0x00060000,
+            line_height: inline_h,
+            text_height: inline_h,
+            baseline_distance: inline_h * 17 / 20,
+            ..Default::default()
+        });
+    }
+"""
+section.write_text(sec.replace(seg_block, seg_new))
 table_test = r'''
 
 #[cfg(test)]
@@ -89,6 +110,7 @@ mod pdfnote_hwpx_table_regression {
             let mut overlaps = 0usize;
             let mut in_image = 0usize;
             let mut near = 0usize;
+            let mut off_page = 0usize;
             for page in 0..pages {
                 let svg = core.render_page_svg_native(page).expect("Render page");
                 let attr_of = |head: &str, name: &str| -> String { head.split(&format!(" {}=\"", name)).nth(1).and_then(|v| v.split('"').next()).unwrap_or("").to_string() };
@@ -116,10 +138,15 @@ mod pdfnote_hwpx_table_regression {
                 let mut ys: Vec<i64> = points.iter().map(|p| p.1.round() as i64).collect();
                 ys.dedup();
                 println!("  page {}: text_lines={}", page, ys.len());
+                let page_h = svg.split("<svg ").nth(1).map(|h| num(attr_of(&h[..h.find('>').unwrap_or(h.len())], "height"))).unwrap_or(f64::NAN);
+                let max_y = points.iter().map(|p| p.1).fold(0.0f64, f64::max);
+                println!("  page {}: height={} max_text_y={}", page, page_h, max_y);
+                if max_y > page_h { off_page += 1; }
             }
             println!("HWPX sample {}: pages={} text_elements={} same_position_overlaps={} near_overlaps={} text_over_image={}", name, pages, total_text, overlaps, near, in_image);
             assert!(pages >= min_pages, "{}: unexpected page count (pages={})", name, pages);
             assert!(near * 50 < total_text.max(1), "{}: text must not be drawn on top of itself", name);
+            assert!(off_page == 0, "{}: text must not be drawn below the page bottom (pages={})", name, off_page);
             assert!(in_image == 0, "{}: text must not be drawn over a picture", name);
         }
     }
