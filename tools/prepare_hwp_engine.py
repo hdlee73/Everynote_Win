@@ -78,34 +78,47 @@ mod pdfnote_hwpx_table_regression {
     /// HWPX tables written without linesegarray (FSS Insights export) must grow to fit their text.
     #[test]
     fn pdfnote_hwpx_table_without_lineseg() {
-        let path = std::env::var("PDFNOTE_TEST_HWPX").expect("HWPX table regression sample is required");
         let font = std::env::var("PDFNOTE_TEST_FONT").expect("Korean TTC regression font is required");
         assert!(!super::register_pdf_font(&std::fs::read(font).expect("Read font")).is_empty());
-        let core = crate::document_core::DocumentCore::from_bytes(&std::fs::read(path).expect("Read sample")).expect("Parse sample");
-        let pages = core.page_count();
-        let mut total_text = 0usize;
-        let mut overlaps = 0usize;
-        for page in 0..pages {
-            let svg = core.render_page_svg_native(page).expect("Render page");
-            let mut seen = std::collections::HashSet::new();
-            for piece in svg.split("<text ").skip(1) {
-                let head = &piece[..piece.find('>').unwrap_or(piece.len())];
-                let attr = |name: &str| head.split(&format!("{}=\"", name)).nth(1).and_then(|v| v.split('"').next()).unwrap_or("").to_string();
-                let key = (attr("x"), attr("y"));
-                total_text += 1;
-                if !seen.insert(key) { overlaps += 1; }
+        // (sample, minimum pages): both are FSS Insights exports without linesegarray.
+        let dir = std::env::var("PDFNOTE_TEST_HWPX_DIR").expect("HWPX sample directory is required");
+        for (name, min_pages) in [("fss-table-no-lineseg.hwpx", 3u32), ("gs-summary-no-lineseg.hwpx", 1u32)] {
+            let core = crate::document_core::DocumentCore::from_bytes(&std::fs::read(format!("{}/{}", dir, name)).expect("Read sample")).expect("Parse sample");
+            let pages = core.page_count();
+            let mut total_text = 0usize;
+            let mut overlaps = 0usize;
+            let mut in_image = 0usize;
+            for page in 0..pages {
+                let svg = core.render_page_svg_native(page).expect("Render page");
+                let attr_of = |head: &str, name: &str| -> String { head.split(&format!(" {}=\"", name)).nth(1).and_then(|v| v.split('"').next()).unwrap_or("").to_string() };
+                let num = |v: String| v.parse::<f64>().unwrap_or(f64::NAN);
+                let mut images = Vec::new();
+                for piece in svg.split("<image ").skip(1) {
+                    let head = &piece[..piece.find('>').unwrap_or(piece.len())];
+                    images.push((num(attr_of(head, "x")), num(attr_of(head, "y")), num(attr_of(head, "width")), num(attr_of(head, "height"))));
+                }
+                let mut seen = std::collections::HashSet::new();
+                for piece in svg.split("<text ").skip(1) {
+                    let head = &piece[..piece.find('>').unwrap_or(piece.len())];
+                    let (x, y) = (attr_of(head, "x"), attr_of(head, "y"));
+                    total_text += 1;
+                    let (fx, fy) = (num(x.clone()), num(y.clone()));
+                    if images.iter().any(|&(ix, iy, iw, ih)| fx > ix + 2.0 && fx < ix + iw - 2.0 && fy > iy + 2.0 && fy < iy + ih - 2.0) { in_image += 1; }
+                    if !seen.insert((x, y)) { overlaps += 1; }
+                }
             }
+            println!("HWPX sample {}: pages={} text_elements={} same_position_overlaps={} text_over_image={}", name, pages, total_text, overlaps, in_image);
+            assert!(pages >= min_pages, "{}: table must grow to fit its text instead of collapsing (pages={})", name, pages);
+            assert!(overlaps * 50 < total_text.max(1), "{}: text must not be drawn on top of itself", name);
+            assert!(in_image == 0, "{}: text must not be drawn over a picture", name);
         }
-        println!("HWPX table sample: pages={} text_elements={} same_position_overlaps={}", pages, total_text, overlaps);
-        assert!(pages >= 3, "table must grow to fit its text instead of collapsing (pages={})", pages);
-        assert!(overlaps * 50 < total_text.max(1), "table text must not be drawn on top of itself");
     }
 }
 '''
 api.write_text(patched + helper + table_test)
 subprocess.run(["cargo", "test", "--locked", "--manifest-path", str(source / "Cargo.toml"),
                 "--lib", "pdfnote_", "--", "--nocapture"], check=True,
-               env={**os.environ, "PDFNOTE_TEST_HWPX": str(ROOT / "tools/test-data/fss-table-no-lineseg.hwpx")})
+               env={**os.environ, "PDFNOTE_TEST_HWPX_DIR": str(ROOT / "tools/test-data")})
 subprocess.run(["wasm-pack", "build", str(source), "--target", "no-modules", "--release",
                 "--out-dir", "pkg-pdfnote", "--out-name", "rhwptopdf", "--", "--locked"], check=True)
 pkg = source / "pkg-pdfnote"
