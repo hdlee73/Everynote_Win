@@ -20,6 +20,7 @@ export const OFFICE_INSTALL_GUIDANCE =
   '설치하지 않았다면 해당 앱에서 PDF로 내보낸 뒤 Everynote에서 가져오세요.';
 
 const FONT_DIR = 'C:\\Windows\\Fonts\\';
+const SYMBOL_FALLBACK_FONTS = ['seguisym.ttf', 'l_10646.ttf', 'cambria.ttc'];
 const OFFICE_EXT = ['hwp', 'hwpx', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'];
 const extOf = name => { const m = /\.([^.\\/]+)$/.exec(String(name || '')); return m ? m[1].toLowerCase() : ''; };
 export const isHwp = name => ['hwp', 'hwpx'].includes(extOf(name));
@@ -140,6 +141,9 @@ async function loadFonts() {
   if (!reg || !bat) { const gul = await readFont('gulim.ttc'); if (gul) out.unshift(gul); }
   if (bold) out.push(bold);
   if (reg) out.push(reg);
+  // Symbol / math fallbacks go last: they carry no serif/sans keyword, so they never become the document default and only
+  // supply glyphs the text fonts lack (예: ∼ ⅓ ∑ ➀).
+  for (const name of SYMBOL_FALLBACK_FONTS) { const f = await readFont(name); if (f) out.push(f); }
   return out;
 }
 
