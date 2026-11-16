@@ -399,6 +399,7 @@ const methods = {
     if (ctrl && !e.altKey) {
       const k = e.key.toLowerCase(); let used = true;
       if (k === 'o') this.choosePdf();
+      else if (k === 'k') this.showCommandPalette();
       else if (k === 'f') this.searchDocument();
       else if (k === 'g') this.goToPage();
       else if (k === 'p') this.callUi2('printDocument');
@@ -486,16 +487,24 @@ const methods = {
       const b = h('button', { class: 'm-hbtn ' + extra, type: 'button', 'aria-label': label, title: label, dataset: { tag } }, mkIcon(name, 18, 'currentColor'), h('span', { class: 'm-hlabel' }, label));
       b.addEventListener('click', () => click(b)); return b;
     };
+    const mkModeBtn = (iconName, label, tag, onClick) => {
+      const b = h('button', { class: 'm-modebtn', type: 'button', 'aria-label': label, title: label, dataset: { tag } }, mkIcon(iconName, 15, 'currentColor'), h('span', null, label));
+      b.addEventListener('click', onClick); return b;
+    };
+    this.readButton = mkModeBtn('ic_reading_mode', '읽기', 'h_read', () => { if (this.renderer == null) toast('문서를 먼저 여세요'); else this.setWriteMode(false); });
+    this.writeSwitchButton = mkModeBtn('ic_ink', '필기', 'h_write', () => { if (this.renderer == null) toast('문서를 먼저 여세요'); else this.setWriteMode(true); });
+    this.modeSwitch = h('div', { class: 'm-modeswitch', role: 'group', 'aria-label': '문서 모드', dataset: { tag: 'mode_switch' } }, this.readButton, this.writeSwitchButton);
     this.headerActions = h('div', { class: 'm-hactions', dataset: { tag: 'header_actions' } },
-      this.fullscreenButton = hb('ic_fullscreen', '전체 화면', () => this.toggleFullscreen(), 'h_fullscreen'),
-      this.readButton = hb('ic_reading_mode', '읽기 모드', () => this.toggleReadMode(), 'h_read'),
-      hb('ic_page_manage', '페이지 관리', v => this.showPageManageMenu(v), 'h_pages'),
-      hb('ic_note_style', '노트 스타일', v => this.showViewMenu(v), 'h_style'),
+      this.modeSwitch,
+      h('div', { class: 'm-hsep', 'aria-hidden': 'true' }),
+      hb('ic_save_file', '파일', v => this.showFileMenu(v), 'h_file'),
+      hb('ic_eye', '보기', v => this.showViewMenu(v), 'h_style'),
+      hb('ic_page_manage', '페이지', v => this.showPageManageMenu(v), 'h_pages'),
       this.insertButton = hb('ic_insert', '삽입', v => this.showInsertMenu(v), 'h_insert'),
-      hb('ic_share', '공유', v => this.showShareMenu(v), 'h_share', 'opt'),
-      hb('ic_save_file', '파일로 저장', v => this.showSaveMenu(v), 'h_save', 'opt'),
-      hb('ic_print', '인쇄', () => { if (this.renderer) this.callUi2('printDocument'); else toast('문서를 먼저 여세요'); }, 'h_print', 'opt'),
-      hb('ic_search', '검색', () => this.searchDocument(), 'h_search'));
+      h('div', { class: 'm-hsep opt', 'aria-hidden': 'true' }),
+      hb('ic_sidebar', '패널', () => { if (this.renderer) this.toggleSidebar(); else toast('문서를 먼저 여세요'); }, 'h_panel', 'opt'),
+      hb('ic_search', '검색', () => this.searchDocument(), 'h_search'),
+      this.fullscreenButton = hb('ic_fullscreen', '전체 화면', () => this.toggleFullscreen(), 'h_fullscreen'));
     this.header.append(libraryButton, this.titleView, h('div', { class: 'm-spacer' }), this.headerActions,
       this.icon('ic_more_vert', '더 보기', NAVY, v => this.showMainMenu(v, false), 'm-ib m-hmore'));
     content.append(this.header);
@@ -537,6 +546,11 @@ const methods = {
     this.previousOverlay.addEventListener('click', () => this.animatePage(-1));
     this.nextOverlay.addEventListener('click', () => this.animatePage(1));
     viewport.append(this.previousOverlay, this.nextOverlay);
+    this.modeBadgeText = h('span', null, '');
+    const modeBadgeClose = h('button', { class: 'm-modebadge-close', type: 'button' }, '종료');
+    modeBadgeClose.addEventListener('click', () => this.exitSpecialMode());
+    this.modeBadge = h('div', { class: 'm-modebadge', dataset: { tag: 'mode_badge' } }, h('span', { class: 'm-modebadge-dot' }), this.modeBadgeText, modeBadgeClose);
+    viewport.append(this.modeBadge);
     this.buildFloaters(viewport);
     this.applyMouseReadDrag();
     this.buildLassoBar();
@@ -1121,27 +1135,25 @@ const methods = {
       new Row('다른 문서와 합치기', 'ic_page_add', () => this.mergeWithOthers()),
       new Row('페이지 삭제', 'ic_delete', () => this.confirmDeletePage(this.currentPage)).danger()], null);
   },
-  shareRows() {
+  fileRows() {
     const run = name => () => this.callUi2(name);
     return [
-      new Row('PDF로 공유 (주석 포함)', 'ic_pdf', run('exportPdf')),
+      new Row('PDF로 내보내기 (주석 포함)', 'ic_pdf', run('exportPdf')).tint('#007AFF'),
+      new Row('원본 파일로 저장', 'ic_original', run('exportOriginal')),
       new Row('노트·발췌 내보내기', 'ic_export', run('exportStudy')),
-      new Row('다른 기기와 동기화', 'ic_sync', run('showDeviceSync')),
-      new Row('파일 탐색기에서 보기', 'ic_folder_open', () => { if (this.documentUri) host.reveal(this.documentUri).catch(() => toast('파일 탐색기를 열 수 없습니다')); })];
-  },
-  saveRows() {
-    const run = name => () => this.callUi2(name);
-    return [
-      new Row('PDF 파일', 'ic_pdf', run('exportPdf')),
-      new Row('원본 파일', 'ic_original', run('exportOriginal')),
+      Row.divider(),
       new Row('이 문서 필기 백업 저장', 'ic_backup', run('exportAnnotations')),
       new Row('이 문서 필기 백업 불러오기', 'ic_import', run('importSidecar')),
-      Row.divider(),
+      new Row('다른 기기와 동기화', 'ic_sync', run('showDeviceSync')),
       new Row('모든 문서 백업', 'ic_backup', run('startLibraryBackup')),
-      new Row('모든 문서 복원', 'ic_import', run('startLibraryRestore'))];
+      new Row('모든 문서 복원', 'ic_import', run('startLibraryRestore')),
+      Row.divider(),
+      new Row('인쇄 (Ctrl+P)', 'ic_print', run('printDocument')).tint('#007AFF'),
+      new Row('파일 탐색기에서 보기', 'ic_folder_open', () => { if (this.documentUri) host.reveal(this.documentUri).catch(() => toast('파일 탐색기를 열 수 없습니다')); })];
   },
-  showShareMenu(anchor) { if (this.renderer == null) { toast('문서를 먼저 여세요'); return; } AnchoredMenu.show(anchor, false, this.shareRows(), null); },
-  showSaveMenu(anchor) { if (this.renderer == null) { toast('문서를 먼저 여세요'); return; } AnchoredMenu.show(anchor, false, this.saveRows(), null); },
+  showFileMenu(anchor) { if (this.renderer == null) { toast('문서를 먼저 여세요'); return; } AnchoredMenu.show(anchor, false, this.fileRows(), null); },
+  showShareMenu(anchor) { this.showFileMenu(anchor); },
+  showSaveMenu(anchor) { this.showFileMenu(anchor); },
   /** Top-bar buttons hidden by a narrow window move into ⋮. */
   headerHidden(tag) { const b = this.headerActions && this.headerActions.querySelector(`[data-tag="${tag}"]`); return !b || b.offsetParent === null; },
   SWIPE_CHOICES: ['화살표만 · 드래그 넘김 끄기', '수평 · 좌우로 넘기기', '수직 · 위아래로 넘기기'],
@@ -1164,7 +1176,7 @@ const methods = {
       return r;
     });
   },
-  /** Compact top-right menu: the common actions, with the long tail grouped into sub menus. */
+  /** Compact top-right menu: streamlined without duplicating header File/Save/Share menus. */
   showMainMenu(anchor, above) {
     const doc = this.renderer != null, awake = this.recentPrefs.getBoolean('keep_awake', false);
     const rows = [];
@@ -1173,30 +1185,27 @@ const methods = {
     if (this.activeSession != null) rows.push(new Row('이름 변경', 'ic_rename', () => this.renameDocument(this.activeSession)).tint('#8E8E93'));
     if (doc) {
       rows.push(Row.divider());
-      if (this.headerHidden('h_share')) rows.push(new Row('공유', 'ic_share', null).children(this.shareRows()));
-      if (this.headerHidden('h_save')) rows.push(new Row('파일로 저장', 'ic_save_file', null).children(this.saveRows()));
+      if (this.headerHidden('h_file')) rows.push(new Row('파일·내보내기·인쇄', 'ic_save_file', null).children(this.fileRows()));
       if (this.headerHidden('h_pages')) rows.push(new Row('페이지 관리', 'ic_page_manage', () => later(() => this.showPageManageMenu(anchor))));
       rows.push(new Row('메모·하이라이트', 'ic_highlight', () => this.showMarkList()).tint('#FF9500'));
       rows.push(new Row('책갈피 목록', 'ic_star', () => this.showBookmarks()).tint('#F5A623'));
       rows.push(new Row('번역 포스트잇', 'ic_translate', () => this.showTranslations()).tint('#AF52DE'));
-      rows.push(new Row('삽입', 'ic_insert', null).children(this.rowsOf(2)).tint('#5856D6'));
       rows.push(new Row('학습·주석', 'ic_study', null).children(this.rowsOf(3)).tint('#30B0C7'));
-      rows.push(new Row('내보내기·백업', 'ic_share', null).children(this.rowsOf(4)).tint('#007AFF'));
     } else {
       rows.push(Row.divider());
-      rows.push(new Row('내보내기·백업', 'ic_share', null).tint('#007AFF').children([
+      rows.push(new Row('동기화·전체 백업', 'ic_backup', null).tint('#007AFF').children([
         new Row('다른 기기와 동기화', 'ic_sync', () => this.callUi2('showDeviceSync')).tint('#007AFF'),
         new Row('모든 문서 백업', 'ic_backup', () => this.callUi2('startLibraryBackup')).tint('#007AFF'),
         new Row('모든 문서 복원', 'ic_import', () => this.callUi2('startLibraryRestore')).tint('#007AFF')]));
     }
     rows.push(Row.divider());
+    rows.push(new Row('명령 팔레트 (Ctrl+K)', 'ic_search', () => later(() => this.showCommandPalette())).tint('#007AFF'));
+    rows.push(new Row('도구 모음 위치·방향', 'ic_float', () => later(() => this.showBarLayoutMenu(anchor))).tint('#8E8E93'));
     rows.push(new Row('화면 켜 둠', 'ic_clock', () => {
       this.recentPrefs.putBoolean('keep_awake', !awake); this.applyKeepAwake();
       toast(!awake ? '읽는 동안 화면이 꺼지지 않습니다' : '화면 자동 꺼짐을 따릅니다');
     }).tint('#8E8E93').selected(awake));
     rows.push(new Row('전체 화면 메뉴 계속 표시', 'ic_float', () => this.toggleDockPinned()).tint('#8E8E93').selected(this.dockPinned()));
-    rows.push(new Row('도구 모음 위치·방향', 'ic_float', () => later(() => this.showBarLayoutMenu(anchor))).tint('#8E8E93'));
-    if (doc) rows.push(new Row('인쇄', 'ic_print', () => this.callUi2('printDocument')).tint('#007AFF'));
     rows.push(Row.divider());
     rows.push(new Row('설정', 'ic_settings', () => this.callUi2('showSettings')).tint('#8E8E93'));
     rows.push(new Row('사용법', 'ic_outline', () => this.showHelp()).tint('#8E8E93'));
@@ -1700,7 +1709,9 @@ const methods = {
   /** Samsung style: the active tool sits on a round grey disc; coloured tools keep their colour, header buttons get the .on look. */
   paintTool(button, on, background, foreground) {
     if (!button) return;
-    if (button.classList.contains('m-hbtn')) { button.classList.toggle('on', !!on); button.setAttribute('aria-pressed', String(!!on)); return; }
+    if (button.classList.contains('m-hbtn') || button.classList.contains('m-modebtn')) {
+      button.classList.toggle('on', !!on); button.setAttribute('aria-pressed', String(!!on)); return;
+    }
     const base = this.baseTint.has(button) ? this.baseTint.get(button) : NAVY;
     button.style.color = argb(base);
     button.style.background = '';
@@ -1712,9 +1723,102 @@ const methods = {
     this.paintTool(this.memoButton, memo, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.markButton, this.highlightMode, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.readButton, !this.writeMode, ACTIVE_BG, ACTIVE_FG);
+    this.paintTool(this.writeSwitchButton, !!this.writeMode, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.inkButton, !!this.writeMode, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.textButton, typing, ACTIVE_BG, ACTIVE_FG);
     this.paintTool(this.lassoButton, this.pageView != null && this.pageView.isLassoMode(), ACTIVE_BG, ACTIVE_FG);
+    this.updateModeBadge();
+  },
+  updateModeBadge() {
+    if (!this.modeBadge || !this.modeBadgeText) return;
+    let msg = '';
+    if (this.renderer != null) {
+      if (this.pageView && this.pageView.isLassoMode()) msg = '올가미 선택 중 · 영역을 그리세요';
+      else if (this.outlineMode) msg = '개요 추가 중 · 저장할 위치를 클릭하세요';
+      else if (this.highlightMode) msg = '문장 하이라이트 중 · 텍스트를 드래그하세요';
+      else if (this.typingActive()) msg = '타이핑 배치 중 · 글상자를 놓을 위치를 클릭하세요';
+      else if (this.memoMode && this.placementKind) msg = '요소 배치 중 · 놓을 위치를 클릭하세요';
+      else if (this.memoMode) msg = '메모 배치 중 · 메모를 놓을 위치를 클릭하세요';
+    }
+    this.modeBadgeText.textContent = msg;
+    this.modeBadge.classList.toggle('show', !!msg);
+  },
+  exitSpecialMode() {
+    if (!this.renderer) return;
+    this.placementKind = '';
+    this.highlightMode = false; this.memoMode = false; this.outlineMode = false;
+    if (this.pageView) {
+      this.pageView.setLassoMode(false);
+      this.pageView.setHighlightMode(false, this.selectedColor);
+      this.pageView.setMemoMode(false);
+      this.pageView.setOutlineMode(false);
+    }
+    this.updateToolStates();
+  },
+  showCommandPalette() {
+    if (document.querySelector('.m-cmd-backdrop')) return;
+    const doc = this.renderer != null;
+    const cmds = [
+      { label: '문서함 열기', cat: '문서', run: () => this.showLibrary() },
+      { label: '문서 추가 (파일 열기)', cat: '문서 · Ctrl+O', run: () => this.choosePdf() },
+      { label: '새 노트 만들기', cat: '문서', run: () => this.newNotebook() },
+      { label: '문서·필기 검색', cat: '탐색 · Ctrl+F', run: () => this.searchDocument() },
+      { label: '설정', cat: '앱', run: () => this.callUi2('showSettings') },
+      { label: '사용법 보기', cat: '도움말', run: () => this.showHelp() },
+    ];
+    if (doc) {
+      cmds.unshift(
+        { label: this.writeMode ? '읽기 모드로 전환' : '필기 모드로 전환', cat: '모드', run: () => this.setWriteMode(!this.writeMode) },
+        { label: '두 쪽 보기 켜기/끄기', cat: '보기', run: () => this.toggleTwoPage() },
+        { label: '화면 나누기 (듀얼 문서)', cat: '보기', run: () => this.toggleSplit() },
+        { label: '여백 자르기 켜기/끄기', cat: '보기', run: () => { this.recentPrefs.putBoolean('crop_margins', !this.cropMargins()); this.applyCrop(); } },
+        { label: '검은 문서 배경 켜기/끄기', cat: '보기', run: () => this.toggleDarkPage() },
+        { label: '전체 화면 켜기/끄기', cat: '보기 · F11', run: () => this.toggleFullscreen() },
+        { label: '페이지 미리보기 패널', cat: '패널', run: () => this.toggleSidebar() },
+        { label: '페이지 이동', cat: '이동 · Ctrl+G', run: () => this.goToPage() },
+        { label: '페이지 추가', cat: '페이지', run: () => this.choosePageToInsert(this.currentPage) },
+        { label: '메모·하이라이트 목록', cat: '주석', run: () => this.showMarkList() },
+        { label: '책갈피 목록', cat: '주석', run: () => this.showBookmarks() },
+        { label: '듀얼 뷰 노트', cat: '학습', run: () => this.showStudy(false) },
+        { label: 'PDF로 내보내기 (주석 포함)', cat: '파일', run: () => this.callUi2('exportPdf') },
+        { label: '인쇄', cat: '파일 · Ctrl+P', run: () => this.callUi2('printDocument') }
+      );
+    }
+    const backdrop = h('div', { class: 'm-cmd-backdrop', dataset: { tag: 'command_palette' } });
+    const input = h('input', { type: 'text', class: 'm-cmd-input', placeholder: '명령 또는 기능 검색 (예: 두 쪽 보기, 여백, 내보내기)…' });
+    const list = h('div', { class: 'm-cmd-list' });
+    const box = h('div', { class: 'm-cmd-box' },
+      h('div', { class: 'm-cmd-head' }, mkIcon('ic_search', 18, '#6B7280'), input, h('span', { class: 'm-cmd-kbd' }, 'ESC')),
+      list);
+    backdrop.append(box);
+    let idx = 0, filtered = cmds.slice();
+    const close = () => { document.removeEventListener('keydown', onKey, true); backdrop.remove(); };
+    const exec = item => { close(); if (item && item.run) item.run(); };
+    const render = () => {
+      const q = input.value.trim().toLowerCase();
+      filtered = q ? cmds.filter(c => c.label.toLowerCase().includes(q) || c.cat.toLowerCase().includes(q)) : cmds.slice();
+      if (idx >= filtered.length) idx = Math.max(0, filtered.length - 1);
+      list.replaceChildren();
+      if (!filtered.length) { list.append(h('div', { class: 'm-cmd-empty' }, '일치하는 명령이 없습니다')); return; }
+      filtered.forEach((c, i) => {
+        const row = h('div', { class: 'm-cmd-item' + (i === idx ? ' on' : '') }, h('span', null, c.label), h('span', { class: 'm-cmd-item-cat' }, c.cat));
+        row.addEventListener('click', () => exec(c));
+        row.addEventListener('mouseenter', () => { idx = i; Array.from(list.children).forEach((el, j) => el.classList.toggle('on', j === idx)); });
+        list.append(row);
+      });
+    };
+    const onKey = e => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); if (filtered.length) { idx = (idx + 1) % filtered.length; render(); } }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); if (filtered.length) { idx = (idx - 1 + filtered.length) % filtered.length; render(); } }
+      else if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); if (filtered[idx]) exec(filtered[idx]); }
+    };
+    input.addEventListener('input', () => { idx = 0; render(); });
+    backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+    document.addEventListener('keydown', onKey, true);
+    document.body.append(backdrop);
+    render();
+    requestAnimationFrame(() => input.focus());
   },
   stopInk() { this.leaveHighlighter(); this.leaveTape(); this.pageView.setLassoMode(false); this.inkMode = 0; this.pageView.setInkTool(0, this.inkColor, this.inkWidth); this.updateInkButton(); },
   /** hl: the stroke is the ink highlighter (형광펜); only modes 1 (free) and 3 (straight) can be one. */

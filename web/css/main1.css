@@ -1,18 +1,37 @@
 /* MainActivity (part 1): shared layout base, header, tab strip, bottom bars, fullscreen dock, page arrows, selection popup. 1dp == 1px. */
+:root{
+  --en-bg-app:#F2F2F4;
+  --en-bg-surface:#FCFCFF;
+  --en-bg-subtle:#F3F3F6;
+  --en-bg-canvas:#E9E9EC;
+  --en-border:rgba(15,23,42,.09);
+  --en-border-strong:rgba(15,23,42,.16);
+  --en-text:#111827;
+  --en-text-muted:#6B7280;
+  --en-accent:#007AFF;
+  --en-accent-soft:rgba(0,122,255,.11);
+  --en-radius-sm:8px;
+  --en-radius-md:12px;
+  --en-radius-lg:16px;
+  --en-shadow-sm:0 1px 3px rgba(0,0,0,.08);
+  --en-shadow-md:0 6px 20px rgba(0,0,0,.14);
+}
 #app{position:fixed;inset:0;overflow:hidden}
-.m-root{position:relative;width:100%;height:100%;background:#F2F2F7;overflow:hidden}
+.m-root{position:relative;width:100%;height:100%;background:var(--en-bg-app);overflow:hidden}
 .m-content{display:flex;flex-direction:column;width:100%;height:100%;min-height:0}
 .m-content > .m-header,.m-content > .m-tabstrip,.m-content > .m-bottom{flex:none}
 
-/* ---- header (52) ---- */
-.m-header{height:52px;display:flex;align-items:center;padding:0 4px;background:#F9F9F9;position:relative;z-index:3}
-.m-libbtn{width:42px;height:42px;margin:0 2px 0 8px;padding:5px;border:0;border-radius:16px;background:#fff;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer}
+/* ---- header (48) ---- */
+.m-header{height:48px;display:flex;align-items:center;padding:0 8px;background:var(--en-bg-surface);border-bottom:1px solid var(--en-border);position:relative;z-index:3;gap:4px}
+.m-libbtn{width:36px;height:36px;margin:0 2px 0 2px;padding:4px;border:0;border-radius:var(--en-radius-sm);background:transparent;color:var(--en-text);display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;transition:background .12s}
+.m-libbtn:hover{background:rgba(0,0,0,.05)}
 .m-libbtn svg{display:block}
-.m-title{height:36px;line-height:36px;margin:0 6px;padding:0 14px;border-radius:18px;background:#fff;color:#1C1C1E;font-size:15px;font-weight:700;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:46vw;direction:ltr;text-align:left;cursor:pointer;flex:0 1 auto;min-width:0}
+.m-title{height:32px;line-height:32px;margin:0 4px;padding:0 10px;border-radius:var(--en-radius-sm);background:transparent;color:var(--en-text);font-size:14.5px;font-weight:700;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34vw;direction:ltr;text-align:left;cursor:pointer;flex:0 1 auto;min-width:0;transition:background .12s}
+.m-title:hover{background:rgba(0,0,0,.045)}
 .m-spacer{flex:1 1 0;min-width:0;height:1px}
-.m-ib{width:44px;height:52px;padding:0;margin:0;border:0;background:transparent;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;border-radius:12px}
-.m-ib:hover{background:rgba(0,0,0,.045)}
+.m-ib{width:38px;height:38px;padding:0;margin:0;border:0;background:transparent;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer;border-radius:var(--en-radius-sm);transition:background .12s}
+.m-ib:hover{background:rgba(0,0,0,.05)}
 .m-ib:focus{outline:none}
 .m-ib:focus-visible,.m-tb:focus-visible,.m-dockbtn:focus-visible{outline:2px solid rgba(0,122,255,.55);outline-offset:-2px}
 
@@ -369,3 +388,33 @@
 .m-tabstrip,.m-tabstrip.single{display:none!important}
 .m-lassobox{padding:6px 8px}
 .m-lassoshapes .m-pp-radio svg{opacity:.75}
+
+/* ---- mode switch (읽기 | 필기) & header grouping ---- */
+.m-hsep{width:1px;height:20px;background:var(--en-border-strong);margin:0 4px;flex:none}
+.m-modeswitch{display:inline-flex;align-items:center;padding:3px;border-radius:var(--en-radius-sm);background:var(--en-bg-subtle);border:1px solid var(--en-border);gap:2px;flex:none;margin-right:4px}
+.m-modebtn{height:26px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:var(--en-text-muted);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;transition:background .15s,color .15s,box-shadow .15s;white-space:nowrap}
+.m-modebtn:hover{color:var(--en-text)}
+.m-modebtn.on{background:#fff;color:var(--en-accent);box-shadow:var(--en-shadow-sm)}
+.m-modebtn .ico{width:15px!important;height:15px!important}
+.m-modebtn .ico svg{width:15px;height:15px}
+@media (max-width:720px){.m-modebtn span:not(.ico){display:none}.m-modebtn{padding:0 8px}}
+
+/* ---- active mode status badge ---- */
+.m-modebadge{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:25;display:none;align-items:center;gap:8px;height:32px;padding:0 6px 0 12px;border-radius:999px;background:rgba(17,24,39,.88);backdrop-filter:blur(8px);color:#fff;font-size:12.5px;font-weight:500;box-shadow:var(--en-shadow-md);pointer-events:auto;white-space:nowrap}
+.m-modebadge.show{display:inline-flex}
+.m-modebadge-dot{width:7px;height:7px;border-radius:50%;background:#38BDF8;flex:none}
+.m-modebadge-close{height:22px;padding:0 9px;border:0;border-radius:999px;background:rgba(255,255,255,.16);color:#fff;font:inherit;font-size:11.5px;font-weight:600;cursor:pointer;transition:background .12s}
+.m-modebadge-close:hover{background:rgba(255,255,255,.28)}
+
+/* ---- command palette (Ctrl+K) ---- */
+.m-cmd-backdrop{position:fixed;inset:0;z-index:9800;background:rgba(15,23,42,.28);backdrop-filter:blur(2px);display:flex;align-items:flex-start;justify-content:center;padding-top:min(14vh,110px)}
+.m-cmd-box{width:min(calc(100vw - 32px),520px);background:var(--en-bg-surface);border:1px solid var(--en-border);border-radius:var(--en-radius-lg);box-shadow:0 18px 50px rgba(0,0,0,.24);overflow:hidden;display:flex;flex-direction:column}
+.m-cmd-head{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--en-border)}
+.m-cmd-input{flex:1;min-width:0;border:0;outline:none;background:transparent;font:inherit;font-size:15px;color:var(--en-text)}
+.m-cmd-input::placeholder{color:var(--en-text-muted)}
+.m-cmd-kbd{font-size:11px;font-weight:600;color:var(--en-text-muted);background:var(--en-bg-subtle);border:1px solid var(--en-border);border-radius:5px;padding:2px 6px;flex:none}
+.m-cmd-list{max-height:min(52vh,380px);overflow-y:auto;padding:6px}
+.m-cmd-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--en-radius-sm);cursor:pointer;color:var(--en-text);font-size:13.5px}
+.m-cmd-item:hover,.m-cmd-item.on{background:var(--en-accent-soft);color:var(--en-accent)}
+.m-cmd-item-cat{font-size:11.5px;color:var(--en-text-muted);margin-left:auto}
+.m-cmd-empty{padding:24px 12px;text-align:center;color:var(--en-text-muted);font-size:13px}
